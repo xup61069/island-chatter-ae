@@ -12,17 +12,35 @@
 
 (function islandChatter(thisObj) {
     var SCRIPT_NAME = "Island Chatter";
-    var VERSION = "1.0.0";
+    var VERSION = "1.1.0";
     var SAMPLE_RATE = 44100;
     var TWO_PI = Math.PI * 2;
-    var outputFolder = new Folder(Folder.myDocuments.fsName + "/Island Chatter");
+    var outputFolder = null;
 
     var VOICES = [
-        { name: "Sunny / 明亮", pitch: 1.00, harmonic: 0.34, breath: 0.04, wobble: 0.018 },
-        { name: "Tiny / 迷你", pitch: 1.48, harmonic: 0.28, breath: 0.025, wobble: 0.024 },
-        { name: "Cozy / 溫厚", pitch: 0.72, harmonic: 0.42, breath: 0.055, wobble: 0.012 },
-        { name: "Buzzy / 電子", pitch: 0.92, harmonic: 0.56, breath: 0.015, wobble: 0.008 }
+        { name: "Sunny / 明亮", pitch: 1.00, tract: 1.00, breath: 0.035, wobble: 0.014, buzz: 0.00 },
+        { name: "Tiny / 迷你", pitch: 1.42, tract: 1.15, breath: 0.025, wobble: 0.020, buzz: 0.00 },
+        { name: "Cozy / 溫厚", pitch: 0.72, tract: 0.86, breath: 0.045, wobble: 0.010, buzz: 0.00 },
+        { name: "Buzzy / 電子", pitch: 0.90, tract: 1.04, breath: 0.018, wobble: 0.007, buzz: 0.22 }
     ];
+
+    var VOWELS = [
+        { name: "a", formants: [800, 1150, 2900], bandwidths: [100, 120, 180] },
+        { name: "e", formants: [500, 1900, 2600], bandwidths: [85, 140, 180] },
+        { name: "i", formants: [300, 2300, 3000], bandwidths: [70, 150, 200] },
+        { name: "o", formants: [500, 900, 2500], bandwidths: [90, 110, 180] },
+        { name: "u", formants: [350, 800, 2200], bandwidths: [75, 100, 170] },
+        { name: "ə", formants: [520, 1450, 2450], bandwidths: [95, 130, 180] }
+    ];
+
+    var CONSONANT_NONE = 0;
+    var CONSONANT_STOP = 1;
+    var CONSONANT_VOICED_STOP = 2;
+    var CONSONANT_FRICATIVE = 3;
+    var CONSONANT_SIBILANT = 4;
+    var CONSONANT_NASAL = 5;
+    var CONSONANT_LIQUID = 6;
+    var CONSONANT_ASPIRATE = 7;
 
     function clamp(value, minimum, maximum) {
         return Math.max(minimum, Math.min(maximum, value));
@@ -32,22 +50,30 @@
         return String(value).replace(/^\s+|\s+$/g, "");
     }
 
-    function pad2(value) {
-        return value < 10 ? "0" + value : String(value);
-    }
-
-    function timestamp() {
-        var date = new Date();
-        return date.getFullYear() + pad2(date.getMonth() + 1) + pad2(date.getDate()) +
-            "_" + pad2(date.getHours()) + pad2(date.getMinutes()) + pad2(date.getSeconds());
-    }
-
-    function safeFilename(value) {
-        var cleaned = trim(value).replace(/[\\\/:*?"<>|\r\n]+/g, "_").replace(/\s+/g, " ");
-        if (!cleaned) {
-            cleaned = "island-chatter";
+    function contentHash(value) {
+        var hash = 2166136261;
+        var index;
+        for (index = 0; index < value.length; index += 1) {
+            hash ^= value.charCodeAt(index);
+            hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
         }
-        return cleaned.substring(0, 48);
+        hash = hash >>> 0;
+        return ("00000000" + hash.toString(16)).slice(-8);
+    }
+
+    function settingsHash(text, settings) {
+        return contentHash(
+            text + "|" + settings.voice.name + "|" +
+            settings.pitch.toFixed(3) + "|" + settings.speed.toFixed(3) + "|" +
+            settings.volume.toFixed(3) + "|" + settings.consonant.toFixed(3)
+        );
+    }
+
+    function defaultOutputFolder() {
+        if (app.project && app.project.file) {
+            return new Folder(app.project.file.parent.fsName + "/Island Chatter Cache");
+        }
+        return new Folder(Folder.myDocuments.fsName + "/Island Chatter Cache");
     }
 
     function isWhitespace(character) {
@@ -88,12 +114,109 @@
         };
     }
 
+    function latinVowelIndex(character) {
+        var lower = character.toLowerCase();
+        if (lower === "a") { return 0; }
+        if (lower === "e") { return 1; }
+        if (lower === "i" || lower === "y") { return 2; }
+        if (lower === "o") { return 3; }
+        if (lower === "u") { return 4; }
+        return -1;
+    }
+
+    function consonantForCharacter(character, code) {
+        var lower = character.toLowerCase();
+        if (/[ptkcq]/.test(lower)) {
+            return { kind: CONSONANT_STOP, place: lower === "p" ? 0.18 : (/[kgq]/.test(lower) ? 0.88 : 0.55) };
+        }
+        if (/[bdg]/.test(lower)) {
+            return { kind: CONSONANT_VOICED_STOP, place: lower === "b" ? 0.18 : (lower === "g" ? 0.88 : 0.55) };
+        }
+        if (/[fv]/.test(lower)) {
+            return { kind: CONSONANT_FRICATIVE, place: 0.24 };
+        }
+        if (/[szxj]/.test(lower)) {
+            return { kind: CONSONANT_SIBILANT, place: lower === "s" || lower === "z" ? 0.72 : 0.90 };
+        }
+        if (/[mn]/.test(lower)) {
+            return { kind: CONSONANT_NASAL, place: lower === "m" ? 0.22 : 0.58 };
+        }
+        if (/[lrwy]/.test(lower)) {
+            return { kind: CONSONANT_LIQUID, place: lower === "l" ? 0.42 : 0.68 };
+        }
+        if (lower === "h") {
+            return { kind: CONSONANT_ASPIRATE, place: 0.50 };
+        }
+
+        var invented = [
+            { kind: CONSONANT_STOP, place: 0.18 },
+            { kind: CONSONANT_VOICED_STOP, place: 0.22 },
+            { kind: CONSONANT_STOP, place: 0.84 },
+            { kind: CONSONANT_SIBILANT, place: 0.72 },
+            { kind: CONSONANT_NASAL, place: 0.55 },
+            { kind: CONSONANT_LIQUID, place: 0.62 },
+            { kind: CONSONANT_ASPIRATE, place: 0.48 }
+        ];
+        return invented[code % invented.length];
+    }
+
+    function consonantDuration(kind, speed) {
+        var seconds = 0.010;
+        if (kind === CONSONANT_STOP || kind === CONSONANT_VOICED_STOP) { seconds = 0.052; }
+        if (kind === CONSONANT_FRICATIVE || kind === CONSONANT_SIBILANT) { seconds = 0.072; }
+        if (kind === CONSONANT_NASAL) { seconds = 0.058; }
+        if (kind === CONSONANT_LIQUID) { seconds = 0.050; }
+        if (kind === CONSONANT_ASPIRATE) { seconds = 0.064; }
+        return Math.round(seconds * SAMPLE_RATE / speed);
+    }
+
+    function gaussian(distance, width) {
+        var normalized = distance / width;
+        return Math.exp(-0.5 * normalized * normalized);
+    }
+
+    function makeVowelProfile(vowelIndex, frequency, voice) {
+        var source = VOWELS[vowelIndex];
+        var formants = [];
+        var bandwidths = [];
+        var harmonicAmplitudes = [];
+        var amplitudeTotal = 0;
+        var formantIndex;
+        var harmonic;
+
+        for (formantIndex = 0; formantIndex < source.formants.length; formantIndex += 1) {
+            formants[formantIndex] = source.formants[formantIndex] * voice.tract;
+            bandwidths[formantIndex] = source.bandwidths[formantIndex] * voice.tract;
+        }
+
+        for (harmonic = 1; harmonic <= 12; harmonic += 1) {
+            var harmonicFrequency = frequency * harmonic;
+            var resonance = 0.035;
+            for (formantIndex = 0; formantIndex < formants.length; formantIndex += 1) {
+                resonance += gaussian(harmonicFrequency - formants[formantIndex], bandwidths[formantIndex]);
+            }
+            var amplitude = resonance / Math.pow(harmonic, 0.72);
+            harmonicAmplitudes.push(amplitude);
+            amplitudeTotal += amplitude;
+        }
+
+        if (amplitudeTotal <= 0) { amplitudeTotal = 1; }
+        for (harmonic = 0; harmonic < harmonicAmplitudes.length; harmonic += 1) {
+            harmonicAmplitudes[harmonic] /= amplitudeTotal;
+        }
+        return {
+            name: source.name,
+            formants: formants,
+            harmonics: harmonicAmplitudes
+        };
+    }
+
     function buildEvents(text, speed, pitch, voice) {
         var events = [];
         var sampleCursor = 0;
-        var unitSeconds = 0.094 / speed;
-        var spaceSeconds = 0.052 / speed;
-        var punctuationSeconds = 0.145 / speed;
+        var unitSeconds = 0.132 / speed;
+        var spaceSeconds = 0.060 / speed;
+        var punctuationSeconds = 0.165 / speed;
         var codeTotal = 0;
         var i;
 
@@ -114,26 +237,44 @@
             }
 
             var code = text.charCodeAt(i);
-            var lengthVariation = 0.82 + random() * 0.30;
+            var vowelIndex = latinVowelIndex(character);
+            var consonant = { kind: CONSONANT_NONE, place: 0.50 };
+            var isLatinLetter = /[A-Za-z]/.test(character);
+            if (vowelIndex < 0) {
+                consonant = consonantForCharacter(character, code);
+                if (isLatinLetter && i + 1 < text.length && latinVowelIndex(text.charAt(i + 1)) >= 0) {
+                    vowelIndex = latinVowelIndex(text.charAt(i + 1));
+                    i += 1;
+                } else {
+                    vowelIndex = isLatinLetter ? 5 : code % 5;
+                }
+            }
+
+            var lengthVariation = 0.91 + random() * 0.18;
             var duration = unitSeconds * lengthVariation;
-            var note = ((code * 7 + i * 3) % 13) - 6;
-            var baseFrequency = 560 * voice.pitch * pitch * Math.pow(2, note / 24);
-            var vowel = code % 5;
-            var formantRatio = [1.72, 1.93, 2.21, 2.48, 2.74][vowel];
-            var eventSamples = Math.max(32, Math.round(duration * SAMPLE_RATE));
+            var note = ((code * 5 + i * 3) % 9) - 4;
+            var baseFrequency = 245 * voice.pitch * pitch * Math.pow(2, note / 24);
+            var eventSamples = Math.max(64, Math.round(duration * SAMPLE_RATE));
+            var onsetSamples = Math.min(eventSamples - 24, consonantDuration(consonant.kind, speed));
+            var vowelProfile = makeVowelProfile(vowelIndex, baseFrequency, voice);
             events.push({
                 start: sampleCursor,
                 length: eventSamples,
+                onset: onsetSamples,
                 frequency: baseFrequency,
-                formant: formantRatio,
+                consonant: consonant,
+                vowel: vowelProfile,
                 phase: random() * TWO_PI,
-                seed: Math.floor(random() * 2147483000) + 1
+                seed: Math.floor(random() * 2147483000) + 1,
+                noiseLow: 0,
+                noiseInput: 0,
+                noiseHigh: 0
             });
             sampleCursor += eventSamples;
-            sampleCursor += Math.round(0.009 * SAMPLE_RATE / speed);
+            sampleCursor += Math.round(0.012 * SAMPLE_RATE / speed);
         }
 
-        sampleCursor += Math.round(0.08 * SAMPLE_RATE);
+        sampleCursor += Math.round(0.10 * SAMPLE_RATE);
         return { events: events, totalSamples: sampleCursor };
     }
 
@@ -158,21 +299,88 @@
             "data" + u32(dataBytes);
     }
 
-    function renderEventSample(event, localIndex, voice, volume, random) {
+    function shapedNoise(event, white, brightness) {
+        event.noiseLow += 0.12 * (white - event.noiseLow);
+        var high = 0.92 * (event.noiseHigh + white - event.noiseInput);
+        event.noiseInput = white;
+        event.noiseHigh = high;
+        return event.noiseLow * (1 - brightness) + high * brightness;
+    }
+
+    function renderConsonant(event, localIndex, phase, random) {
+        if (event.consonant.kind === CONSONANT_NONE || event.onset <= 1) {
+            return 0;
+        }
+        var progress = clamp(localIndex / event.onset, 0, 1);
+        var white = random() * 2 - 1;
+        var place = event.consonant.place;
+        var kind = event.consonant.kind;
+        var consonantEnvelope = Math.sin(Math.PI * progress);
+        var sample = 0;
+
+        if (kind === CONSONANT_STOP || kind === CONSONANT_VOICED_STOP) {
+            var releasePoint = 0.58;
+            if (kind === CONSONANT_VOICED_STOP && progress < releasePoint) {
+                sample += Math.sin(phase) * 0.24 * Math.sin(Math.PI * progress / releasePoint);
+            }
+            if (progress >= releasePoint) {
+                var burstProgress = (progress - releasePoint) / (1 - releasePoint);
+                var burstEnvelope = Math.exp(-4.5 * burstProgress);
+                var burstTone = Math.sin(TWO_PI * (1100 + place * 3200) * localIndex / SAMPLE_RATE);
+                sample += (shapedNoise(event, white, 0.42 + place * 0.48) * 0.82 + burstTone * 0.18) * burstEnvelope;
+            }
+        } else if (kind === CONSONANT_FRICATIVE) {
+            sample = shapedNoise(event, white, 0.55) * consonantEnvelope * 0.95;
+        } else if (kind === CONSONANT_SIBILANT) {
+            sample = shapedNoise(event, white, 0.92) * consonantEnvelope * 1.15;
+        } else if (kind === CONSONANT_NASAL) {
+            var nasal = Math.sin(phase) * 0.62 + Math.sin(phase * 2) * 0.16;
+            sample = nasal * (0.45 + 0.55 * progress) + event.noiseLow * 0.05;
+        } else if (kind === CONSONANT_LIQUID) {
+            var liquidPhase = phase * (0.72 + progress * 0.28);
+            sample = (Math.sin(liquidPhase) * 0.65 + Math.sin(liquidPhase * 2) * 0.15) * consonantEnvelope;
+        } else if (kind === CONSONANT_ASPIRATE) {
+            sample = shapedNoise(event, white, 0.28) * consonantEnvelope * 0.62;
+        }
+        return sample;
+    }
+
+    function renderVowel(event, localIndex, phase, voice, random) {
+        var vowelLength = Math.max(1, event.length - event.onset);
+        var vowelIndex = Math.max(0, localIndex - event.onset);
+        var progress = clamp(vowelIndex / vowelLength, 0, 1);
+        var fadeIn = clamp((localIndex - event.onset + SAMPLE_RATE * 0.009) / (SAMPLE_RATE * 0.018), 0, 1);
+        var fadeOut = clamp((event.length - localIndex) / (SAMPLE_RATE * 0.022), 0, 1);
+        var envelope = fadeIn * fadeOut * (1 - progress * 0.16);
+        var voiced = 0;
+        var harmonic;
+
+        for (harmonic = 1; harmonic <= event.vowel.harmonics.length; harmonic += 1) {
+            voiced += Math.sin(phase * harmonic) * event.vowel.harmonics[harmonic - 1];
+        }
+
+        var formantDetail =
+            Math.sin(TWO_PI * event.vowel.formants[0] * localIndex / SAMPLE_RATE + 0.3) * 0.065 +
+            Math.sin(TWO_PI * event.vowel.formants[1] * localIndex / SAMPLE_RATE + 1.1) * 0.042 +
+            Math.sin(TWO_PI * event.vowel.formants[2] * localIndex / SAMPLE_RATE + 2.0) * 0.022;
+        var breath = shapedNoise(event, random() * 2 - 1, 0.35) * voice.breath;
+        var buzz = voice.buzz > 0 ? Math.sin(phase * 2.01) * voice.buzz : 0;
+        return (voiced * 1.85 + formantDetail + breath + buzz) * envelope;
+    }
+
+    function renderEventSample(event, localIndex, voice, volume, consonantGain, random) {
         var t = localIndex / SAMPLE_RATE;
         var progress = localIndex / event.length;
-        var attack = Math.min(1, localIndex / (SAMPLE_RATE * 0.004));
-        var release = Math.min(1, (event.length - localIndex) / (SAMPLE_RATE * 0.018));
-        var envelope = attack * release * Math.pow(1 - progress * 0.28, 1.5);
-        var wobble = 1 + voice.wobble * Math.sin(TWO_PI * 10.5 * t);
-        var chirp = 1 + 0.035 * progress;
-        var phase = TWO_PI * event.frequency * wobble * chirp * t + event.phase;
-        var fundamental = Math.sin(phase);
-        var harmonic = Math.sin(phase * event.formant + 0.6) * voice.harmonic;
-        var sparkle = Math.sin(phase * 3.01 + 1.2) * 0.11;
-        var noise = (random() * 2 - 1) * voice.breath;
-        var sample = (fundamental * 0.68 + harmonic + sparkle + noise) * envelope * volume;
-        return clamp(Math.round(sample * 23500), -32768, 32767);
+        var masterAttack = Math.min(1, localIndex / (SAMPLE_RATE * 0.002));
+        var masterRelease = Math.min(1, (event.length - localIndex) / (SAMPLE_RATE * 0.010));
+        var wobble = 1 + voice.wobble * Math.sin(TWO_PI * 9.2 * t);
+        var pitchGesture = 1 + 0.018 * (0.5 - progress);
+        var phase = TWO_PI * event.frequency * wobble * pitchGesture * t + event.phase;
+        var consonant = renderConsonant(event, localIndex, phase, random);
+        var vowel = renderVowel(event, localIndex, phase, voice, random);
+        var sample = (consonant * consonantGain + vowel) * masterAttack * masterRelease * volume;
+        var softened = (2 / Math.PI) * Math.atan(sample);
+        return clamp(Math.round(softened * 30000), -32768, 32767);
     }
 
     function writeWav(file, text, settings) {
@@ -192,6 +400,7 @@
             var eventIndex = 0;
             var currentEvent = sequence.events.length > 0 ? sequence.events[0] : null;
             var random = currentEvent ? makeRandom(currentEvent.seed) : makeRandom(1);
+            var consonantGain = settings.consonant === undefined ? 1.65 : settings.consonant;
             var bytes = "";
             var sampleIndex;
 
@@ -209,6 +418,7 @@
                         sampleIndex - currentEvent.start,
                         settings.voice,
                         settings.volume,
+                        consonantGain,
                         random
                     );
                 }
@@ -230,12 +440,38 @@
         return estimatedSeconds;
     }
 
+    function sameFilePath(first, second) {
+        if (!first || !second) { return false; }
+        var firstPath = first.fsName;
+        var secondPath = second.fsName;
+        if (File.fs === "Windows") {
+            firstPath = firstPath.toLowerCase();
+            secondPath = secondPath.toLowerCase();
+        }
+        return firstPath === secondPath;
+    }
+
+    function findImportedFootage(file) {
+        if (!app.project) { return null; }
+        var itemIndex;
+        for (itemIndex = 1; itemIndex <= app.project.numItems; itemIndex += 1) {
+            var item = app.project.item(itemIndex);
+            if (item instanceof FootageItem && item.file && sameFilePath(item.file, file)) {
+                return item;
+            }
+        }
+        return null;
+    }
+
     function importIntoAfterEffects(file, addToComp) {
         if (!app.project) {
             app.newProject();
         }
         var activeComp = app.project.activeItem;
-        var footage = app.project.importFile(new ImportOptions(file));
+        var footage = findImportedFootage(file);
+        if (!footage) {
+            footage = app.project.importFile(new ImportOptions(file));
+        }
         if (addToComp && activeComp && activeComp instanceof CompItem) {
             var layer = activeComp.layers.add(footage);
             layer.startTime = activeComp.time;
@@ -271,6 +507,9 @@
     }
 
     function buildUI(host) {
+        if (!outputFolder) {
+            outputFolder = defaultOutputFolder();
+        }
         var palette = host instanceof Panel ? host : new Window("palette", SCRIPT_NAME + " " + VERSION, undefined, { resizeable: true });
         palette.orientation = "column";
         palette.alignChildren = ["fill", "top"];
@@ -280,7 +519,7 @@
         var intro = palette.add("statictext", undefined, "Original island-style character chatter / 原創島民式碎語");
         intro.alignment = ["fill", "top"];
 
-        var textInput = palette.add("edittext", undefined, "Hello, island! 你好，島民！", { multiline: true, scrolling: true });
+        var textInput = palette.add("edittext", undefined, "Ba be bi bo bu! 你好，島民！", { multiline: true, scrolling: true });
         textInput.preferredSize = [390, 92];
 
         var selectedTextButton = palette.add("button", undefined, "Use selected text layer / 使用選取文字圖層");
@@ -306,6 +545,7 @@
         var pitchSlider = addLabeledSlider(palette, "Pitch / 音高", 0.55, 1.80, 1.00, 2);
         var speedSlider = addLabeledSlider(palette, "Speed / 速度", 0.55, 2.20, 1.00, 2);
         var volumeSlider = addLabeledSlider(palette, "Volume / 音量", 0.10, 1.00, 0.78, 2);
+        var consonantSlider = addLabeledSlider(palette, "Consonant / 子音", 0.50, 2.50, 1.65, 2);
 
         var optionsGroup = palette.add("group");
         optionsGroup.orientation = "column";
@@ -351,21 +591,27 @@
                 return;
             }
 
-            var filename = safeFilename(text.substring(0, 24)) + "_" + timestamp() + ".wav";
-            var outputFile = new File(outputFolder.fsName + "/" + filename);
             var settings = {
                 voice: VOICES[voiceMenu.selection ? voiceMenu.selection.index : 0],
                 pitch: pitchSlider.value,
                 speed: speedSlider.value,
-                volume: volumeSlider.value
+                volume: volumeSlider.value,
+                consonant: consonantSlider.value
             };
+            var filename = "island-chatter-" + settingsHash(text, settings) + ".wav";
+            var outputFile = new File(outputFolder.fsName + "/" + filename);
 
             generateButton.enabled = false;
             status.text = "Rendering… / 產生中…";
             palette.update();
             app.beginUndoGroup(SCRIPT_NAME + " - Generate");
             try {
-                var duration = writeWav(outputFile, text, settings);
+                var duration;
+                if (outputFile.exists && outputFile.length > 44) {
+                    duration = (outputFile.length - 44) / (SAMPLE_RATE * 2);
+                } else {
+                    duration = writeWav(outputFile, text, settings);
+                }
                 if (importCheckbox.value) {
                     importIntoAfterEffects(outputFile, compCheckbox.value);
                 }
@@ -386,6 +632,18 @@
         palette.layout.layout(true);
         palette.layout.resize();
         return palette;
+    }
+
+    if (typeof $ === "undefined" && typeof module !== "undefined" && module.exports) {
+        module.exports = {
+            version: VERSION,
+            sampleRate: SAMPLE_RATE,
+            voices: VOICES,
+            vowels: VOWELS,
+            buildEvents: buildEvents,
+            writeWav: writeWav
+        };
+        return;
     }
 
     var panel = buildUI(thisObj);

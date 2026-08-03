@@ -1,64 +1,96 @@
-# Island Chatter for After Effects
+# Island Chatter AE
 
-在 After Effects 裡把文字變成原創的「島民式碎語」WAV。完全離線、無外部相依套件，支援繁體中文、英文、日文等 Unicode 文字。
+讓 After Effects 的文字圖層直接發出原創的遊戲式角色語音，主要針對繁體／簡體中文設計。不需要先輸出 WAV，也不會在專案旁產生一堆音訊檔。
 
-> 本專案的聲音由程式即時合成，不含、也不擷取任何遊戲音效、角色或其他專有素材。它不是 Nintendo 或《動物森友會》的官方產品，也未受其認可。
+> 這是獨立開發的程序式語音合成器，沒有使用、擷取或附帶任天堂／《動物森友會》的聲音與素材。
 
 ## 功能
 
-- 直接執行單一 `IslandChatter.jsx`
-- 讀取 AE 目前選取的文字圖層
-- 4 種原創聲線，以及音高、速度、音量控制
-- 輸出標準 44.1 kHz / 16-bit / mono WAV
-- 自動匯入 Project，並可放到合成的目前時間
-- 不上傳文字或音訊，沒有網路依賴
-- 中英雙語面板，可停駐在 AE 介面
+- 特效直接掛在文字圖層，預覽與輸出都由 AE 即時計算
+- 44,355 個 Unihan 漢字讀音，支援繁體與簡體中文
+- 中文聲母、韻母、送氣音、捲舌音、鼻尾、雙母音與四聲／輕聲
+- 三聲變調、「一／不」變調、常用輕聲字與常見多音詞
+- 拼音、注音與行內讀音覆寫，例如 `[重|chong2]新`
+- 8 種角色聲線、7 種情緒、4 種角色體型
+- 音高、速度、音量、聲母強度、清晰度、可愛度與固定隨機種子
+- 多選文字圖層批次套用
+- 可選擇自動配合圖層長度、建立 `IC:` 逐字時間標記
+- 可建立 `IC Mouth`、`IC Volume`、`IC Pitch`、`IC Head Bounce`、`IC Blink` 動畫控制器
+- 可選擇建立不破壞 Source Text 的逐字顯示動畫
+- 不含音訊資產；相同設定可重現相同結果
 
-## 快速使用
+## 系統需求
 
-1. 下載 [`IslandChatter.jsx`](./IslandChatter.jsx)。
-2. 在 After Effects 開啟：
-   - Windows：`編輯 > 偏好設定 > 指令碼與運算式`
-   - macOS：`After Effects > 設定 > 指令碼與運算式`
-3. 啟用「允許指令碼寫入檔案及存取網路」。本腳本只需要其中的本機寫檔權限。
-4. 選擇 `檔案 > 指令碼 > 執行指令碼檔案…`，開啟 `IslandChatter.jsx`。
-5. 輸入文字或選取文字圖層，調整聲線後按「產生碎語」。
+- Windows 10／11 x64
+- Adobe After Effects 2025 或 2026（目前實機驗證：After Effects 2026）
+- 安裝時需要可寫入 After Effects 安裝資料夾的權限
 
-## 安裝成可停駐面板
+## 安裝
 
-將 `IslandChatter.jsx` 複製到 After Effects 的 `Scripts/ScriptUI Panels` 資料夾，重新啟動 AE，然後從 `視窗 > IslandChatter.jsx` 開啟。
+### Release 安裝包
 
-常見位置：
+1. 從 GitHub Releases 下載 `Island-Chatter-AE-1.0.0-Windows-x64.zip` 並解壓縮。
+2. 關閉 After Effects。
+3. 以 PowerShell 執行：
 
-- Windows：`C:\Program Files\Adobe\Adobe After Effects <版本>\Support Files\Scripts\ScriptUI Panels\`
-- macOS：`/Applications/Adobe After Effects <版本>/Scripts/ScriptUI Panels/`
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-IslandChatter.ps1
+   ```
 
-## 聲音設計
+4. 重新開啟 After Effects，選擇 `Window > IslandChatterNativePanel.jsx`。
 
-Island Chatter 會把每個非空白字元映射成一小段帶有泛音、共振峰、滑音、顫音與少量氣聲的合成音。相同文字和設定會得到一致的節奏與音色；標點符號會產生自然停頓。所有波形都在本機由數學函式生成。
+安裝器預設安裝到最新版本的 AE；加上 `-AllVersions` 可安裝到所有偵測到的版本。也可以用 `-AfterEffectsRoot "...\Support Files"` 指定位置。
 
-## 開發與檢查
+### 手動安裝
 
-需要 Node.js 18 或更新版本：
+- 把 `IslandChatterNative.aex` 放到 `Support Files\Plug-ins\Island Chatter\`
+- 把 `IslandChatterNativePanel.jsx` 與 `IslandChatterMandarinReadings.jsxinc` 放到 `Support Files\Scripts\ScriptUI Panels\`
+- 重新啟動 After Effects
 
-```bash
+## 使用方式
+
+1. 建立合成與文字圖層，輸入中文。
+2. 選取一個或多個文字圖層。
+3. 在 Island Chatter 面板選擇角色、情緒與語音參數。
+4. 視需要勾選 Markers、Fit Duration、Rig 或 Type-On。
+5. 按下 **Apply to selected text layers**。
+6. 修改 Source Text 後再按一次 Apply，即可同步文字、時間與動畫資料。
+
+面板會在同一文字圖層加入零音量的 AE 內建 Tone 作為音訊來源，再由 `Island Chatter Native` 取代輸出樣本。這是為了避開 AE 26 對第三方文字圖層音訊合成的宿主崩潰路徑；不會建立載體圖層或外部 WAV。
+
+## 中文讀音覆寫
+
+讀音欄位可填：
+
+- 數字聲調拼音：`ni3 hao3 ma5`
+- 以空格分隔的注音：`ㄋㄧˇ ㄏㄠˇ ㄇㄚ˙`
+- 行內覆寫：`[重|chong2]新開始`
+
+批次套用多個文字圖層時，為避免同一個覆寫誤套到不同句子，面板會使用各圖層自己的 Source Text。
+
+## 從原始碼測試與建置
+
+```powershell
 npm test
+cmake -S native -B native/build
+cmake --build native/build --config Release
+ctest --test-dir native/build -C Release --output-on-failure
 ```
 
-自動檢查會驗證 ExtendScript 語法、WAV 寫入必要結構，以及專案內沒有二進位音訊素材。實際 AE 匯入仍建議在支援 ExtendScript 的 After Effects 版本中做一次冒煙測試。
+建置 `.aex` 需要 Adobe After Effects SDK；SDK 不隨本專案散布。詳細指令請看 [`native/README.md`](native/README.md)。
 
-## 參與貢獻
+若已完成 `.aex` 建置，可產生 Windows 發行包：
 
-歡迎開 Issue 或 Pull Request。請避免提交來自遊戲或其他來源、且你無權再散布的音訊與視覺素材。
+```powershell
+npm run package:windows
+```
 
-## 授權與商標
+## 開源與商標
 
-程式碼以 [MIT License](./LICENSE) 開源。
+程式碼使用 [MIT License](LICENSE)。Unicode 讀音資料的授權請見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-“Nintendo”與“Animal Crossing／動物森友會”是其各自權利人的商標。本專案僅描述使用者熟悉的聲音類型，與其權利人沒有關聯。
+After Effects 是 Adobe 的商標；Nintendo 與 Animal Crossing 是其各自權利人的商標。本專案與上述公司沒有關聯或背書關係。
 
-## English quick start
+## English
 
-Island Chatter turns text into original, game-like character chatter directly inside After Effects. Enable **Allow Scripts to Write Files and Access Network**, then run `IslandChatter.jsx` from **File > Scripts > Run Script File…**. To dock it, install the file in `Scripts/ScriptUI Panels`, restart AE, and open it from the **Window** menu.
-
-The generated audio is procedural and original. No game samples or proprietary assets are included.
+Island Chatter AE is an original, procedural Mandarin character-voice effect for Adobe After Effects. It runs directly on text layers, creates no audio files, supports Traditional and Simplified Chinese readings, pronunciation overrides, character presets, timing markers, rig controllers, and Type-On animation. See the installation section above or the release archive for the Windows installer.
