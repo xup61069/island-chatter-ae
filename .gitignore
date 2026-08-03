@@ -5,3 +5,8 @@ node_modules/
 *.mp3
 .DS_Store
 Thumbs.db
+native/build*/
+native/data/
+native-preview.wav
+ae-smoke-test-result.txt
+dist/
