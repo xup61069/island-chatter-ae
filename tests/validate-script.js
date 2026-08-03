@@ -39,10 +39,10 @@ if (!nativePluginSource.includes("dest_snd.num_samples")) {
 if (nativePluginSource.includes("PF_OutFlag2_SUPPORTS_THREADED_RENDERING")) {
   throw new Error("Native audio effect must not opt into AE threaded rendering without host stress tests");
 }
-if (!nativeVersionSource.includes("ISLAND_CHATTER_AE_VERSION 524289")) {
+if (!nativeVersionSource.includes("ISLAND_CHATTER_AE_VERSION 526337")) {
     throw new Error("Unexpected native/PiPL version encoding");
 }
-if (packageJson.version !== "1.0.0" ||
+if (packageJson.version !== "1.0.1" ||
     !nativeVersionSource.includes("ISLAND_CHATTER_VERSION_MAJOR 1")) {
   throw new Error("Release and native versions are not synchronized");
 }
@@ -61,7 +61,9 @@ if (!nativePluginSource.includes('"Emotion / 情緒"') ||
 for (const fragment of [
   'DISPLAY_NAME = "Island Chatter Voice"',
   'TONE_MATCH_NAME = "ADBE Aud Tone"',
-  "tone.property(6).setValue(0)",
+  "if (level.numKeys > 0) { clearKeys(level); }",
+  "if (slider.numKeys === 0 && valuesDiffer(slider.value, defaultValue))",
+  "property.setValueAtTime(time, value)",
   "tone.moveTo(effect.propertyIndex)",
   "effect = findNativeEffect(textLayer)",
   'addProperty(EFFECT_NAME)',

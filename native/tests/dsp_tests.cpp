@@ -1,10 +1,15 @@
 #include "island_chatter/dsp.hpp"
+#include "island_chatter/synthesis_cache.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <set>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -32,6 +37,52 @@ int main() {
     require(first.diagnostics.mandarin_event_count == 19, "Han characters did not use Mandarin readings");
     require(first.diagnostics.peak > 0.05F, "synthesis is silent");
     require(first.diagnostics.peak < 0.999F, "synthesis clips");
+
+    std::vector<float> chunked(first.samples.size(), -1.0F);
+    const std::size_t chunk_sizes[] = {1, 17, 511, 1500, 4096, 73};
+    std::size_t cursor = 0;
+    std::size_t chunk_index = 0;
+    while (cursor < chunked.size()) {
+        const auto count = std::min(chunk_sizes[chunk_index % 6], chunked.size() - cursor);
+        island_chatter::copy_region(first, static_cast<std::int64_t>(cursor),
+            chunked.data() + cursor, count, 1);
+        cursor += count;
+        ++chunk_index;
+    }
+    require(chunked == first.samples, "variable AE audio blocks introduced gaps or overlaps");
+
+    island_chatter::SynthesisCache cache(4);
+    std::vector<std::shared_ptr<const island_chatter::Result>> concurrent_results(12);
+    std::mutex gate_mutex;
+    std::condition_variable gate;
+    bool start = false;
+    std::vector<std::thread> workers;
+    for (std::size_t index = 0; index < concurrent_results.size(); ++index) {
+        workers.emplace_back([&, index] {
+            {
+                std::unique_lock<std::mutex> lock(gate_mutex);
+                gate.wait(lock, [&start] { return start; });
+            }
+            concurrent_results[index] = cache.get(settings);
+        });
+    }
+    {
+        const std::lock_guard<std::mutex> lock(gate_mutex);
+        start = true;
+    }
+    gate.notify_all();
+    for (auto& worker : workers) worker.join();
+    for (const auto& result : concurrent_results) {
+        require(result == concurrent_results.front(),
+            "concurrent AE blocks synthesized duplicate utterances on a cold cache");
+    }
+    for (std::uint32_t seed = 1; seed <= 8; ++seed) {
+        auto cache_settings = settings;
+        cache_settings.text = "ni3";
+        cache_settings.seed = seed;
+        cache.get(cache_settings);
+    }
+    require(cache.size() <= 4, "synthesis cache exceeded its configured bound");
 
     const std::set<char> vowels(
         first.diagnostics.vowel_names.begin(), first.diagnostics.vowel_names.end());
