@@ -1,0 +1,7 @@
+node_modules/
+*.wav
+*.aif
+*.aiff
+*.mp3
+.DS_Store
+Thumbs.db
