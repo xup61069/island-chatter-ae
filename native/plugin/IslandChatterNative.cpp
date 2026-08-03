@@ -2,6 +2,7 @@
 #include "IslandChatterVersion.h"
 
 #include "island_chatter/dsp.hpp"
+#include "island_chatter/synthesis_cache.hpp"
 
 #include "AEConfig.h"
 #ifdef AE_OS_WIN
@@ -17,10 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <memory>
-#include <mutex>
 #include <string>
-#include <unordered_map>
 
 namespace {
 
@@ -89,31 +87,9 @@ island_chatter::Settings settings_from_params(PF_ParamDef* params[], std::uint32
     return settings;
 }
 
-std::string cache_key(const island_chatter::Settings& settings) {
-    return settings.text + "\x1f" + std::to_string(settings.voice_index) + "\x1f" +
-        std::to_string(settings.pitch) + "\x1f" + std::to_string(settings.speed) + "\x1f" +
-        std::to_string(settings.volume) + "\x1f" + std::to_string(settings.consonant) + "\x1f" +
-        std::to_string(static_cast<int>(settings.emotion)) + "\x1f" +
-        std::to_string(static_cast<int>(settings.character_size)) + "\x1f" +
-        std::to_string(settings.clarity) + "\x1f" + std::to_string(settings.cuteness) + "\x1f" +
-        std::to_string(settings.seed) + "\x1f" +
-        std::to_string(settings.sample_rate);
-}
-
 std::shared_ptr<const island_chatter::Result> cached_synthesis(const island_chatter::Settings& settings) {
-    static std::mutex mutex;
-    static std::unordered_map<std::string, std::shared_ptr<const island_chatter::Result>> cache;
-    const auto key = cache_key(settings);
-    {
-        const std::lock_guard<std::mutex> lock(mutex);
-        const auto found = cache.find(key);
-        if (found != cache.end()) return found->second;
-    }
-    auto rendered = std::make_shared<const island_chatter::Result>(island_chatter::synthesize(settings));
-    const std::lock_guard<std::mutex> lock(mutex);
-    if (cache.size() >= 64U) cache.clear();
-    cache.emplace(key, rendered);
-    return rendered;
+    static island_chatter::SynthesisCache cache;
+    return cache.get(settings);
 }
 
 PF_Err global_setup(PF_OutData* out_data) {
@@ -233,7 +209,7 @@ extern "C" DllExport PF_Err EffectMain(
         switch (cmd) {
             case PF_Cmd_ABOUT:
                 PF_SPRINTF(out_data->return_msg,
-                    "Island Chatter Native v1.0\rMandarin character voices, timing, and animation controls.");
+                    "Island Chatter Native v1.0.1\rMandarin character voices, timing, and animation controls.");
                 return PF_Err_NONE;
             case PF_Cmd_GLOBAL_SETUP: return global_setup(out_data);
             case PF_Cmd_PARAMS_SETUP: return params_setup(in_data, out_data);

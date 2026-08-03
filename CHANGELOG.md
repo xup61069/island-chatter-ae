@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-08-03
+
+- Fix repeated Apply failures when generated rig sliders already have keyframes.
+- Reuse one cold-cache synthesis across concurrent AE audio blocks to prevent first-preview dropouts.
+- Skip unchanged effect parameters to avoid unnecessary audio-cache invalidation.
+
 ## 1.0.0 - 2026-08-03
 
 - Add a native Windows x64 After Effects audio effect that runs directly on text layers without generated audio files.

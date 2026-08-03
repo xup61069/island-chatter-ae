@@ -29,7 +29,7 @@
 
 ### Release 安裝包
 
-1. 從 GitHub Releases 下載 `Island-Chatter-AE-1.0.0-Windows-x64.zip` 並解壓縮。
+1. 從 GitHub Releases 下載最新的 `Island-Chatter-AE-*-Windows-x64.zip` 並解壓縮。
 2. 關閉 After Effects。
 3. 以 PowerShell 執行：
 

@@ -53,7 +53,7 @@ foreach ($target in $targets) {
     $pluginDirectory = Join-Path $target "Plug-ins\Island Chatter"
     $panelDirectory = Join-Path $target "Scripts\ScriptUI Panels"
 
-    if ($PSCmdlet.ShouldProcess($target, "Install Island Chatter 1.0")) {
+    if ($PSCmdlet.ShouldProcess($target, "Install Island Chatter 1.0.1")) {
         New-Item -ItemType Directory -Path $pluginDirectory -Force | Out-Null
         New-Item -ItemType Directory -Path $panelDirectory -Force | Out-Null
         Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterNative.aex") `
@@ -62,7 +62,7 @@ foreach ($target in $targets) {
             -Destination (Join-Path $panelDirectory "IslandChatterNativePanel.jsx") -Force
         Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterMandarinReadings.jsxinc") `
             -Destination (Join-Path $panelDirectory "IslandChatterMandarinReadings.jsxinc") -Force
-        Write-Host "Installed Island Chatter 1.0 to: $target"
+        Write-Host "Installed Island Chatter 1.0.1 to: $target"
     }
 }
 

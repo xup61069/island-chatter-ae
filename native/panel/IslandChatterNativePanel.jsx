@@ -82,22 +82,35 @@
         return findEffect(layer, EFFECT_NAME, DISPLAY_NAME);
     }
 
-    function setEffectParameters(effect, text, settings) {
+    function valuesDiffer(current, next) {
+        return Math.abs(Number(current) - Number(next)) > 0.000001;
+    }
+
+    function setPropertyValue(property, value, time) {
+        if (property.numKeys > 0) {
+            property.setValueAtTime(time, value);
+        } else if (valuesDiffer(property.value, value)) {
+            property.setValue(value);
+        }
+    }
+
+    function setEffectParameters(effect, text, settings, time) {
         var units = Math.min(text.length, MAX_TEXT_UNITS);
-        effect.property(PARAM_VOICE).setValue(settings.voice + 1);
-        effect.property(PARAM_PITCH).setValue(settings.pitch);
-        effect.property(PARAM_SPEED).setValue(settings.speed);
-        effect.property(PARAM_VOLUME).setValue(settings.volume * 100);
-        effect.property(PARAM_CONSONANT).setValue(settings.consonant);
-        effect.property(PARAM_EMOTION).setValue(settings.emotion + 1);
-        effect.property(PARAM_CHARACTER_SIZE).setValue(settings.characterSize + 1);
-        effect.property(PARAM_CLARITY).setValue(settings.clarity * 100);
-        effect.property(PARAM_CUTENESS).setValue(settings.cuteness * 100);
-        effect.property(PARAM_SEED).setValue(Math.round(settings.seed));
-        effect.property(PARAM_TEXT_LENGTH).setValue(units);
+        setPropertyValue(effect.property(PARAM_VOICE), settings.voice + 1, time);
+        setPropertyValue(effect.property(PARAM_PITCH), settings.pitch, time);
+        setPropertyValue(effect.property(PARAM_SPEED), settings.speed, time);
+        setPropertyValue(effect.property(PARAM_VOLUME), settings.volume * 100, time);
+        setPropertyValue(effect.property(PARAM_CONSONANT), settings.consonant, time);
+        setPropertyValue(effect.property(PARAM_EMOTION), settings.emotion + 1, time);
+        setPropertyValue(effect.property(PARAM_CHARACTER_SIZE), settings.characterSize + 1, time);
+        setPropertyValue(effect.property(PARAM_CLARITY), settings.clarity * 100, time);
+        setPropertyValue(effect.property(PARAM_CUTENESS), settings.cuteness * 100, time);
+        setPropertyValue(effect.property(PARAM_SEED), Math.round(settings.seed), time);
+        setPropertyValue(effect.property(PARAM_TEXT_LENGTH), units, time);
         var index;
         for (index = 0; index < MAX_TEXT_UNITS; index += 1) {
-            effect.property(PARAM_TEXT_FIRST + index).setValue(index < units ? text.charCodeAt(index) : 0);
+            setPropertyValue(effect.property(PARAM_TEXT_FIRST + index),
+                index < units ? text.charCodeAt(index) : 0, time);
         }
     }
 
@@ -212,7 +225,12 @@
             effect = layer.property("ADBE Effect Parade").addProperty("ADBE Slider Control");
             effect.name = name;
         }
-        effect.property(1).setValue(defaultValue);
+        var slider = effect.property(1);
+        // Existing rig controls already contain the keys created below.
+        // Calling setValue() on them makes AE abort every subsequent Apply.
+        if (slider.numKeys === 0 && valuesDiffer(slider.value, defaultValue)) {
+            slider.setValue(defaultValue);
+        }
     }
 
     function clearKeys(property) {
@@ -353,7 +371,9 @@
         tone.name = TONE_DISPLAY_NAME;
         // Tone's sixth parameter is Level. Zero keeps its private AE sound
         // source alive while Island Chatter replaces every output sample.
-        tone.property(6).setValue(0);
+        var level = tone.property(6);
+        if (level.numKeys > 0) { clearKeys(level); }
+        if (valuesDiffer(level.value, 0)) { level.setValue(0); }
         return tone;
     }
 
@@ -376,7 +396,7 @@
             // moveTo() invalidates the references again.
             effect = findNativeEffect(textLayer);
         }
-        setEffectParameters(effect, spokenText, settings);
+        setEffectParameters(effect, spokenText, settings, comp.time);
 
         var plan = estimateSpeech(text, settings.speed);
         if (options.fitDuration) {

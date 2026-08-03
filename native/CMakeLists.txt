@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(IslandChatterNative VERSION 1.0.0 LANGUAGES CXX)
+project(IslandChatterNative VERSION 1.0.1 LANGUAGES CXX)
+
+find_package(Threads REQUIRED)
 
 option(ISLAND_CHATTER_BUILD_AE_PLUGIN "Build the After Effects .aex target" OFF)
 
@@ -10,6 +12,7 @@ endif()
 
 add_library(island_chatter_dsp STATIC
     src/dsp.cpp
+    src/synthesis_cache.cpp
 )
 target_include_directories(island_chatter_dsp PUBLIC include)
 target_include_directories(island_chatter_dsp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -22,7 +25,7 @@ else()
 endif()
 
 add_executable(island_chatter_native_tests tests/dsp_tests.cpp)
-target_link_libraries(island_chatter_native_tests PRIVATE island_chatter_dsp)
+target_link_libraries(island_chatter_native_tests PRIVATE island_chatter_dsp Threads::Threads)
 
 add_executable(island_chatter_render tools/render_preview.cpp)
 target_link_libraries(island_chatter_render PRIVATE island_chatter_dsp)

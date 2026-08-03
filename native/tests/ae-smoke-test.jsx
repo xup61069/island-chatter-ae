@@ -75,7 +75,7 @@
 
         writeReport(
             "PASS\n" +
-            "Version: 1.0.0\n" +
+            "Version: 1.0.1\n" +
             "Layer: " + layer.name + "\n" +
             "Tone: " + tone.name + " (level 0)\n" +
             "Effect: " + effect.name + "\n" +
