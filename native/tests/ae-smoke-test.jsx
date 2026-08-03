@@ -64,6 +64,12 @@
         effect.property(74).setValue(62.0);
         effect.property(75).setValue(803);
 
+        // Adding an effect invalidates previously acquired Property handles in AE.
+        // Reacquire both effects before reading them for verification.
+        effects = layer.property("ADBE Effect Parade");
+        tone = effects.property(1);
+        effect = effects.property(2);
+
         if (tone.propertyIndex >= effect.propertyIndex || tone.property(6).value !== 0) {
             throw new Error("Tone bootstrap is not immediately before the native audio effect.");
         }
@@ -83,7 +89,8 @@
             "External audio files: 0"
         );
     } catch (error) {
-        writeReport("FAIL\n" + error.toString());
+        writeReport("FAIL\n" + error.toString() +
+            (error.line ? "\nLine: " + error.line : ""));
     } finally {
         if (ownsProject && app.project) {
             app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
