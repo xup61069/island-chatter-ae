@@ -1,9 +1,11 @@
 #include "island_chatter/dsp.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 namespace {

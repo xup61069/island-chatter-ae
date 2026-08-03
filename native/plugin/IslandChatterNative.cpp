@@ -50,20 +50,34 @@ std::string text_from_params(PF_ParamDef* params[]) {
     const auto length = std::clamp<A_long>(requested, 0, static_cast<A_long>(island_chatter::ae::kMaxTextUnits));
     std::string output;
     output.reserve(static_cast<std::size_t>(length) * 3U);
+    const auto unit_at = [&params](A_long index) {
+        return static_cast<std::uint32_t>(std::clamp<A_long>(
+            params[island_chatter::ae::kParamTextFirst + index]->u.sd.value, 0, 0xFFFF));
+    };
     for (A_long index = 0; index < length; ++index) {
-        std::uint32_t codepoint = static_cast<std::uint32_t>(
-            params[island_chatter::ae::kParamTextFirst + index]->u.sd.value);
+        std::uint32_t codepoint = unit_at(index);
         if (codepoint >= 0xD800U && codepoint <= 0xDBFFU && index + 1 < length) {
-            const auto low = static_cast<std::uint32_t>(
-                params[island_chatter::ae::kParamTextFirst + index + 1]->u.sd.value);
+            const auto low = unit_at(index + 1);
             if (low >= 0xDC00U && low <= 0xDFFFU) {
                 codepoint = 0x10000U + ((codepoint - 0xD800U) << 10U) + (low - 0xDC00U);
                 ++index;
             }
         }
+        // A surrogate still standing alone here was split by the 64-unit
+        // transport limit. Encoding it would emit a CESU-8 noise syllable.
+        if (codepoint >= 0xD800U && codepoint <= 0xDFFFU) continue;
         if (codepoint != 0U) append_utf8(output, codepoint);
     }
     return output;
+}
+
+// After Effects hands an audio effect one parameter snapshot per audio block.
+// Every distinct value is a distinct cache key and therefore a full re-synthesis
+// of the utterance, so snap the continuous values onto the same grid the slider
+// already displays. Values typed or written by the panel are unchanged; only
+// interpolated keyframe values in between are collapsed.
+double quantize(double value, double step) {
+    return std::round(value / step) * step;
 }
 
 island_chatter::Settings settings_from_params(PF_ParamDef* params[], std::uint32_t sample_rate) {
@@ -71,16 +85,16 @@ island_chatter::Settings settings_from_params(PF_ParamDef* params[], std::uint32
     settings.text = text_from_params(params);
     settings.voice_index = static_cast<std::size_t>(std::max<A_long>(1,
         params[island_chatter::ae::kParamVoice]->u.pd.value) - 1);
-    settings.pitch = params[island_chatter::ae::kParamPitch]->u.fs_d.value;
-    settings.speed = params[island_chatter::ae::kParamSpeed]->u.fs_d.value;
-    settings.volume = params[island_chatter::ae::kParamVolume]->u.fs_d.value / 100.0;
-    settings.consonant = params[island_chatter::ae::kParamConsonant]->u.fs_d.value;
+    settings.pitch = quantize(params[island_chatter::ae::kParamPitch]->u.fs_d.value, 0.01);
+    settings.speed = quantize(params[island_chatter::ae::kParamSpeed]->u.fs_d.value, 0.01);
+    settings.volume = quantize(params[island_chatter::ae::kParamVolume]->u.fs_d.value, 0.1) / 100.0;
+    settings.consonant = quantize(params[island_chatter::ae::kParamConsonant]->u.fs_d.value, 0.01);
     settings.emotion = static_cast<island_chatter::Emotion>(std::clamp<A_long>(
         params[island_chatter::ae::kParamEmotion]->u.pd.value - 1, 0, 6));
     settings.character_size = static_cast<island_chatter::CharacterSize>(std::clamp<A_long>(
         params[island_chatter::ae::kParamCharacterSize]->u.pd.value - 1, 0, 3));
-    settings.clarity = params[island_chatter::ae::kParamClarity]->u.fs_d.value / 100.0;
-    settings.cuteness = params[island_chatter::ae::kParamCuteness]->u.fs_d.value / 100.0;
+    settings.clarity = quantize(params[island_chatter::ae::kParamClarity]->u.fs_d.value, 0.1) / 100.0;
+    settings.cuteness = quantize(params[island_chatter::ae::kParamCuteness]->u.fs_d.value, 0.1) / 100.0;
     settings.seed = static_cast<std::uint32_t>(std::max<A_long>(0,
         params[island_chatter::ae::kParamSeed]->u.sd.value));
     settings.sample_rate = sample_rate;
@@ -118,13 +132,16 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUPX("Voice / 聲線", 8, 1,
         "Sunny|Tiny|Cozy|Buzzy|Chirpy|Whisper|Elder|Droid", PF_ParamFlag_NONE, 1);
-    PF_ADD_FLOAT_SLIDERX("Pitch / 音高", 0.55, 1.80, 0.55, 1.80, 1.0,
+    // Valid range is what can be typed in; slider range is the comfortable drag
+    // range. Widening a valid range never invalidates a saved project, because
+    // every previously storable value is still inside the new one.
+    PF_ADD_FLOAT_SLIDERX("Pitch / 音高", 0.10, 4.00, 0.55, 2.00, 1.0,
         PF_Precision_HUNDREDTHS, 0, PF_ParamFlag_NONE, 2);
-    PF_ADD_FLOAT_SLIDERX("Speed / 速度", 0.55, 2.20, 0.55, 2.20, 1.0,
+    PF_ADD_FLOAT_SLIDERX("Speed / 速度", 0.10, 10.00, 0.55, 3.00, 1.0,
         PF_Precision_HUNDREDTHS, 0, PF_ParamFlag_NONE, 3);
-    PF_ADD_FLOAT_SLIDERX("Volume / 音量", 0.0, 100.0, 0.0, 100.0, 78.0,
+    PF_ADD_FLOAT_SLIDERX("Volume / 音量", 0.0, 200.0, 0.0, 100.0, 78.0,
         PF_Precision_TENTHS, PF_ValueDisplayFlag_PERCENT, PF_ParamFlag_NONE, 4);
-    PF_ADD_FLOAT_SLIDERX("Initial / 聲母", 0.50, 2.50, 0.50, 2.50, 1.25,
+    PF_ADD_FLOAT_SLIDERX("Initial / 聲母", 0.00, 6.00, 0.50, 2.50, 1.25,
         PF_Precision_HUNDREDTHS, 0, PF_ParamFlag_NONE, 5);
 
     AEFX_CLR_STRUCT(def);
@@ -150,7 +167,7 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
     PF_ADD_FLOAT_SLIDERX("Cuteness / 可愛度", 0.0, 100.0, 0.0, 100.0, 55.0,
         PF_Precision_TENTHS, PF_ValueDisplayFlag_PERCENT, PF_ParamFlag_NONE, 74);
     AEFX_CLR_STRUCT(def);
-    PF_ADD_SLIDER("Seed / 種子", 0, 9999, 0, 9999, 0, 75);
+    PF_ADD_SLIDER("Seed / 種子", 0, 999999, 0, 9999, 0, 75);
     out_data->num_params = island_chatter::ae::kParamCount;
     return PF_Err_NONE;
 }
@@ -209,7 +226,8 @@ extern "C" DllExport PF_Err EffectMain(
         switch (cmd) {
             case PF_Cmd_ABOUT:
                 PF_SPRINTF(out_data->return_msg,
-                    "Island Chatter Native v1.0.1\rMandarin character voices, timing, and animation controls.");
+                    "Island Chatter Native v" ISLAND_CHATTER_VERSION_TEXT
+                    "\rMandarin character voices, timing, and animation controls.");
                 return PF_Err_NONE;
             case PF_Cmd_GLOBAL_SETUP: return global_setup(out_data);
             case PF_Cmd_PARAMS_SETUP: return params_setup(in_data, out_data);

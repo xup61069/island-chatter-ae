@@ -39,12 +39,60 @@ if (!nativePluginSource.includes("dest_snd.num_samples")) {
 if (nativePluginSource.includes("PF_OutFlag2_SUPPORTS_THREADED_RENDERING")) {
   throw new Error("Native audio effect must not opt into AE threaded rendering without host stress tests");
 }
-if (!nativeVersionSource.includes("ISLAND_CHATTER_AE_VERSION 526337")) {
-    throw new Error("Unexpected native/PiPL version encoding");
+// Release synchronization. CLAUDE.md lists the files that carry the version;
+// every one of them is checked here so a bump cannot half-land.
+const version = packageJson.version;
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  throw new Error(`package.json version is not a plain semver triple: ${version}`);
 }
-if (packageJson.version !== "1.0.1" ||
-    !nativeVersionSource.includes("ISLAND_CHATTER_VERSION_MAJOR 1")) {
-  throw new Error("Release and native versions are not synchronized");
+const [major, minor, bug] = version.split(".").map(Number);
+for (const [macro, expected] of [
+  ["ISLAND_CHATTER_VERSION_MAJOR", major],
+  ["ISLAND_CHATTER_VERSION_MINOR", minor],
+  ["ISLAND_CHATTER_VERSION_BUG", bug],
+]) {
+  if (!new RegExp(`#define ${macro} ${expected}\\b`).test(nativeVersionSource)) {
+    throw new Error(`${macro} does not match package.json version ${version}`);
+  }
+}
+const stageMatch = nativeVersionSource.match(/#define ISLAND_CHATTER_VERSION_STAGE (\d+)/);
+const buildMatch = nativeVersionSource.match(/#define ISLAND_CHATTER_VERSION_BUILD (\d+)/);
+if (!stageMatch || !buildMatch) {
+  throw new Error("Version stage or build macro is missing");
+}
+const stage = Number(stageMatch[1]);
+const build = Number(buildMatch[1]);
+if (stage !== 3) {
+  throw new Error(
+    "A published build must use PF_Stage_RELEASE (3); After Effects compares the encoded stage");
+}
+// Mirrors PF_VERSION() in the After Effects SDK.
+const encodedVersion =
+  (((major & 0x7) << 19) | ((minor & 0xf) << 15) | ((bug & 0xf) << 11) |
+   ((stage & 0x3) << 9) | (build & 0x1ff)) >>> 0;
+if (!new RegExp(`#define ISLAND_CHATTER_AE_VERSION ${encodedVersion}\\b`).test(nativeVersionSource)) {
+  throw new Error(
+    `ISLAND_CHATTER_AE_VERSION should be ${encodedVersion} for ${version} stage ${stage} build ${build}`);
+}
+for (const [label, filePath, pattern] of [
+  ["native/CMakeLists.txt", path.join(root, "native", "CMakeLists.txt"),
+    new RegExp(`project\\(IslandChatterNative VERSION ${version.replace(/\./g, "\\.")}\\b`)],
+  ["native/tests/ae-smoke-test.jsx", path.join(root, "native", "tests", "ae-smoke-test.jsx"),
+    new RegExp(`EXPECTED_VERSION = "${version.replace(/\./g, "\\.")}"`)],
+  ["tools/package-release.ps1", path.join(root, "tools", "package-release.ps1"),
+    new RegExp(`\\$Version = "${version.replace(/\./g, "\\.")}"`)],
+  ["installer/Install-IslandChatter.ps1", path.join(root, "installer", "Install-IslandChatter.ps1"),
+    new RegExp(`\\$IslandChatterVersion = "${version.replace(/\./g, "\\.")}"`)],
+  ["CHANGELOG.md", path.join(root, "CHANGELOG.md"),
+    new RegExp(`^## ${version.replace(/\./g, "\\.")} `, "m")],
+]) {
+  if (!pattern.test(fs.readFileSync(filePath, "utf8"))) {
+    throw new Error(`${label} is not synchronized with package.json version ${version}`);
+  }
+}
+// The About box must derive its text from the macros instead of hardcoding it.
+if (/Island Chatter Native v\d/.test(nativePluginSource)) {
+  throw new Error("About text hardcodes a version; use ISLAND_CHATTER_VERSION_TEXT");
 }
 if (nativePluginSource.includes("PF_OutFlag_I_SYNTHESIZE_AUDIO")) {
   throw new Error("AE 26 crashes before third-party synthesized-audio callbacks on text layers");
@@ -83,6 +131,245 @@ for (const fragment of [
 if (nativePanelSource.includes("app.scheduleTask")) {
   throw new Error("Native panel must not poll while AE modal dialogs are open");
 }
+
+// ExtendScript is ES3, whose future-reserved words are far wider than modern
+// JavaScript's. Node parses `var native = ...` happily; After Effects rejects
+// the whole file with "Illegal use of reserved word" in a modal dialog, which
+// is invisible to automation. Catch it here instead.
+const es3ReservedWords = [
+  "abstract", "boolean", "byte", "char", "class", "const", "debugger", "double", "enum",
+  "export", "extends", "final", "float", "goto", "implements", "import", "int", "interface",
+  "long", "native", "package", "private", "protected", "public", "short", "static", "super",
+  "synchronized", "throws", "transient", "volatile",
+];
+const extendScriptFiles = [
+  path.join(root, "IslandChatter.jsx"),
+  path.join(root, "native", "panel", "IslandChatterNativePanel.jsx"),
+  ...fs.readdirSync(path.join(root, "native", "tests"))
+    .filter((name) => name.endsWith(".jsx"))
+    .map((name) => path.join(root, "native", "tests", name)),
+];
+for (const filePath of extendScriptFiles) {
+  // Strip comments and string literals so prose and messages do not trip this.
+  const code = fs.readFileSync(filePath, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  for (const word of es3ReservedWords) {
+    const declared = new RegExp(`\\b(?:var|function)\\s+${word}\\b`);
+    const assigned = new RegExp(`[,(]\\s*${word}\\s*(?:=[^=]|[,)])`);
+    const member = new RegExp(`\\.\\s*${word}\\b`);
+    if (declared.test(code) || assigned.test(code) || member.test(code)) {
+      throw new Error(
+        `${path.relative(root, filePath)} uses the ES3 reserved word "${word}" as an ` +
+        "identifier; After Effects will refuse to run the file");
+    }
+  }
+}
+
+// The 76-slot parameter ABI is split across three files. Keep them in lockstep.
+const paramsHeader = fs.readFileSync(
+  path.join(root, "native", "plugin", "params.hpp"), "utf8");
+if (!/static_assert\(kParamCount == 76/.test(paramsHeader)) {
+  throw new Error("params.hpp no longer asserts the published 76-slot parameter count");
+}
+for (const [constant, index] of [
+  ["PARAM_VOICE", 1], ["PARAM_PITCH", 2], ["PARAM_SPEED", 3], ["PARAM_VOLUME", 4],
+  ["PARAM_CONSONANT", 5], ["PARAM_TEXT_LENGTH", 6], ["PARAM_TEXT_FIRST", 7],
+  ["PARAM_EMOTION", 71], ["PARAM_CHARACTER_SIZE", 72], ["PARAM_CLARITY", 73],
+  ["PARAM_CUTENESS", 74], ["PARAM_SEED", 75],
+]) {
+  if (!new RegExp(`var ${constant} = ${index};`).test(nativePanelSource)) {
+    throw new Error(`Panel ${constant} must stay at published index ${index}`);
+  }
+  // Index 7 opens the 64 text-unit block, which the plug-in registers in a loop.
+  const registered = index === 7
+    ? /PF_ADD_SLIDER\("Text code unit"[^;]*?static_cast<A_long>\(7 \+ index\)\);/s
+    : new RegExp(`PF_ADD_[A-Z_]+\\([^;]*?[ ,]${index}\\);`, "s");
+  if (!registered.test(nativePluginSource)) {
+    throw new Error(`Native plug-in does not register a parameter with id ${index}`);
+  }
+}
+if (!/var MAX_TEXT_UNITS = 64;/.test(nativePanelSource) ||
+    !/kMaxTextUnits = 64;/.test(paramsHeader)) {
+  throw new Error("The 64 UTF-16 unit transport contract is not synchronized");
+}
+
+// The panel reproduces the engine's text planning so markers, the rig, Type-On
+// and Fit Duration line up with the audio. These tables must not drift apart.
+const dspSource = fs.readFileSync(path.join(root, "native", "src", "dsp.cpp"), "utf8");
+
+const nativePhrases = [...dspSource
+  .match(/kPhrasePronunciations\{\{([\s\S]*?)\}\};/)[1]
+  .matchAll(/\{U"([^"]+)",\s*"([^"]+)"\}/g)].map((m) => `${m[1]}=${m[2]}`);
+const panelPhrases = [...nativePanelSource
+  .match(/IC_PHRASE_READINGS = \[([\s\S]*?)\];/)[1]
+  .matchAll(/\["([^"]+)",\s*"([^"]+)"\]/g)].map((m) => `${m[1]}=${m[2]}`);
+if (nativePhrases.join("|") !== panelPhrases.join("|")) {
+  throw new Error(
+    "Phrase readings differ between native/src/dsp.cpp and the panel:\n" +
+    `  native only: ${nativePhrases.filter((x) => !panelPhrases.includes(x)).join(", ") || "-"}\n` +
+    `  panel only:  ${panelPhrases.filter((x) => !nativePhrases.includes(x)).join(", ") || "-"}`);
+}
+if (nativePhrases.length < 40) {
+  throw new Error("Phrase reading table lost entries");
+}
+
+const nativeParticles = [...dspSource
+  .match(/bool is_neutral_particle[\s\S]*?\n\}/)[0]
+  .matchAll(/U'(.)'/g)].map((m) => m[1]).sort().join("");
+const panelParticles = nativePanelSource
+  .match(/IC_NEUTRAL_PARTICLES = "([^"]+)"/)[1].split("").sort().join("");
+if (nativeParticles !== panelParticles) {
+  throw new Error(
+    `Neutral-tone particle lists differ: native "${nativeParticles}" vs panel "${panelParticles}"`);
+}
+
+const nativeYi = [...dspSource
+  .match(/bool yi_keeps_citation_tone[\s\S]*?\n\}/)[0]
+  .matchAll(/U'(.)'/g)].map((m) => m[1]).sort().join("");
+const panelYi = ((nativePanelSource.match(/"(第星期週周初)"/) || [])[1] +
+  (nativePanelSource.match(/"(月日號号)"/) || [])[1]).split("").sort().join("");
+if (nativeYi !== panelYi) {
+  throw new Error(
+    `一 citation-tone exceptions differ: native "${nativeYi}" vs panel "${panelYi}"`);
+}
+
+// apply_character_style() scales Speed again; the panel must use the same
+// numbers or Fit Duration and every marker drift away from the audio.
+for (const [label, expected] of [
+  ["tiny", "1.08"], ["young", "1.04"], ["giant", "0.91"],
+  ["happy", "1.08"], ["angry", "1.12"], ["scared", "1.14"],
+  ["sleepy", "0.78"], ["robot", "0.96"],
+]) {
+  if (!new RegExp(`settings\\.speed \\*= ${expected.replace(".", "\\.")};`).test(dspSource)) {
+    throw new Error(`Native speed multiplier for ${label} (${expected}) changed`);
+  }
+  if (!new RegExp(`speed \\*= ${expected.replace(".", "\\.")};`).test(nativePanelSource)) {
+    throw new Error(`Panel effectiveSpeed() is missing the ${label} multiplier ${expected}`);
+  }
+}
+for (const seconds of ["0.188", "0.148", "0.012", "0.055", "0.105", "0.190", "0.155",
+  "0.215", "0.195", "0.235", "0.300", "0.125", "0.165"]) {
+  const pattern = new RegExp(seconds.replace(".", "\\."));
+  if (!pattern.test(dspSource) || !pattern.test(nativePanelSource)) {
+    throw new Error(`Timing constant ${seconds} is not present in both the engine and the panel`);
+  }
+}
+
+// The panel's ScriptUI sliders must span the same range as the effect
+// parameters, and its Speed clamp must equal the engine's or the timings it
+// plans stop matching the audio at the ends of the range.
+for (const [label, pluginPattern, panelPattern] of [
+  ["Pitch", /PF_ADD_FLOAT_SLIDERX\("Pitch[^"]*", 0\.10, 4\.00,/,
+    /addSlider\(panel, "Pitch[^"]*", 0\.10, 4\.00,/],
+  ["Speed", /PF_ADD_FLOAT_SLIDERX\("Speed[^"]*", 0\.10, 10\.00,/,
+    /addSlider\(panel, "Speed[^"]*", 0\.10, 10\.00,/],
+  ["Volume", /PF_ADD_FLOAT_SLIDERX\("Volume[^"]*", 0\.0, 200\.0,/,
+    /addSlider\(panel, "Volume[^"]*", 0\.00, 2\.00,/],
+  ["Consonant", /PF_ADD_FLOAT_SLIDERX\("Initial[^"]*", 0\.00, 6\.00,/,
+    /addSlider\(panel, "Consonant[^"]*", 0\.00, 6\.00,/],
+]) {
+  if (!pluginPattern.test(nativePluginSource)) {
+    throw new Error(`${label} parameter range changed in the plug-in without updating the panel`);
+  }
+  if (!panelPattern.test(nativePanelSource)) {
+    throw new Error(`${label} slider range in the panel does not match the plug-in parameter`);
+  }
+}
+const engineSpeedBounds = [
+  (dspSource.match(/kMinimumSpeed = ([\d.]+);/) || [])[1],
+  (dspSource.match(/kMaximumSpeed = ([\d.]+);/) || [])[1],
+];
+const panelSpeedBounds = [
+  (nativePanelSource.match(/var MIN_SPEED = ([\d.]+);/) || [])[1],
+  (nativePanelSource.match(/var MAX_SPEED = ([\d.]+);/) || [])[1],
+];
+if (engineSpeedBounds.some((value) => value === undefined) ||
+    Number(engineSpeedBounds[0]) !== Number(panelSpeedBounds[0]) ||
+    Number(engineSpeedBounds[1]) !== Number(panelSpeedBounds[1])) {
+  throw new Error(
+    `Speed clamp differs: engine [${engineSpeedBounds}] vs panel [${panelSpeedBounds}]`);
+}
+
+// Run the panel's planner and pin its output. The matching engine-side values
+// are asserted in native/tests/dsp_tests.cpp; both were cross-checked against
+// each other sample by sample.
+const planner = { Math, String, parseInt, parseFloat, isNaN };
+planner.islandChatterMandarinReading = aeReadingsContext.islandChatterMandarinReading;
+vm.createContext(planner);
+const takeFunction = (name) => {
+  const start = nativePanelSource.indexOf(`function ${name}(`);
+  if (start < 0) throw new Error(`Panel planner is missing ${name}()`);
+  let depth = 0;
+  for (let cursor = nativePanelSource.indexOf("{", start); cursor < nativePanelSource.length; cursor += 1) {
+    if (nativePanelSource[cursor] === "{") depth += 1;
+    else if (nativePanelSource[cursor] === "}") {
+      depth -= 1;
+      if (depth === 0) return nativePanelSource.slice(start, cursor + 1);
+    }
+  }
+  throw new Error(`Panel planner function ${name}() is unbalanced`);
+};
+const takeVariable = (name) => {
+  const start = nativePanelSource.indexOf(`var ${name} =`);
+  if (start < 0) throw new Error(`Panel planner is missing ${name}`);
+  return nativePanelSource.slice(start, nativePanelSource.indexOf(";\n", start) + 1);
+};
+vm.runInContext([
+  takeVariable("MIN_SPEED"),
+  takeVariable("MAX_SPEED"),
+  takeVariable("IC_PHRASE_READINGS"),
+  takeVariable("IC_NEUTRAL_PARTICLES"),
+  ...["clamp", "codePointAt", "isSpaceCode", "isPunctuationCode", "punctuationSeconds",
+    "mouthForReading", "readingTone", "replaceReadingTone", "isNeutralParticle", "isNumberCode",
+    "yiKeepsCitationTone", "readingForCodePoint", "isLatinLetter", "isLatinVowel",
+    "characterFromCode", "matchesPhrase", "applySandhi", "buildSpeechUnits", "estimateSpeech",
+    "effectiveSpeed"].map(takeFunction),
+].join("\n"), planner);
+
+for (const [text, emotion, size, events, duration, readings] of [
+  ["你好，今天一起去散步。", 0, 2, 9, 2.240, "ni2,hao3,jin1,tian1,yi4,qi3,qu4,san4,bu4"],
+  ["你好，今天一起去散步。", 5, 2, 9, 2.844, "ni2,hao3,jin1,tian1,yi4,qi3,qu4,san4,bu4"],
+  ["你好，今天一起去散步。", 3, 0, 9, 1.838, "ni2,hao3,jin1,tian1,yi4,qi3,qu4,san4,bu4"],
+  ["他說「好」", 0, 2, 3, 1.030, "ta1,shuo1,hao3"],
+  ["二〇一九年一月一日", 0, 2, 9, 1.900, "er4,ling2,yi1,jiu3,nian2,yi1,yue4,yi1,ri4"],
+  ["第一名過去了解著名", 0, 2, 9, 1.900, "di4,yi1,ming2,guo4,qu4,liao2,jie3,zhu4,ming2"],
+  ["你-好…再見", 0, 2, 4, 1.325, "ni3,hao3,zai4,jian4"],
+  ["我很好嗎？不對！", 1, 1, 6, 1.533, "wo2,hen2,hao3,ma5,bu2,dui4"],
+  ["ba de si mo lu", 0, 2, 5, 1.120, "a5,a5,a5,a5,a5"],
+]) {
+  const speed = vm.runInContext(
+    `effectiveSpeed({ speed: 1, emotion: ${emotion}, characterSize: ${size} })`, planner);
+  const plan = vm.runInContext(
+    `estimateSpeech(${JSON.stringify(text)}, ${speed})`, planner);
+  const label = `"${text}" emotion=${emotion} size=${size}`;
+  if (plan.events.length !== events) {
+    throw new Error(`${label}: planned ${plan.events.length} events, expected ${events}`);
+  }
+  if (Math.abs(plan.duration - duration) > 0.002) {
+    throw new Error(`${label}: planned ${plan.duration.toFixed(3)}s, expected ${duration}s`);
+  }
+  const planned = plan.events.map((event) => event.reading).join(",");
+  if (planned !== readings) {
+    throw new Error(`${label}: planned readings ${planned}, expected ${readings}`);
+  }
+}
+// Windows PowerShell 5.1 reads a .ps1 as the system ANSI codepage unless the
+// file starts with a UTF-8 BOM, which turns any non-ASCII message into mojibake
+// and can break the parse outright.
+for (const scriptName of ["installer/Install-IslandChatter.ps1",
+  "installer/Uninstall-IslandChatter.ps1", "tools/package-release.ps1"]) {
+  const bytes = fs.readFileSync(path.join(root, scriptName));
+  const hasBom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+  const isAscii = bytes.every((byte) => byte < 0x80);
+  if (!isAscii && !hasBom) {
+    throw new Error(`${scriptName} has non-ASCII text but no UTF-8 BOM; ` +
+      "Windows PowerShell 5.1 will mis-decode it");
+  }
+}
+
 for (const releaseFile of [
   "IslandChatterNative.aex",
   "IslandChatterNativePanel.jsx",
@@ -185,9 +472,14 @@ const filesToVisit = [root];
 while (filesToVisit.length) {
   const current = filesToVisit.pop();
   for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+    // Locally generated previews and the transient output of
+    // native/tests/ae-audio-render.jsx. Everything else must stay asset-free:
+    // this check is what keeps the repository and release free of third-party
+    // audio. All of these are also in .gitignore.
     if (entry.name === ".git" || entry.name === "node_modules" ||
         entry.name === "preview.wav" || entry.name === "native-preview.wav" ||
         entry.name === "mandarin-preview.wav" ||
+        entry.name === "ae-audio-render-output.aif" ||
         /^build/.test(entry.name)) continue;
     const fullPath = path.join(current, entry.name);
     if (entry.isDirectory()) filesToVisit.push(fullPath);

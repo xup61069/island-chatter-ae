@@ -1,7 +1,6 @@
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
 param(
-    [string]$AfterEffectsRoot,
-    [switch]$AllVersions
+    [string]$AfterEffectsRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,19 +15,24 @@ function Get-AfterEffectsRoots {
     }
     $adobeRoot = Join-Path $env:ProgramFiles "Adobe"
     if (-not (Test-Path -LiteralPath $adobeRoot -PathType Container)) { return @() }
-    $roots = Get-ChildItem -LiteralPath $adobeRoot -Directory |
+    $roots = @(Get-ChildItem -LiteralPath $adobeRoot -Directory |
         Where-Object { $_.Name -like "Adobe After Effects *" } |
         ForEach-Object { Join-Path $_.FullName "Support Files" } |
-        Where-Object { Test-Path -LiteralPath $_ -PathType Container } |
-        Sort-Object -Descending
-    if ($AllVersions) { return @($roots) }
-    if ($roots.Count -gt 0) { return ,$roots[0] }
+        Where-Object { Test-Path -LiteralPath $_ -PathType Container })
+    # Uninstall is not the mirror image of install: whichever version the user
+    # installed into, leaving a stale copy behind is worse than checking them
+    # all, so every root that actually holds the plug-in is cleaned by default.
+    $installed = @($roots | Where-Object {
+        Test-Path -LiteralPath (Join-Path $_ "Plug-ins\Island Chatter\IslandChatterNative.aex") -PathType Leaf
+    })
+    if ($installed.Count -gt 0) { return $installed }
     return @()
 }
 
 $targets = @(Get-AfterEffectsRoots)
 if ($targets.Count -eq 0) {
-    throw "No After Effects Support Files directory was found. Pass -AfterEffectsRoot explicitly."
+    throw ("Island Chatter was not found in any After Effects installation. " +
+        "Pass -AfterEffectsRoot explicitly if it is installed elsewhere.")
 }
 
 foreach ($target in $targets) {

@@ -4,12 +4,16 @@
 #include <algorithm>
 #include <cmath>
 #include <condition_variable>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -176,6 +180,190 @@ int main() {
         settings.character_size = static_cast<island_chatter::CharacterSize>(voice % 4);
         const auto rendered = island_chatter::synthesize(settings);
         require(rendered.diagnostics.peak < 0.999F, "voice clips at maximum settings");
+    }
+
+    // U+3007 〇 lives inside the CJK punctuation block but is a spoken digit.
+    settings = island_chatter::Settings{};
+    settings.text = "二〇一九";
+    const auto ideographic_zero = island_chatter::synthesize(settings);
+    require(ideographic_zero.diagnostics.readings ==
+        std::vector<std::string>({"er4", "ling2", "yi1", "jiu3"}),
+        "〇 was not read, or 一 lost its citation tone inside a digit sequence");
+
+    // 一 keeps its first tone as an ordinal and in dates, but still takes
+    // sandhi everywhere else.
+    for (const auto& [text, expected] : std::vector<std::pair<std::string, std::string>>{
+            {"第一名", "yi1"}, {"一月", "yi1"}, {"一號", "yi1"}, {"星期一早", "yi1"},
+            {"一起", "yi4"}, {"一天", "yi4"}, {"一樣", "yi2"}}) {
+        settings.text = text;
+        const auto planned = island_chatter::synthesize(settings);
+        bool found = false;
+        for (const auto& reading : planned.diagnostics.readings) {
+            if (reading.size() >= 2 && reading.compare(0, 2, "yi") == 0) {
+                require(reading == expected, ("一 sandhi is wrong in " + text).c_str());
+                found = true;
+            }
+        }
+        require(found, ("no 一 syllable was planned for " + text).c_str());
+    }
+
+    // 過, 著, and 了 default to a neutral particle reading; these words must not.
+    for (const auto& [text, expected] : std::vector<std::pair<std::string, std::string>>{
+            {"過去", "guo4"}, {"經過", "guo4"}, {"難過", "guo4"}, {"過来", "guo5"},
+            {"著名", "zhu4"}, {"顯著", "zhu4"}, {"我去過", "guo5"}}) {
+        settings.text = text;
+        const auto planned = island_chatter::synthesize(settings);
+        bool found = false;
+        for (const auto& reading : planned.diagnostics.readings) {
+            if (reading == expected) found = true;
+        }
+        require(found, ("expected reading " + expected + " in " + text).c_str());
+    }
+    settings.text = "了解";
+    require(island_chatter::synthesize(settings).diagnostics.lexical_tones ==
+        std::vector<std::uint8_t>({3, 3}), "了解 did not use the liao3 reading");
+
+    // punctuation_pause() scores — and … ; is_punctuation() must reach them.
+    settings.text = "你好";
+    const auto no_marks = island_chatter::synthesize(settings);
+    for (const char* text : {"你…好", "你—好"}) {
+        settings.text = text;
+        const auto spaced = island_chatter::synthesize(settings);
+        require(spaced.diagnostics.event_count == no_marks.diagnostics.event_count,
+            "an ellipsis or em dash produced a chatter syllable instead of a rest");
+        require(spaced.samples.size() > no_marks.samples.size(),
+            "an ellipsis or em dash did not insert a pause");
+    }
+
+    // ASCII pinyin spells ü as either "v" or "u:".
+    settings.text = "nv3";
+    const auto v_spelling = island_chatter::synthesize(settings);
+    settings.text = "nu:3";
+    const auto colon_spelling = island_chatter::synthesize(settings);
+    settings.text = "nu3";
+    const auto plain_u = island_chatter::synthesize(settings);
+    require(v_spelling.diagnostics.vowel_names == colon_spelling.diagnostics.vowel_names,
+        "nu:3 did not reach the same front rounded vowel as nv3");
+    require(v_spelling.diagnostics.vowel_names != plain_u.diagnostics.vowel_names,
+        "ü and plain u are not distinguished");
+
+    // The nasal murmur must release with the onset instead of running at full
+    // amplitude for the rest of the syllable.
+    const auto syllable_energy = [](const char* text) {
+        island_chatter::Settings local;
+        local.text = text;
+        local.seed = 7;
+        const auto rendered = island_chatter::synthesize(local);
+        double energy = 0.0;
+        for (const float value : rendered.samples) {
+            energy += static_cast<double>(value) * static_cast<double>(value);
+        }
+        return std::sqrt(energy / static_cast<double>(std::max<std::size_t>(1, rendered.samples.size())));
+    };
+    const double stop_energy = syllable_energy("ba1");
+    require(syllable_energy("ma1") < stop_energy * 1.15,
+        "the nasal onset envelope does not terminate; ma1 is far louder than ba1");
+    require(syllable_energy("na1") < stop_energy * 1.15,
+        "the nasal onset envelope does not terminate; na1 is far louder than ba1");
+
+    // The cache is bounded by memory, not just by entry count.
+    {
+        island_chatter::Settings bounded;
+        bounded.text = "你好，島民";
+        const auto single = island_chatter::synthesize(bounded).samples.size();
+        island_chatter::SynthesisCache small(1024, single * 3);
+        for (std::uint32_t seed = 1; seed <= 24; ++seed) {
+            auto keyed = bounded;
+            keyed.seed = seed;
+            small.get(keyed);
+        }
+        require(small.resident_samples() <= single * 3,
+            "the synthesis cache exceeded its configured memory bound");
+        require(small.size() > 0, "the synthesis cache evicted everything");
+    }
+
+    // A failed synthesis must propagate and leave no poisoned entry behind.
+    {
+        island_chatter::SynthesisCache failing(8);
+        island_chatter::Settings invalid;
+        invalid.text = "你好";
+        invalid.sample_rate = 1;
+        bool threw = false;
+        try {
+            failing.get(invalid);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        require(threw, "an invalid sample rate did not propagate out of the cache");
+        require(failing.size() == 0, "a failed synthesis left an entry in the cache");
+        island_chatter::Settings valid = invalid;
+        valid.sample_rate = 44100;
+        require(failing.get(valid) != nullptr, "the cache did not recover after a failure");
+    }
+
+    // The widened parameter ranges must stay stable, silent-free and unclipped
+    // at both extremes, and Speed must actually change the duration all the way
+    // to the top of its range.
+    {
+        island_chatter::Settings extreme;
+        extreme.text = "你好，島民！今天天氣真好。";
+        double previous_duration = 0.0;
+        for (const double speed : {0.10, 0.25, 1.0, 4.0, 10.0, 12.0, 40.0}) {
+            extreme.speed = speed;
+            const auto rendered = island_chatter::synthesize(extreme);
+            require(!rendered.samples.empty(), "an extreme Speed produced no audio");
+            require(rendered.diagnostics.peak < 0.999F, "an extreme Speed clipped");
+            require(rendered.diagnostics.event_count == 10, "an extreme Speed dropped syllables");
+            if (previous_duration > 0.0) {
+                require(rendered.diagnostics.duration_seconds <= previous_duration,
+                    "a higher Speed did not shorten the utterance");
+            }
+            previous_duration = rendered.diagnostics.duration_seconds;
+        }
+        // 40.0 is past the clamp, so it must land on the same result as 12.0.
+        extreme.speed = 12.0;
+        const auto at_bound = island_chatter::synthesize(extreme);
+        extreme.speed = 40.0;
+        require(island_chatter::synthesize(extreme).samples == at_bound.samples,
+            "Speed is not clamped consistently above its maximum");
+
+        extreme.speed = 1.0;
+        for (const double pitch : {0.10, 1.0, 2.0, 4.0, 6.0}) {
+            extreme.pitch = pitch;
+            const auto rendered = island_chatter::synthesize(extreme);
+            require(rendered.diagnostics.peak > 0.01F, "an extreme Pitch produced near-silence");
+            require(rendered.diagnostics.peak < 0.999F, "an extreme Pitch clipped");
+        }
+        extreme.pitch = 1.0;
+        for (const double volume : {0.0, 1.0, 2.0}) {
+            extreme.volume = volume;
+            const auto rendered = island_chatter::synthesize(extreme);
+            require(rendered.diagnostics.peak < 0.999F, "an extreme Volume clipped");
+        }
+        extreme.volume = 2.0;
+        const auto loud = island_chatter::synthesize(extreme);
+        extreme.volume = 0.78;
+        require(loud.diagnostics.peak > island_chatter::synthesize(extreme).diagnostics.peak,
+            "Volume above 100% is not louder than the default");
+        extreme.volume = 0.78;
+        for (const double consonant : {0.0, 1.25, 6.0}) {
+            extreme.consonant = consonant;
+            require(island_chatter::synthesize(extreme).diagnostics.peak < 0.999F,
+                "an extreme Consonant clipped");
+        }
+    }
+
+    // Harmonics above Nyquist are dropped rather than folded back as aliasing.
+    {
+        island_chatter::Settings limited;
+        limited.text = "米";
+        limited.sample_rate = 8000;
+        limited.pitch = 6.0;
+        limited.voice_index = 1;
+        limited.character_size = island_chatter::CharacterSize::tiny;
+        const auto rendered = island_chatter::synthesize(limited);
+        require(rendered.diagnostics.peak < 0.999F, "band-limited synthesis clipped");
+        require(!rendered.samples.empty(), "band-limited synthesis produced no audio");
     }
 
     std::cout << "Native DSP tests passed: " << first.samples.size() << " samples, peak "

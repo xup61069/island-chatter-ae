@@ -58,7 +58,11 @@ See `THIRD_PARTY_NOTICES.md` for the Unicode data license.
 
 `panel/IslandChatterNativePanel.jsx` puts `Island Chatter Native` directly on the selected text layer. Because AE 26.0 crashes in `BEE_RenderItemSound` before a third-party synthesized-audio callback receives a text layer, the panel places AE's built-in Tone effect immediately before Island Chatter as a zero-level sound-source bootstrap. Island Chatter then replaces every output sample. This requires no carrier layer and generates no WAV files.
 
-The panel writes Source Text into 64 hidden UTF-16 numeric parameters when Apply is clicked. After editing Source Text, click Apply again; Voice, Pitch, Speed, Volume, and Initial remain directly keyframeable on the text layer.
+The panel writes Source Text into 64 hidden UTF-16 numeric parameters when Apply is clicked. After editing Source Text, click Apply again.
+
+Voice, Pitch, Speed, Volume, and Initial are keyframeable, but they are meant to be set once per layer. After Effects passes an audio effect one parameter snapshot per audio block, so an animated value re-synthesizes the whole utterance for every block, and animating Speed shifts each syllable's start time enough to step audibly at block boundaries. Animate the layer's own Audio Levels for volume moves.
+
+The panel's `estimateSpeech()` mirrors the engine's text planning, including the CJK punctuation block, surrogate pairs, tone sandhi, and the phrase and neutral-particle tables. `npm test` fails if the two drift apart.
 
 The optional pronunciation field accepts tone-number pinyin (`ni3 hao3`), space-delimited Zhuyin (`ㄋㄧˇ ㄏㄠˇ`), or inline overrides such as `[重|chong2]新`. Phrase-level readings handle common polyphones such as 音樂/音乐, 銀行/银行, 重新, 重要, 長大/长大, and 還書/还书. The language planner also applies third-tone, 一, and 不 sandhi plus common neutral-tone particles.
 

@@ -4,17 +4,25 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace island_chatter {
 namespace {
 
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr double kTwoPi = kPi * 2.0;
+
+// Speed bounds. The panel's estimateSpeech() clamps to the same pair so its
+// markers, rig and Fit Duration keep matching the rendered audio at the far
+// ends of the range.
+constexpr double kMinimumSpeed = 0.10;
+constexpr double kMaximumSpeed = 12.0;
 
 struct Vowel {
     char name;
@@ -149,11 +157,19 @@ bool is_space(std::uint32_t codepoint) {
 }
 
 bool is_punctuation(std::uint32_t codepoint) {
+    // U+3007 IDEOGRAPHIC NUMBER ZERO sits inside the CJK punctuation block but
+    // is a spoken character in dates and numbers such as 二〇二六.
+    if (codepoint == 0x3007U) {
+        return false;
+    }
     if (codepoint >= 0x3000U && codepoint <= 0x303FU) {
         return true;
     }
     switch (codepoint) {
         case '.': case ',': case '!': case '?': case ';': case ':': case '-':
+        // punctuation_pause() has always scored these two; without them here
+        // an ellipsis or em dash produced a chatter syllable instead of a rest.
+        case 0x2014U: case 0x2026U:
         case 0xFF01U: case 0xFF0CU: case 0xFF0EU: case 0xFF1AU: case 0xFF1BU: case 0xFF1FU:
             return true;
         default:
@@ -213,6 +229,15 @@ Consonant consonant_for(std::uint32_t codepoint) {
     return invented[codepoint % invented.size()];
 }
 
+// Characters Unicode's kMandarin property does not cover. The generated table
+// stays untouched; keep this list tiny and auditable.
+std::string_view supplementary_reading(std::uint32_t codepoint) {
+    switch (codepoint) {
+        case 0x3007U: return "ling2";  // 〇
+        default: return {};
+    }
+}
+
 std::string_view mandarin_reading(std::uint32_t codepoint) {
     const auto& entries = generated::kMandarinReadings;
     const auto found = std::lower_bound(
@@ -221,7 +246,7 @@ std::string_view mandarin_reading(std::uint32_t codepoint) {
             return entry.codepoint < value;
         });
     if (found == entries.end() || found->codepoint != codepoint) {
-        return {};
+        return supplementary_reading(codepoint);
     }
     return generated::kMandarinSyllables[found->syllable_index];
 }
@@ -292,6 +317,11 @@ MandarinSyllable parse_mandarin(std::string_view reading) {
     else if (initial == "r") syllable.consonant = {ConsonantKind::liquid, 0.42, false, true};
 
     std::string final(reading);
+    // ASCII pinyin spells ü as "u:" or "v" (nu:3 / nv3, lu:4 / lv4). Both must
+    // reach the front rounded vowel instead of falling back to plain u.
+    for (std::size_t at = final.find("u:"); at != std::string::npos; at = final.find("u:", at)) {
+        final.replace(at, 2, "v");
+    }
     if (initial.empty() && !final.empty() && final.front() == 'y') {
         final.erase(0, 1);
         if (final.empty() || final == "i") final = "i";
@@ -359,6 +389,7 @@ void build_vowel_profile(
     int vowel_index,
     const Voice& voice,
     double frequency,
+    double sample_rate,
     std::array<double, 3>& formants,
     std::array<double, 12>& harmonics) {
     const auto& vowel = kVowels[static_cast<std::size_t>(vowel_index)];
@@ -367,10 +398,18 @@ void build_vowel_profile(
         formants[index] = vowel.formants[index] * voice.tract;
         bandwidths[index] = vowel.bandwidths[index] * voice.tract;
     }
+    const double nyquist = sample_rate * 0.5;
     double total = 0.0;
     for (std::size_t index = 0; index < harmonics.size(); ++index) {
         const double harmonic = static_cast<double>(index + 1);
         const double harmonic_frequency = frequency * harmonic;
+        // Drop harmonics above Nyquist instead of letting them fold back as
+        // aliasing. At normal pitches nothing is dropped; it only matters once
+        // Pitch is pushed towards the top of its range.
+        if (harmonic_frequency >= nyquist) {
+            harmonics[index] = 0.0;
+            continue;
+        }
         double resonance = 0.035;
         for (std::size_t formant = 0; formant < 3; ++formant) {
             resonance += gaussian(harmonic_frequency - formants[formant], bandwidths[formant]);
@@ -386,10 +425,12 @@ void build_vowel_profile(
     }
 }
 
-void build_vowel(Event& event, int first_vowel, int end_vowel, const Voice& voice) {
+void build_vowel(Event& event, int first_vowel, int end_vowel, const Voice& voice, double sample_rate) {
     event.vowel_name = kVowels[static_cast<std::size_t>(first_vowel)].name;
-    build_vowel_profile(first_vowel, voice, event.frequency, event.formants, event.harmonics);
-    build_vowel_profile(end_vowel, voice, event.frequency, event.end_formants, event.end_harmonics);
+    build_vowel_profile(
+        first_vowel, voice, event.frequency, sample_rate, event.formants, event.harmonics);
+    build_vowel_profile(
+        end_vowel, voice, event.frequency, sample_rate, event.end_formants, event.end_harmonics);
 }
 
 struct SpeechUnit {
@@ -410,7 +451,7 @@ struct PhrasePronunciation {
 // Phrase-level entries override Unihan's single-character kMandarin value.
 // Keep this list deliberately compact and auditable; user overrides handle
 // names and uncommon readings without requiring a full word segmenter.
-constexpr std::array<PhrasePronunciation, 24> kPhrasePronunciations{{
+constexpr std::array<PhrasePronunciation, 44> kPhrasePronunciations{{
     {U"音樂", "yin1 yue4"}, {U"音乐", "yin1 yue4"},
     {U"樂隊", "yue4 dui4"}, {U"乐队", "yue4 dui4"},
     {U"快樂", "kuai4 le4"}, {U"快乐", "kuai4 le4"},
@@ -422,6 +463,19 @@ constexpr std::array<PhrasePronunciation, 24> kPhrasePronunciations{{
     {U"長度", "chang2 du4"}, {U"长度", "chang2 du4"},
     {U"還書", "huan2 shu1"}, {U"还书", "huan2 shu1"},
     {U"還是", "hai2 shi4"}, {U"还是", "hai2 shi4"},
+    // 過, 著, and 了 default to a neutral particle reading below. These are the
+    // common full-tone words where that default would be wrong.
+    {U"過去", "guo4 qu4"}, {U"过去", "guo4 qu4"},
+    {U"經過", "jing1 guo4"}, {U"经过", "jing1 guo4"},
+    {U"超過", "chao1 guo4"}, {U"超过", "chao1 guo4"},
+    {U"難過", "nan2 guo4"}, {U"难过", "nan2 guo4"},
+    {U"過來", "guo4 lai2"}, {U"过来", "guo4 lai2"},
+    {U"過年", "guo4 nian2"}, {U"过年", "guo4 nian2"},
+    {U"著名", "zhu4 ming2"},
+    {U"著急", "zhao2 ji2"}, {U"着急", "zhao2 ji2"},
+    {U"顯著", "xian3 zhu4"}, {U"显著", "xian3 zhu4"},
+    {U"了解", "liao3 jie3"}, {U"瞭解", "liao3 jie3"},
+    {U"明了", "ming2 liao3"},
 }};
 
 std::vector<std::string> split_readings(std::string_view value) {
@@ -434,7 +488,7 @@ std::vector<std::string> split_readings(std::string_view value) {
                 current.clear();
             }
         } else {
-            current.push_back(character == 'u' ? 'u' : character);
+            current.push_back(character);
         }
     }
     if (!current.empty()) output.push_back(current);
@@ -465,6 +519,37 @@ void replace_reading_tone(std::string& reading, std::uint8_t tone) {
     } else {
         reading.push_back(static_cast<char>('0' + tone));
     }
+}
+
+bool is_number_character(std::uint32_t codepoint) {
+    switch (codepoint) {
+        case 0x3007U:  // 〇
+        case U'零': case U'一': case U'二': case U'兩': case U'两': case U'三':
+        case U'四': case U'五': case U'六': case U'七': case U'八': case U'九':
+        case U'十': case U'百': case U'千': case U'萬': case U'万':
+            return true;
+        default:
+            return codepoint >= '0' && codepoint <= '9';
+    }
+}
+
+// 一 keeps its citation first tone as an ordinal, in dates, and inside a spoken
+// digit sequence: 第一名, 星期一早上, 一月, 一號, 二〇一九. Everywhere else it
+// takes the usual second/fourth-tone sandhi.
+bool yi_keeps_citation_tone(std::uint32_t previous, std::uint32_t next) {
+    switch (previous) {
+        case U'第': case U'星': case U'期': case U'週': case U'周': case U'初':
+            return true;
+        default:
+            break;
+    }
+    switch (next) {
+        case U'月': case U'日': case U'號': case U'号':
+            return true;
+        default:
+            break;
+    }
+    return is_number_character(previous);
 }
 
 bool is_neutral_particle(std::uint32_t codepoint) {
@@ -676,12 +761,19 @@ std::vector<SpeechUnit> build_speech_units(const std::string& text) {
             ++next;
         }
         if (next >= units.size() || !units[next].mandarin) continue;
+        std::uint32_t previous = 0;
+        for (std::size_t back = index; back > 0; --back) {
+            if (units[back - 1].mandarin) { previous = units[back - 1].codepoint; break; }
+            if (units[back - 1].pause_seconds > 0.0 && !is_space(units[back - 1].codepoint)) break;
+        }
         const auto next_tone = reading_tone(units[next].reading);
         auto tone = reading_tone(units[index].reading);
         if (tone == 3 && next_tone == 3) {
             replace_reading_tone(units[index].reading, 2);
         } else if (units[index].codepoint == U'一') {
-            replace_reading_tone(units[index].reading, next_tone == 4 ? 2 : 4);
+            if (!yi_keeps_citation_tone(previous, units[next].codepoint)) {
+                replace_reading_tone(units[index].reading, next_tone == 4 ? 2 : 4);
+            }
         } else if (units[index].codepoint == U'不' && next_tone == 4) {
             replace_reading_tone(units[index].reading, 2);
         }
@@ -739,7 +831,10 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
     Random random(seed);
     std::vector<Event> events;
     std::size_t cursor = 0;
-    const double speed = clamp(settings.speed, 0.25, 4.0);
+    // Keep these bounds in step with the parameter ranges in
+    // plugin/IslandChatterNative.cpp and with estimateSpeech() in the panel,
+    // which has to reproduce this exact clamp to plan matching timings.
+    const double speed = clamp(settings.speed, kMinimumSpeed, kMaximumSpeed);
     const auto sample_rate = static_cast<double>(settings.sample_rate);
 
     for (std::size_t index = 0; index < units.size(); ++index) {
@@ -791,7 +886,8 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             clamp(settings.cuteness, 0.0, 1.0) * (6.0 - clarity * 2.0)));
         const int note = static_cast<int>((codepoint * 5U + index * 3U) %
             static_cast<std::uint32_t>(note_span * 2 + 1)) - note_span;
-        event.frequency = 245.0 * voice.pitch * clamp(settings.pitch, 0.25, 4.0) * std::pow(2.0, note / 24.0);
+        event.frequency = 245.0 * voice.pitch * clamp(settings.pitch, 0.10, 6.0) *
+            std::pow(2.0, note / 24.0);
         event.consonant = consonant;
         event.mandarin = has_mandarin_reading;
         event.tone = has_mandarin_reading ? mandarin.tone : 5;
@@ -805,7 +901,7 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             static_cast<std::size_t>(std::llround(consonant_seconds(consonant) / speed * sample_rate)));
         event.phase = random.next() * kTwoPi;
         event.seed = static_cast<std::uint32_t>(random.next() * 2147483000.0) + 1U;
-        build_vowel(event, vowel_index, end_vowel_index, voice);
+        build_vowel(event, vowel_index, end_vowel_index, voice, sample_rate);
         events.push_back(event);
         cursor += event.length + static_cast<std::size_t>(std::llround(0.012 / speed * sample_rate));
     }
@@ -881,9 +977,18 @@ double render_consonant(Event& event, std::size_t local, double phase, Random& r
                 (event.consonant.retroflex ? 0.72 : 0.82);
             break;
         }
-        case ConsonantKind::nasal:
-            sample = (std::sin(phase) * 0.62 + std::sin(phase * 2.0) * 0.16) * (0.45 + 0.55 * progress);
+        case ConsonantKind::nasal: {
+            // The murmur grows into the vowel and must then release. Without
+            // this tail every other class fades out at progress 1.0 but the
+            // nasal held full amplitude for the rest of the syllable.
+            const double tail = local >= event.onset
+                ? clamp(1.0 - static_cast<double>(local - event.onset) /
+                    static_cast<double>(event.onset + 1U), 0.0, 1.0)
+                : 1.0;
+            sample = (std::sin(phase) * 0.62 + std::sin(phase * 2.0) * 0.16) *
+                (0.45 + 0.55 * progress) * tail;
             break;
+        }
         case ConsonantKind::liquid: {
             const double liquid_phase = phase * (0.72 + progress * 0.28);
             sample = (std::sin(liquid_phase) * 0.65 + std::sin(liquid_phase * 2.0) * 0.15) * envelope;
@@ -1015,8 +1120,8 @@ Result synthesize(const Settings& requested) {
             const double cute_softening = 1.0 - clamp(settings.cuteness, 0.0, 1.0) * 0.12;
             const double consonant_gain = (event.mandarin ? 0.68 + clarity * 0.28 : 1.0) * cute_softening;
             const double emphasis_gain = event.emphatic ? 1.12 : 1.0;
-            const double mixed = (consonant * clamp(settings.consonant, 0.0, 4.0) * consonant_gain + vowel) *
-                attack * release * clamp(settings.volume, 0.0, 1.0) * emphasis_gain;
+            const double mixed = (consonant * clamp(settings.consonant, 0.0, 6.0) * consonant_gain + vowel) *
+                attack * release * clamp(settings.volume, 0.0, 2.0) * emphasis_gain;
             const float sample = static_cast<float>((2.0 / kPi) * std::atan(mixed) * 0.915);
             result.samples[event.start + local] = sample;
             result.diagnostics.peak = std::max(result.diagnostics.peak, std::abs(sample));
