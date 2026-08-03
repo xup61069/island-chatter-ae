@@ -6,6 +6,7 @@
     var EFFECT_NAME = "Island Chatter Native";
     var TONE_MATCH_NAME = "ADBE Aud Tone";
     var EXPECTED_PARAMETERS = 76;
+    var ownsProject = false;
 
     function writeReport(message) {
         report.encoding = "UTF-8";
@@ -30,6 +31,7 @@
             return;
         }
         if (!app.project) { app.newProject(); }
+        ownsProject = true;
 
         var comp = app.project.items.addComp("Island Chatter 1.0 Smoke Test", 640, 360, 1, 6, 30);
         var layer = comp.layers.addText("你好，中文聲音測試！");
@@ -60,7 +62,7 @@
         effect.property(72).setValue(3);
         effect.property(73).setValue(82.0);
         effect.property(74).setValue(62.0);
-        effect.property(75).setValue(20260803);
+        effect.property(75).setValue(803);
 
         if (tone.propertyIndex >= effect.propertyIndex || tone.property(6).value !== 0) {
             throw new Error("Tone bootstrap is not immediately before the native audio effect.");
@@ -82,5 +84,10 @@
         );
     } catch (error) {
         writeReport("FAIL\n" + error.toString());
+    } finally {
+        if (ownsProject && app.project) {
+            app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
+            app.quit();
+        }
     }
 }());
