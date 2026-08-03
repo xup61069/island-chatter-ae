@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <condition_variable>
 #include <cstdint>
-#include <cstring>
 #include <exception>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -40,8 +40,9 @@ std::string settings_key(const Settings& settings) {
 
 class SynthesisCache::Implementation {
 public:
-    explicit Implementation(std::size_t maximum_entries)
-        : maximum_entries_(std::max<std::size_t>(1, maximum_entries)) {}
+    Implementation(std::size_t maximum_entries, std::size_t maximum_samples)
+        : maximum_entries_(std::max<std::size_t>(1, maximum_entries)),
+          maximum_samples_(std::max<std::size_t>(1, maximum_samples)) {}
 
     std::shared_ptr<const Result> get(const Settings& settings) {
         const auto key = settings_key(settings);
@@ -69,6 +70,11 @@ public:
                 const std::lock_guard<std::mutex> lock(mutex_);
                 entry->result = rendered;
                 entry->rendering = false;
+                resident_samples_ += rendered->samples.size();
+                // The size of a render is only known now, so the bound has to
+                // be reapplied here as well as on the miss path. This entry is
+                // the most recently used, so eviction reaches it last.
+                evict_ready_entries();
             }
             entry->ready.notify_all();
             return rendered;
@@ -100,7 +106,7 @@ private:
     };
 
     void evict_ready_entries() {
-        while (entries_.size() >= maximum_entries_) {
+        while (entries_.size() >= maximum_entries_ || resident_samples_ > maximum_samples_) {
             auto oldest = entries_.end();
             std::uint64_t oldest_use = std::numeric_limits<std::uint64_t>::max();
             for (auto candidate = entries_.begin(); candidate != entries_.end(); ++candidate) {
@@ -112,18 +118,29 @@ private:
             // If every entry is currently rendering, temporarily exceed the
             // bound; deleting one would allow duplicate synthesis again.
             if (oldest == entries_.end()) return;
+            if (oldest->second->result) {
+                resident_samples_ -= oldest->second->result->samples.size();
+            }
             entries_.erase(oldest);
         }
     }
 
     const std::size_t maximum_entries_;
+    const std::size_t maximum_samples_;
     mutable std::mutex mutex_;
     std::unordered_map<std::string, std::shared_ptr<Entry>> entries_;
     std::uint64_t clock_ = 0;
+    std::size_t resident_samples_ = 0;
+
+public:
+    std::size_t resident_samples() const {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        return resident_samples_;
+    }
 };
 
-SynthesisCache::SynthesisCache(std::size_t maximum_entries)
-    : implementation_(std::make_unique<Implementation>(maximum_entries)) {}
+SynthesisCache::SynthesisCache(std::size_t maximum_entries, std::size_t maximum_samples)
+    : implementation_(std::make_unique<Implementation>(maximum_entries, maximum_samples)) {}
 
 SynthesisCache::~SynthesisCache() = default;
 
@@ -133,6 +150,10 @@ std::shared_ptr<const Result> SynthesisCache::get(const Settings& settings) {
 
 std::size_t SynthesisCache::size() const {
     return implementation_->size();
+}
+
+std::size_t SynthesisCache::resident_samples() const {
+    return implementation_->resident_samples();
 }
 
 }  // namespace island_chatter

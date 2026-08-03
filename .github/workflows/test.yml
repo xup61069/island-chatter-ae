@@ -16,3 +16,14 @@ jobs:
         with:
           node-version: 22
       - run: npm test
+
+  # The DSP and cache tests guard the audio callback, buffer bounds and the
+  # single-flight cache. They need no Adobe SDK, so there is no reason for them
+  # to be a local-only check.
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build native/build --config Release
+      - run: ctest --test-dir native/build -C Release --output-on-failure

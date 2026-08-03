@@ -1,15 +1,62 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.1",
-    [string]$AexPath = "native/build-ae-outer/plugin/Release/IslandChatterNative.aex"
+    [string]$Version = "1.0.2",
+    # Empty means "find the newest build". Pass a path to pin one explicitly.
+    [string]$AexPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$resolvedAex = Join-Path $repoRoot $AexPath
-if (-not (Test-Path -LiteralPath $resolvedAex -PathType Leaf)) {
-    throw "Build the native plug-in first. Missing: $resolvedAex"
+
+if ($AexPath) {
+    $resolvedAex = Join-Path $repoRoot $AexPath
+    if (-not (Test-Path -LiteralPath $resolvedAex -PathType Leaf)) {
+        throw "Build the native plug-in first. Missing: $resolvedAex"
+    }
+} else {
+    # Several build directories can coexist (native/build-ae, build-ae-outer...).
+    # Always take the newest, never merely the first one found, or a release can
+    # silently ship a stale binary from an earlier configuration.
+    $candidates = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot "native") -Directory `
+            -Filter "build*" -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName "plugin\Release\IslandChatterNative.aex" } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Get-Item | Sort-Object -Property LastWriteTime -Descending)
+    if ($candidates.Count -eq 0) {
+        throw ("Build the native plug-in first. No IslandChatterNative.aex found under " +
+            (Join-Path $repoRoot "native\build*\plugin\Release"))
+    }
+    $resolvedAex = $candidates[0].FullName
+    if ($candidates.Count -gt 1) {
+        Write-Host "Multiple builds found; using the newest:"
+        $candidates | ForEach-Object { Write-Host ("  {0}  {1}" -f $_.LastWriteTime, $_.FullName) }
+    }
 }
+
+# A plug-in older than the sources it is compiled from is the one mistake this
+# script must never let through. Only what actually links into the .aex counts:
+# native/tests and native/tools build separate executables, and the panel .jsx
+# and readings .jsxinc ship as their own files and are copied fresh below.
+$aexTime = (Get-Item -LiteralPath $resolvedAex).LastWriteTime
+$compiledExtensions = @(".cpp", ".hpp", ".h", ".r", ".cmake", ".txt")
+$compiledRoots = @("src", "include", "generated", "plugin", "cmake") |
+    ForEach-Object { Join-Path (Join-Path $repoRoot "native") $_ }
+$compiledRoots += (Join-Path $repoRoot "native\CMakeLists.txt")
+$newestSource = $compiledRoots |
+    Where-Object { Test-Path -LiteralPath $_ } |
+    ForEach-Object {
+        if (Test-Path -LiteralPath $_ -PathType Leaf) { Get-Item -LiteralPath $_ }
+        else { Get-ChildItem -LiteralPath $_ -Recurse -File -ErrorAction SilentlyContinue }
+    } |
+    Where-Object { $compiledExtensions -contains $_.Extension.ToLowerInvariant() } |
+    Sort-Object -Property LastWriteTime -Descending |
+    Select-Object -First 1
+if ($newestSource -and $newestSource.LastWriteTime -gt $aexTime) {
+    throw ("The plug-in is older than its sources. Rebuild before packaging.`n" +
+        "  plug-in: $resolvedAex ($aexTime)`n" +
+        "  source:  $($newestSource.FullName) ($($newestSource.LastWriteTime))")
+}
+Write-Host "Packaging plug-in: $resolvedAex ($aexTime)"
 
 $distRoot = Join-Path $repoRoot "dist"
 $stageRoot = Join-Path $distRoot "Island-Chatter-AE-$Version-Windows-x64"

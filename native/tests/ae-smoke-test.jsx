@@ -1,11 +1,15 @@
 #target aftereffects
 
 (function () {
-    var root = "G:/AICODE/island-chatter-ae";
+    var scriptFile = new File($.fileName);
+    var root = scriptFile.parent.parent.parent.fsName.replace(/\\/g, "/");
     var report = new File(root + "/ae-smoke-test-result.txt");
     var EFFECT_NAME = "Island Chatter Native";
     var TONE_MATCH_NAME = "ADBE Aud Tone";
+    // 1 implicit input + 75 registered parameters. After Effects also reports a
+    // trailing built-in group, so the scripted count matches by construction.
     var EXPECTED_PARAMETERS = 76;
+    var EXPECTED_VERSION = "1.0.2";
     var ownsProject = false;
 
     function writeReport(message) {
@@ -79,9 +83,23 @@
             throw new Error("Source Text changed during direct-audio setup.");
         }
 
+        // AE scripting cannot read a plug-in's PiPL version, so confirming the
+        // installed .aex really is this build stays a manual About-box check.
+        var installed = null;
+        var effectIndex;
+        for (effectIndex = 0; effectIndex < app.effects.length; effectIndex += 1) {
+            if (app.effects[effectIndex].matchName === EFFECT_NAME) {
+                installed = app.effects[effectIndex];
+                break;
+            }
+        }
+        if (!installed) {
+            throw new Error("Island Chatter Native is not registered with After Effects.");
+        }
+
         writeReport(
             "PASS\n" +
-            "Version: 1.0.1\n" +
+            "Version (expected, verify in About): " + EXPECTED_VERSION + "\n" +
             "Layer: " + layer.name + "\n" +
             "Tone: " + tone.name + " (level 0)\n" +
             "Effect: " + effect.name + "\n" +

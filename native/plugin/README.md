@@ -15,7 +15,16 @@ The adapter deliberately keeps the synthesis engine independent from After Effec
 | 5 | Consonant | visible slider |
 | 6 | UTF-16 length | hidden |
 | 7-70 | UTF-16 code units | hidden |
+| 71 | Emotion | visible popup |
+| 72 | Character size | visible popup |
+| 73 | Clarity | visible slider |
+| 74 | Cuteness | visible slider |
+| 75 | Seed | visible slider |
+
+Index 0 is the implicit input, so `params.hpp` counts 76 slots in total.
 
 Do not reorder these parameters after a public build. After Effects serializes effect parameters by index in project files.
+
+Pitch, Speed, Volume and Consonant are keyframeable, but After Effects hands an audio effect one parameter snapshot per audio block. Changing them over time forces a fresh synthesis of the whole utterance per block, and animating Speed also shifts every syllable's start time, so block boundaries can step audibly. Set them once per layer and animate the layer's own Audio Levels for volume moves.
 
 The implementation and PiPL resource are generated only against the current official SDK. Adobe's headers and PiPL tools are not vendored or redistributed.

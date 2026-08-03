@@ -10,3 +10,8 @@ native/data/
 native-preview.wav
 ae-smoke-test-result.txt
 dist/
+ae-typeon-verify-result.txt
+ae-text-animator-probe-result.txt
+ae-host-regression-result.txt
+ae-audio-render-result.txt
+ae-audio-render-output.*
