@@ -1,10 +1,11 @@
 {
   "name": "island-chatter-ae",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Original procedural character-chatter audio generator for Adobe After Effects",
   "scripts": {
-    "test": "node tests/validate-script.js"
+    "test": "node tests/validate-script.js",
+    "preview": "node tools/render-preview.js"
   },
   "license": "MIT",
   "engines": {
