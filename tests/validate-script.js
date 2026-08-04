@@ -259,9 +259,20 @@ for (const [label, expected] of [
   if (!new RegExp(`settings\\.speed \\*= ${expected.replace(".", "\\.")};`).test(dspSource)) {
     throw new Error(`Native speed multiplier for ${label} (${expected}) changed`);
   }
-  if (!new RegExp(`speed \\*= ${expected.replace(".", "\\.")};`).test(nativePanelSource)) {
-    throw new Error(`Panel effectiveSpeed() is missing the ${label} multiplier ${expected}`);
+  if (!new RegExp(`factor \\*= ${expected.replace(".", "\\.")};`).test(nativePanelSource)) {
+    throw new Error(`Panel styleSpeedMultiplier() is missing the ${label} multiplier ${expected}`);
   }
+}
+// A tempo fixes the effective speed, but the Speed slider holds the value before
+// the engine applies the style multiplier, so speedForTempo() must divide it out.
+// Without that the tempo drifts with emotion and character size: Sleepy ran 28%
+// slow while Neutral looked exact, because Neutral's multiplier is 1.
+if (!/return target \/ styleSpeedMultiplier\(emotion, characterSize\);/.test(nativePanelSource)) {
+  throw new Error("speedForTempo() must divide out the style multiplier, or BPM drifts per emotion");
+}
+if (!/emotion\.onChange = refreshTempo;/.test(nativePanelSource) ||
+    !/characterSize\.onChange = refreshTempo;/.test(nativePanelSource)) {
+  throw new Error("Changing emotion or character size must recompute the tempo-derived Speed");
 }
 for (const seconds of ["0.188", "0.148", "0.012", "0.055", "0.105", "0.190", "0.155",
   "0.215", "0.195", "0.235", "0.300", "0.125", "0.165"]) {
@@ -335,12 +346,42 @@ vm.runInContext([
   takeVariable("MAX_SPEED"),
   takeVariable("IC_PHRASE_READINGS"),
   takeVariable("IC_NEUTRAL_PARTICLES"),
+  takeVariable("SYLLABLE_STRIDE"),
+  takeVariable("MIN_SPEED"),
+  takeVariable("MAX_SPEED"),
   ...["clamp", "codePointAt", "isSpaceCode", "isPunctuationCode", "punctuationSeconds",
     "mouthForReading", "readingTone", "replaceReadingTone", "isNeutralParticle", "isNumberCode",
     "yiKeepsCitationTone", "readingForCodePoint", "isLatinLetter", "isLatinVowel",
     "characterFromCode", "matchesPhrase", "applySandhi", "buildSpeechUnits", "estimateSpeech",
-    "effectiveSpeed"].map(takeFunction),
+    "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo"].map(takeFunction),
 ].join("\n"), planner);
+
+// Tempo mode across every emotion and character size. The original version only
+// divided the tempo by the syllable slot and ignored the multiplier the engine
+// applies on top, so the beat drifted with the character: Sleepy ran 28% slow.
+// Neutral and Question were the only combinations that looked right, and those
+// were the two the first version of this test happened to use.
+for (const bpm of [60, 90, 120, 174]) {
+  for (const perBeat of [1, 2, 4]) {
+    for (let emotion = 0; emotion < 7; emotion += 1) {
+      for (let size = 0; size < 4; size += 1) {
+        const slider = vm.runInContext(
+          `speedForTempo(${bpm}, ${perBeat}, ${emotion}, ${size})`, planner);
+        const effective = vm.runInContext(
+          `effectiveSpeed({ speed: ${slider}, emotion: ${emotion}, characterSize: ${size} })`,
+          planner);
+        // 0.188 s of voice plus a 0.012 s gap, divided by the effective speed.
+        const perSyllable = 0.2 / effective;
+        const target = 60 / bpm / perBeat;
+        if (Math.abs(perSyllable - target) > target * 0.001) {
+          throw new Error(
+            `tempo drift at ${bpm} BPM, ${perBeat}/beat, emotion ${emotion}, size ${size}: ` +
+            `${perSyllable.toFixed(5)}s per syllable, expected ${target.toFixed(5)}s`);
+        }
+      }
+    }
+  }
+}
 
 for (const [text, emotion, size, events, duration, readings] of [
   ["你好，今天一起去散步。", 0, 2, 9, 2.240, "ni2,hao3,jin1,tian1,yi4,qi3,qu4,san4,bu4"],

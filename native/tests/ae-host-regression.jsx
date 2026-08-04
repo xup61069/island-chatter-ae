@@ -259,10 +259,24 @@
             "the user's own effect survived removal");
 
         // --- 9. tempo mode -----------------------------------------------------
-        check(Math.abs(speedForTempo(120, 2) - 0.8) < 1e-9,
-            "speedForTempo(120, 2) should be 0.8, got " + speedForTempo(120, 2));
-        check(Math.abs(speedForTempo(60, 1) - 0.2) < 1e-9,
-            "speedForTempo(60, 1) should be 0.2, got " + speedForTempo(60, 1));
+        check(Math.abs(speedForTempo(120, 2, 0, 2) - 0.8) < 1e-9,
+            "speedForTempo(120, 2, neutral, adult) should be 0.8, got " + speedForTempo(120, 2, 0, 2));
+        check(Math.abs(speedForTempo(60, 1, 0, 2) - 0.2) < 1e-9,
+            "speedForTempo(60, 1, neutral, adult) should be 0.2, got " + speedForTempo(60, 1, 0, 2));
+        // The engine scales Speed again per emotion and size, so the tempo has to
+        // divide that out or the beat drifts with the character.
+        var tempoOk = true;
+        var emotionAt;
+        var sizeAt;
+        for (emotionAt = 0; emotionAt < 7; emotionAt += 1) {
+            for (sizeAt = 0; sizeAt < 4; sizeAt += 1) {
+                var derived = speedForTempo(120, 2, emotionAt, sizeAt);
+                var actual = 0.2 / effectiveSpeed(
+                    { speed: derived, emotion: emotionAt, characterSize: sizeAt });
+                if (Math.abs(actual - 0.25) > 0.00025) { tempoOk = false; }
+            }
+        }
+        check(tempoOk, "120 BPM at 2/beat stays on the grid for every emotion and size");
         var tempoLayer = comp.layers.addText("節拍測試一二三四");
         var tempoSettings = {
             voice: 0, pitch: 1, speed: speedForTempo(120, 2), volume: 0.78, consonant: 1.25,
@@ -282,6 +296,49 @@
             if (Math.abs(at / slot - Math.round(at / slot)) > 0.02) { onGrid = false; }
         }
         check(onGrid, "every marker landed on the tempo grid");
+
+        // --- 10. reading a layer's settings back -------------------------------
+        var readLayer = comp.layers.addText("讀取測試");
+        var stored = {
+            voice: 5, pitch: 1.37, speed: 0.63, volume: 1.42, consonant: 2.11,
+            emotion: 3, characterSize: 1, clarity: 0.41, cuteness: 0.87, seed: 31337,
+            tempoLock: true
+        };
+        attempt("apply a distinctive set of settings", function () {
+            applyToTextLayer(comp, readLayer, "", stored, options);
+        });
+        var readEffect = findNativeEffect(readLayer);
+        var readBack = readEffect ? settingsFromEffect(readEffect) : null;
+        check(readBack !== null, "settings can be read back off the layer");
+        if (readBack) {
+            var fields = ["voice", "emotion", "characterSize", "seed"];
+            var exact = true;
+            var f;
+            for (f = 0; f < fields.length; f += 1) {
+                if (readBack[fields[f]] !== stored[fields[f]]) {
+                    exact = false;
+                    log("    " + fields[f] + ": read " + readBack[fields[f]] +
+                        ", stored " + stored[fields[f]]);
+                }
+            }
+            check(exact, "voice, emotion, size and seed round-trip exactly");
+            var floats = ["pitch", "speed", "volume", "consonant", "clarity", "cuteness"];
+            var close = true;
+            for (f = 0; f < floats.length; f += 1) {
+                if (Math.abs(readBack[floats[f]] - stored[floats[f]]) > 0.005) {
+                    close = false;
+                    log("    " + floats[f] + ": read " + readBack[floats[f]] +
+                        ", stored " + stored[floats[f]]);
+                }
+            }
+            check(close, "the continuous controls round-trip within slider precision");
+            check(readBack.tempoLock === true, "tempo lock round-trips");
+            // A tempo-locked layer stores only Speed; the BPM has to come back out.
+            var impliedBpm = tempoForSpeed(readBack.speed, 2, readBack.emotion, readBack.characterSize);
+            var reDerived = speedForTempo(impliedBpm, 2, readBack.emotion, readBack.characterSize);
+            check(Math.abs(reDerived - readBack.speed) < 1e-9,
+                "Speed -> BPM -> Speed round-trips (" + impliedBpm.toFixed(2) + " BPM)");
+        }
 
         log("");
         log("checks: " + checks + "   failures: " + failures);

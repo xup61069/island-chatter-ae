@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(IslandChatterNative VERSION 1.0.3 LANGUAGES CXX)
+project(IslandChatterNative VERSION 1.0.4 LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
 

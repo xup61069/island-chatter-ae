@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.4 - 2026-08-04
+
+- Fix Tempo mode drifting with the character. The tempo sets how fast syllables should
+  arrive, but the engine multiplies Speed again by emotion and character size, and the
+  panel was not dividing that back out. Sleepy ran 28% slow, Scared with a Tiny character
+  19% fast, and only Neutral and Question at Adult size were ever on the beat, because
+  those are the combinations whose multiplier is 1. Verified against the engine across
+  112 tempo, emotion and size combinations: worst error is now 0.001%.
+- Recompute the tempo-derived Speed when emotion, character size, a preset or Randomize
+  changes any of them, and stop the panel's own writes to the Speed slider from being
+  mistaken for a manual drag and switching tempo mode off.
+- Add Read selected layer: pulls the layer's text and, when Island Chatter is already
+  applied, every voice setting back into the panel. A tempo-locked layer stores only the
+  resulting Speed, so the BPM is derived back from it and round-trips exactly.
+- Relicense from MIT to a source-available licence. Builds are sold, and MIT explicitly
+  permitted anyone to compile and redistribute or sell them. The source stays public and
+  buildable for personal use, including paid client work; passing a build to someone else
+  is what is no longer permitted. Releases v1.0.0 to v1.0.3 remain MIT for anyone who
+  obtained them.
+
 ## 1.0.3 - 2026-08-04
 
 Performance:
