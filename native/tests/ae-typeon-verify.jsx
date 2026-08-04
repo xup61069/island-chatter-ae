@@ -32,7 +32,7 @@
         var names = ["valuesDiffer", "setPropertyValue", "clearKeys", "setHoldKey",
             "setEasedKey", "findNamedProperty", "findPropertyByMatchName",
             "setRevealSmoothness", "textFromLayer", "measureRevealWidths",
-            "updateTypeOnCentering", "updateTypeOn"];
+            "typeOnCurve", "updateTypeOnCentering", "updateTypeOn"];
         var code = [];
         for (var n = 0; n < names.length; n += 1) { code.push(take(names[n])); }
         // Constants the extracted functions compare against.
@@ -40,6 +40,8 @@
         code.push(source.substring(defaultStart, source.indexOf(";", defaultStart) + 1));
         var centerStart = source.indexOf("var CENTER_ANIMATOR_NAME =");
         code.push(source.substring(centerStart, source.indexOf(";", centerStart) + 1));
+        var curvesStart = source.indexOf("var TYPEON_CURVES =");
+        code.push(source.substring(curvesStart, source.indexOf("];", curvesStart) + 2));
         eval(code.join("\n"));
         log("extracted from the repository panel: " + names.join(", "));
 
@@ -216,6 +218,66 @@
                 log(eased ? "PASS  keyframes are eased, not held"
                           : "FAIL  keyframes are not eased");
                 if (!eased) { ok = false; }
+
+                // The default must actually be fast-to-slow: leaving a key at
+                // speed, arriving at the next one decelerating. Equal influence
+                // on both sides would read as slow-fast-slow instead.
+                var probeKey = Math.min(2, offsetProp.numKeys);
+                var outInf = offsetProp.keyOutTemporalEase(probeKey)[0].influence;
+                var inInf = offsetProp.keyInTemporalEase(probeKey)[0].influence;
+                log("default curve influence: out " + outInf.toFixed(1) +
+                    ", in " + inInf.toFixed(1));
+                if (!(inInf > outInf * 5)) {
+                    ok = false;
+                    log("FAIL  the default curve is not fast-to-slow");
+                } else {
+                    log("PASS  the default curve decelerates into each position");
+                }
+            }
+        }
+
+        // Every curve preset must reach the host intact.
+        var curveNames = ["fast-to-slow", "slow-to-fast", "smooth", "linear"];
+        var curveIndex;
+        for (curveIndex = 0; curveIndex < 4; curveIndex += 1) {
+            updateTypeOnCentering(comp, layer, plan, typeOnCurve(curveIndex));
+            var animatorsNow = layer.property("ADBE Text Properties").property("ADBE Text Animators");
+            var centerNow = null;
+            var n;
+            for (n = 1; n <= animatorsNow.numProperties; n += 1) {
+                if (animatorsNow.property(n).name === CENTER_ANIMATOR_NAME) {
+                    centerNow = animatorsNow.property(n);
+                }
+            }
+            var propsNow = centerNow.property("ADBE Text Animator Properties");
+            var offsetNow = null;
+            for (n = 1; n <= propsNow.numProperties; n += 1) {
+                if (propsNow.property(n).matchName === "ADBE Text Position 3D") {
+                    offsetNow = propsNow.property(n);
+                }
+            }
+            var key = Math.min(2, offsetNow.numKeys);
+            var expected = typeOnCurve(curveIndex);
+            if (expected.linear) {
+                var isLinear =
+                    offsetNow.keyOutInterpolationType(key) === KeyframeInterpolationType.LINEAR;
+                log((isLinear ? "PASS  " : "FAIL  ") + curveNames[curveIndex] + " is linear");
+                if (!isLinear) { ok = false; }
+            } else {
+                var gotOut = offsetNow.keyOutTemporalEase(key)[0].influence;
+                var gotIn = offsetNow.keyInTemporalEase(key)[0].influence;
+                var matches = Math.abs(gotOut - expected.outInfluence) < 1 &&
+                    Math.abs(gotIn - expected.inInfluence) < 1;
+                log((matches ? "PASS  " : "FAIL  ") + curveNames[curveIndex] +
+                    " -> out " + gotOut.toFixed(1) + ", in " + gotIn.toFixed(1) +
+                    " (wanted " + expected.outInfluence + "/" + expected.inInfluence + ")");
+                if (!matches) { ok = false; }
+            }
+        }
+        // Restore the default for the repeat check below.
+        updateTypeOnCentering(comp, layer, plan, typeOnCurve(0));
+        if (true) {
+            if (true) {
             }
         }
 
