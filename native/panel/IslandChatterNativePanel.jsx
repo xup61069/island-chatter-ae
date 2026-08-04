@@ -530,6 +530,25 @@
         for (index = property.numKeys; index >= 1; index -= 1) { property.removeKey(index); }
     }
 
+    // Smooth keyframe, used for the recentring glide. Hold keys would make the
+    // text jump sideways on every character.
+    function setEasedKey(property, time, value) {
+        property.setValueAtTime(time, value);
+        try {
+            var index = property.nearestKeyIndex(time);
+            property.setInterpolationTypeAtKey(index,
+                KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
+            var ease = new KeyframeEase(0, 60);
+            var dimensions = property.value.length ? property.value.length : 1;
+            var eases = [];
+            var at;
+            for (at = 0; at < dimensions; at += 1) { eases.push(ease); }
+            property.setTemporalEaseAtKey(index, eases, eases);
+        } catch (error) {
+            // Older hosts may reject the ease; the motion still lands correctly.
+        }
+    }
+
     function setHoldKey(property, time, value) {
         property.setValueAtTime(time, value);
         try {
@@ -627,6 +646,99 @@
             }
         } catch (ignored) {
             // Older hosts may not expose it; the reveal still works.
+        }
+    }
+
+    /*
+     * Keeping the reveal centred.
+     *
+     * Type-On hides characters with an opacity animator, which does not reflow
+     * the text: the full block stays laid out and the visible run grows out of
+     * its left edge. On a centre-justified layer that reads as the text sliding
+     * right rather than typing in place.
+     *
+     * Re-flowing would mean keyframing Source Text, which is off limits -- the
+     * panel reads Source Text back as the authority on what to speak, and a
+     * partial value would be written into the effect on the next Apply.
+     *
+     * Instead the width of each partial string is measured once, at Apply time,
+     * and a second animator shifts every glyph right by half the missing width.
+     * At the end the offset is zero, so the final frame is exactly the layout
+     * After Effects would have produced anyway.
+     */
+    var CENTER_ANIMATOR_NAME = "Island Chatter Center";
+
+    // Measured on a throwaway text layer built from the same TextDocument, so
+    // the real Source Text is never written to and the real layer's effects are
+    // not duplicated along with it.
+    function measureRevealWidths(comp, layer, counts) {
+        var source = layer.property("ADBE Text Properties").property("ADBE Text Document").value;
+        var full = String(source.text);
+        var probe = comp.layers.addText(source);
+        var widths = [];
+        try {
+            var document = probe.property("ADBE Text Properties").property("ADBE Text Document");
+            // sourceRectAtTime returns an empty rect outside the layer's own
+            // span, so measure somewhere the probe is definitely live.
+            var at = probe.inPoint + Math.min(0.1, (probe.outPoint - probe.inPoint) / 2);
+            var index;
+            for (index = 0; index < counts.length; index += 1) {
+                var value = document.value;
+                value.text = full.substring(0, counts[index]);
+                document.setValue(value);
+                widths.push(probe.sourceRectAtTime(at, false).width);
+            }
+        } finally {
+            try { probe.remove(); } catch (removeError) { /* already gone */ }
+        }
+        return widths;
+    }
+
+    function updateTypeOnCentering(comp, layer, plan) {
+        var text = textFromLayer(layer);
+        var total = text.length;
+        var steps = plan.events.length;
+        if (total < 2 || steps < 1) { return; }
+
+        // The range selector works in percent of characters, so each reveal step
+        // exposes this many of them.
+        var counts = [];
+        var index;
+        for (index = 0; index < steps; index += 1) {
+            counts.push(Math.round((index + 1) / steps * total));
+        }
+        counts.push(total);
+        var widths = measureRevealWidths(comp, layer, counts);
+        var full = widths[widths.length - 1];
+        // A zero width means the measurement did not work on this host; leaving
+        // the offset alone is better than shifting the text by a wrong amount.
+        if (!full) { return; }
+
+        var animators = layer.property("ADBE Text Properties").property("ADBE Text Animators");
+        var animator = findNamedProperty(animators, CENTER_ANIMATOR_NAME);
+        if (!animator) {
+            animators.addProperty("ADBE Text Animator").name = CENTER_ANIMATOR_NAME;
+            animator = findNamedProperty(
+                layer.property("ADBE Text Properties").property("ADBE Text Animators"),
+                CENTER_ANIMATOR_NAME);
+        }
+        // Adding is unconditional: every animator property is always listed as a
+        // child whether or not it exists, so presence cannot be tested.
+        animator.property("ADBE Text Animator Properties").addProperty("ADBE Text Position 3D");
+        animator = findNamedProperty(
+            layer.property("ADBE Text Properties").property("ADBE Text Animators"),
+            CENTER_ANIMATOR_NAME);
+        var offset = findPropertyByMatchName(
+            animator.property("ADBE Text Animator Properties"), "ADBE Text Position 3D");
+        if (!offset) { return; }
+
+        clearKeys(offset);
+        // Half the width still to come, so the visible run stays over the anchor.
+        setEasedKey(offset, layer.inPoint, [(full - widths[0]) / 2, 0, 0]);
+        for (index = 0; index < steps; index += 1) {
+            var at = layer.inPoint + plan.events[index].time +
+                plan.events[index].duration * 0.55;
+            setEasedKey(offset, at, [(full - widths[index]) / 2, 0, 0]);
         }
     }
 
@@ -800,7 +912,10 @@
         }
         if (options.markers) { updateTimingMarkers(textLayer, plan); }
         if (options.controllers) { updateAnimationControls(textLayer, plan); }
-        if (options.typeOn) { updateTypeOn(textLayer, plan, comp.time); }
+        if (options.typeOn) {
+            updateTypeOn(textLayer, plan, comp.time);
+            if (options.typeOnCenter) { updateTypeOnCentering(comp, textLayer, plan); }
+        }
         return truncated;
     }
 
@@ -831,7 +946,9 @@
         }
         var animators = layer.property("ADBE Text Properties").property("ADBE Text Animators");
         for (index = animators.numProperties; index >= 1; index -= 1) {
-            if (animators.property(index).name === "Island Chatter Type-On") {
+            var animatorName = animators.property(index).name;
+            if (animatorName === "Island Chatter Type-On" ||
+                    animatorName === CENTER_ANIMATOR_NAME) {
                 animators.property(index).remove();
                 removed += 1;
             }
@@ -1305,6 +1422,11 @@
         controllers.value = true;
         var typeOn = animationRow.add("checkbox", undefined, "Type-On / 逐字顯示");
         typeOn.value = false;
+        var typeOnCenter = animationRow.add("checkbox", undefined, "Center / 維持置中");
+        typeOnCenter.value = true;
+        typeOnCenter.helpTip = "Keep the revealed text centred as it types on, gliding into" +
+            " place instead of growing out of the left edge. For centre-justified text." +
+            "\n讓已顯示的文字保持置中並平滑滑動，而不是從左邊長出來。適用於置中對齊的文字。";
 
         var applyButton = panel.add("button", undefined,
             "Apply to selected text layers / 套用到選取文字圖層");
@@ -1414,7 +1536,8 @@
                     markers: markers.value,
                     fitDuration: fitDuration.value,
                     controllers: controllers.value,
-                    typeOn: typeOn.value
+                    typeOn: typeOn.value,
+                    typeOnCenter: typeOnCenter.value
                 });
                 status.text = "Applied to " + applied.count + " layer(s) / 已套用 " +
                     applied.count + " 個圖層";

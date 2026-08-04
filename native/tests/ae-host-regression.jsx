@@ -70,7 +70,8 @@
             voice: 1, pitch: 1.0, speed: 1.0, volume: 0.78, consonant: 1.25,
             emotion: 5, characterSize: 0, clarity: 0.78, cuteness: 0.55, seed: 4242
         };
-        var options = { markers: true, fitDuration: true, controllers: true, typeOn: true };
+        var options = { markers: true, fitDuration: true, controllers: true, typeOn: true,
+            typeOnCenter: true };
         var TEXT = "你好，島民！今天天氣真好。";
 
         app.beginUndoGroup("Island Chatter host regression");
