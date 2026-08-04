@@ -36,12 +36,10 @@
         var code = [];
         for (var n = 0; n < names.length; n += 1) { code.push(take(names[n])); }
         // Constants the extracted functions compare against.
-        var defaultStart = source.indexOf("var AE_DEFAULT_SMOOTHNESS =");
-        code.push(source.substring(defaultStart, source.indexOf(";", defaultStart) + 1));
         var centerStart = source.indexOf("var CENTER_ANIMATOR_NAME =");
         code.push(source.substring(centerStart, source.indexOf(";", centerStart) + 1));
         var influenceNames = ["MIN_INFLUENCE", "MAX_INFLUENCE",
-            "DEFAULT_OUT_INFLUENCE", "DEFAULT_IN_INFLUENCE"];
+            "ARRIVE_INFLUENCE", "DEFAULT_LEAVE_INFLUENCE", "DEFAULT_SMOOTHNESS"];
         var inf;
         for (inf = 0; inf < influenceNames.length; inf += 1) {
             var start = source.indexOf("var " + influenceNames[inf] + " =");
@@ -61,7 +59,7 @@
 
         function attempt(label) {
             try {
-                updateTypeOn(layer, plan, 0);
+                updateTypeOn(layer, plan, 0, typeOnCurve(), 40);
                 log("PASS  " + label);
                 return true;
             } catch (err) {
@@ -119,21 +117,47 @@
                 }
             }
         }
-        log("Smoothness: " + (smoothness ? smoothness.value : "<not found>") + " (expected 0)");
-        if (!smoothness || smoothness.value !== 0) {
-            ok = false;
-            log("FAIL  Smoothness was not defaulted to 0");
-        } else {
-            log("PASS  Smoothness defaulted to 0");
+        // Smoothness is a panel slider now, so every value must reach the host.
+        var smoothOk = true;
+        var wantSmooth;
+        for (var sIndex = 0; sIndex < 4; sIndex += 1) {
+            wantSmooth = [0, 25, 40, 100][sIndex];
+            updateTypeOn(layer, plan, 0, typeOnCurve(), wantSmooth);
+            if (Math.abs(smoothness.value - wantSmooth) > 0.01) {
+                smoothOk = false;
+                log("    smoothness " + wantSmooth + " read back as " + smoothness.value);
+            }
         }
-        // A deliberate value must survive a later apply.
-        smoothness.setValue(35);
-        updateTypeOn(layer, plan, 0);
-        log(smoothness.value === 35
-            ? "PASS  a user's own Smoothness (35) was left alone"
-            : "FAIL  a user's own Smoothness was overwritten with " + smoothness.value);
-        if (smoothness.value !== 35) { ok = false; }
-        smoothness.setValue(0);
+        log(smoothOk ? "PASS  every Smoothness value reaches the selector"
+                     : "FAIL  Smoothness did not round-trip");
+        if (!smoothOk) { ok = false; }
+
+        // The reveal itself must follow the curve now, not hold.
+        updateTypeOn(layer, plan, 0, typeOnCurve(0.1), 40);
+        var revealEased =
+            startProp.keyOutInterpolationType(1) === KeyframeInterpolationType.BEZIER;
+        log(revealEased ? "PASS  the reveal keyframes follow the curve"
+                        : "FAIL  the reveal keyframes are still held");
+        if (!revealEased) { ok = false; }
+        var revealKey = Math.min(2, startProp.numKeys);
+        var revealOut = startProp.keyOutTemporalEase(revealKey)[0].influence;
+        var revealIn = startProp.keyInTemporalEase(revealKey)[0].influence;
+        log("reveal influence: out " + revealOut.toFixed(1) + ", in " + revealIn.toFixed(1) +
+            " (expected 0.1 / " + ARRIVE_INFLUENCE + ")");
+        if (Math.abs(revealOut - 0.1) > 1 || Math.abs(revealIn - ARRIVE_INFLUENCE) > 1) {
+            ok = false;
+            log("FAIL  the reveal curve does not match the Leave slider");
+        } else {
+            log("PASS  the reveal curve matches the Leave slider");
+        }
+        // The Leave slider must actually move the reveal, not just the glide.
+        updateTypeOn(layer, plan, 0, typeOnCurve(70), 40);
+        var movedOut = startProp.keyOutTemporalEase(revealKey)[0].influence;
+        log(Math.abs(movedOut - 70) < 1
+            ? "PASS  Leave 70 reaches the reveal (" + movedOut.toFixed(1) + ")"
+            : "FAIL  Leave 70 did not reach the reveal (" + movedOut.toFixed(1) + ")");
+        if (Math.abs(movedOut - 70) > 1) { ok = false; }
+        updateTypeOn(layer, plan, 0, typeOnCurve(), 40);
 
         // Now the case the previous fix was aimed at: user keyframes the
         // properties the panel writes, then applies again.
@@ -243,10 +267,10 @@
 
         // Any pair of slider values must reach the host intact, including the
         // clamped ends of the range.
-        var pairs = [[0.1, 80], [80, 0.1], [50, 50], [0.1, 0.1], [100, 100], [-5, 250]];
+        var pairs = [[0.1], [25], [50], [100], [-5], [250]];
         var pairIndex;
         for (pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
-            var wanted = typeOnCurve(pairs[pairIndex][0], pairs[pairIndex][1]);
+            var wanted = typeOnCurve(pairs[pairIndex][0]);
             updateTypeOnCentering(comp, layer, plan, wanted);
             var animatorsNow = layer.property("ADBE Text Properties").property("ADBE Text Animators");
             var centerNow = null;
@@ -269,7 +293,7 @@
             var matches = Math.abs(gotOut - wanted.outInfluence) < 1 &&
                 Math.abs(gotIn - wanted.inInfluence) < 1;
             log((matches ? "PASS  " : "FAIL  ") + "leave " + pairs[pairIndex][0] +
-                " / arrive " + pairs[pairIndex][1] + " -> out " + gotOut.toFixed(1) +
+                " -> out " + gotOut.toFixed(1) +
                 ", in " + gotIn.toFixed(1) + " (wanted " + wanted.outInfluence +
                 "/" + wanted.inInfluence + ")");
             if (!matches) { ok = false; }

@@ -547,18 +547,18 @@
     // linear as a Bezier key gets.
     var MIN_INFLUENCE = 0.1;
     var MAX_INFLUENCE = 100;
-    // Leaves at speed, decelerates into place.
-    var DEFAULT_OUT_INFLUENCE = 0.1;
-    var DEFAULT_IN_INFLUENCE = 80;
+    // Only the outgoing side is exposed. The incoming side is pinned to full
+    // influence so motion always settles rather than arriving at speed, which
+    // is the shape this effect wants and leaves one number to think about.
+    var ARRIVE_INFLUENCE = 100;
+    var DEFAULT_LEAVE_INFLUENCE = 0.1;
 
-    function typeOnCurve(outInfluence, inInfluence) {
+    function typeOnCurve(leaveInfluence) {
         return {
             outInfluence: clamp(
-                outInfluence === undefined ? DEFAULT_OUT_INFLUENCE : outInfluence,
+                leaveInfluence === undefined ? DEFAULT_LEAVE_INFLUENCE : leaveInfluence,
                 MIN_INFLUENCE, MAX_INFLUENCE),
-            inInfluence: clamp(
-                inInfluence === undefined ? DEFAULT_IN_INFLUENCE : inInfluence,
-                MIN_INFLUENCE, MAX_INFLUENCE)
+            inInfluence: ARRIVE_INFLUENCE
         };
     }
 
@@ -670,17 +670,12 @@
         return null;
     }
 
-    // A Range Selector arrives with Smoothness at 100%, which ramps each
-    // character in across the selector edge. Type-On reveals one character at a
-    // time on a syllable, so that ramp just softens every reveal; 0 makes each
-    // character land cleanly.
-    //
-    // Only After Effects' own default is replaced. Any other value is treated as
-    // a deliberate choice and left alone, so this does not fight the user on
-    // every Apply.
-    var AE_DEFAULT_SMOOTHNESS = 100;
+    // How softly each character crosses the selector edge. This only does
+    // anything because the reveal keyframes interpolate: with the hold keys used
+    // before, the edge jumped instantly and there was nothing to soften.
+    var DEFAULT_SMOOTHNESS = 40;
 
-    function setRevealSmoothness(selector, time) {
+    function setRevealSmoothness(selector, amount, time) {
         if (!selector) { return; }
         var advanced = findPropertyByMatchName(selector, "ADBE Text Range Advanced");
         if (!advanced) { return; }
@@ -688,10 +683,7 @@
         if (!smoothness) { smoothness = findNamedProperty(advanced, "Smoothness"); }
         if (!smoothness) { return; }
         try {
-            if (smoothness.numKeys === 0 &&
-                    !valuesDiffer(smoothness.value, AE_DEFAULT_SMOOTHNESS)) {
-                smoothness.setValue(0);
-            }
+            setPropertyValue(smoothness, clamp(amount, 0, 100), time);
         } catch (ignored) {
             // Older hosts may not expose it; the reveal still works.
         }
@@ -790,7 +782,7 @@
         }
     }
 
-    function updateTypeOn(layer, plan, time) {
+    function updateTypeOn(layer, plan, time, curve, smoothness) {
         // addProperty() invalidates every Property handle obtained before it,
         // so the animator group is reacquired from the text property each time
         // rather than being held across a mutation.
@@ -826,7 +818,7 @@
         }
         setRevealSmoothness(
             findNamedProperty(animator.property("ADBE Text Selectors"), "Island Chatter Reveal"),
-            time);
+            smoothness === undefined ? DEFAULT_SMOOTHNESS : smoothness, time);
         var opacity = findPropertyByMatchName(
             animator.property("ADBE Text Animator Properties"), "ADBE Text Opacity");
         var selector = findNamedProperty(
@@ -854,14 +846,14 @@
                 " Advanced > Units 改回 Percentage 後再套用一次。\n(" + hidden.toString() + ")");
         }
         clearKeys(start);
-        setHoldKey(start, layer.inPoint, 0);
+        setEasedKey(start, layer.inPoint, 0, curve);
         var index;
         for (index = 0; index < plan.events.length; index += 1) {
             // Named separately: a plain `time` here would shadow this function's
             // own time parameter.
             var revealTime = layer.inPoint + plan.events[index].time +
                 plan.events[index].duration * 0.55;
-            setHoldKey(start, revealTime, (index + 1) / plan.events.length * 100);
+            setEasedKey(start, revealTime, (index + 1) / plan.events.length * 100, curve);
         }
     }
 
@@ -961,10 +953,11 @@
         if (options.markers) { updateTimingMarkers(textLayer, plan); }
         if (options.controllers) { updateAnimationControls(textLayer, plan); }
         if (options.typeOn) {
-            updateTypeOn(textLayer, plan, comp.time);
+            updateTypeOn(textLayer, plan, comp.time,
+                typeOnCurve(options.typeOnLeave), options.typeOnSmoothness);
             if (options.typeOnCenter) {
                 updateTypeOnCentering(comp, textLayer, plan,
-                    typeOnCurve(options.typeOnEaseOut, options.typeOnEaseIn));
+                    typeOnCurve(options.typeOnLeave));
             }
         }
         return truncated;
@@ -1479,20 +1472,21 @@
             " place instead of growing out of the left edge. For centre-justified text." +
             "\n讓已顯示的文字保持置中並平滑滑動，而不是從左邊長出來。適用於置中對齊的文字。";
 
-        // Two influences shape the glide, the same pair After Effects exposes on
-        // a keyframe. Low leaves at speed, high draws the motion out.
-        var easeOut = addSlider(panel, "Leave / 離開", MIN_INFLUENCE, MAX_INFLUENCE,
-            DEFAULT_OUT_INFLUENCE);
-        easeOut.valueField.helpTip = easeOut.helpTip = "How the text leaves each position." +
-            " Low leaves at full speed." +
-            "\n文字離開每個位置的方式，低值代表全速離開。";
-        var easeIn = addSlider(panel, "Arrive / 抵達", MIN_INFLUENCE, MAX_INFLUENCE,
-            DEFAULT_IN_INFLUENCE);
-        easeIn.valueField.helpTip = easeIn.helpTip = "How the text settles into each position." +
-            " High decelerates into place." +
-            "\n文字停進每個位置的方式，高值代表減速停入。" +
-            "\n\nLeave 低 + Arrive 高 = 由快到慢（預設）。兩者都低則接近等速。" +
+        // One influence shapes both the reveal and the recentring glide; the
+        // arriving side is always full, so motion settles rather than stopping
+        // dead. Low leaves at full speed, which is the fast-to-slow default.
+        var easeLeave = addSlider(panel, "Leave / 離開", MIN_INFLUENCE, MAX_INFLUENCE,
+            DEFAULT_LEAVE_INFLUENCE);
+        easeLeave.valueField.helpTip = easeLeave.helpTip =
+            "How the reveal and the recentring leave each position. Low leaves at full" +
+            " speed and settles slowly; high draws the whole move out." +
+            "\n逐字顯示與置中滑動離開每個位置的方式。低值＝全速離開、慢慢停入；高值＝整段拉長。" +
             "\n產生的是一般關鍵影格，之後仍可在圖表編輯器裡自由調整。";
+        var smoothness = addSlider(panel, "Smoothness / 平滑", 0, 100, DEFAULT_SMOOTHNESS);
+        smoothness.valueField.helpTip = smoothness.helpTip =
+            "How softly each character crosses the reveal edge. 0 makes characters pop," +
+            " higher values fade them in." +
+            "\n每個字跨過顯示邊界的柔和程度。0 是直接彈出，越高越像淡入。";
 
         var applyButton = panel.add("button", undefined,
             "Apply to selected text layers / 套用到選取文字圖層");
@@ -1604,8 +1598,8 @@
                     controllers: controllers.value,
                     typeOn: typeOn.value,
                     typeOnCenter: typeOnCenter.value,
-                    typeOnEaseOut: easeOut.value,
-                    typeOnEaseIn: easeIn.value
+                    typeOnLeave: easeLeave.value,
+                    typeOnSmoothness: smoothness.value
                 });
                 status.text = "Applied to " + applied.count + " layer(s) / 已套用 " +
                     applied.count + " 個圖層";
