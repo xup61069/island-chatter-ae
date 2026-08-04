@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.5 - 2026-08-04
+
+- Add Center to Type-On. The opacity-based reveal does not reflow the text, so on a
+  centre-justified layer the visible run grew out of the left edge and the line looked
+  like it was sliding right. Reflowing would mean keyframing Source Text, which the panel
+  reads back as the authority on what to speak, so instead the width of each partial
+  string is measured once at Apply time and a second animator offsets every glyph by half
+  the width still to come. The offset reaches zero on the last character, so the finished
+  frame is exactly the layout After Effects would have produced on its own.
+- The recentring uses eased keyframes rather than holds, so the line glides into place
+  instead of jumping sideways on every character.
+- Remove now also clears the centring animator.
+
 ## 1.0.4 - 2026-08-04
 
 - Fix Tempo mode drifting with the character. The tempo sets how fast syllables should

@@ -19,7 +19,7 @@
 - 多選文字圖層批次套用
 - 可選擇自動配合圖層長度、建立 `IC:` 逐字時間標記
 - 可建立 `IC Mouth`、`IC Volume`、`IC Pitch`、`IC Head Bounce`、`IC Blink` 動畫控制器
-- 可選擇建立不破壞 Source Text 的逐字顯示動畫
+- 可選擇建立不破壞 Source Text 的逐字顯示動畫，並可維持置中、平滑滑動
 - 不含音訊資產；相同設定可重現相同結果
 
 ## 系統需求
