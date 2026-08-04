@@ -530,20 +530,65 @@
         for (index = property.numKeys; index >= 1; index -= 1) { property.removeKey(index); }
     }
 
+    /*
+     * Easing curves for the recentring glide.
+     *
+     * After Effects describes a keyframe by the ease arriving at it and the ease
+     * leaving it, and influence is what bends the curve: a high influence on the
+     * incoming side decelerates into the key, a low one arrives at full speed.
+     * So "fast to slow" is a low outgoing influence paired with a high incoming
+     * one, which is the opposite of a symmetric ease and is why the first
+     * version, using the same value on both sides, read as slow-fast-slow.
+     *
+     * Influence is clamped by the host to 0.1 - 100; 0.1 is as close to linear
+     * as a Bezier key gets.
+     */
+    var TYPEON_CURVES = [
+        { label: "Fast to slow / 由快到慢", outInfluence: 0.1, inInfluence: 80 },
+        { label: "Slow to fast / 由慢到快", outInfluence: 80, inInfluence: 0.1 },
+        { label: "Smooth / 兩端平滑", outInfluence: 50, inInfluence: 50 },
+        { label: "Linear / 線性", linear: true }
+    ];
+
+    function typeOnCurve(index) {
+        return TYPEON_CURVES[index >= 0 && index < TYPEON_CURVES.length ? index : 0];
+    }
+
     // Smooth keyframe, used for the recentring glide. Hold keys would make the
     // text jump sideways on every character.
-    function setEasedKey(property, time, value) {
+    function setEasedKey(property, time, value, curve) {
         property.setValueAtTime(time, value);
+        curve = curve || typeOnCurve(0);
         try {
             var index = property.nearestKeyIndex(time);
+            if (curve.linear) {
+                property.setInterpolationTypeAtKey(index,
+                    KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);
+                return;
+            }
             property.setInterpolationTypeAtKey(index,
                 KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
-            var ease = new KeyframeEase(0, 60);
-            var dimensions = property.value.length ? property.value.length : 1;
-            var eases = [];
+            // Two traps here, both of which fail silently inside this catch and
+            // leave keys that look eased but carry no ease at all:
+            //
+            // Reading property.value on a text animator's Position throws
+            // "invalid numeric result (divide by zero?)", so the dimension count
+            // has to come from the value being written instead.
+            //
+            // And a spatial property -- which Position is, ThreeD_SPATIAL --
+            // takes exactly one temporal ease, not one per dimension. Passing
+            // three gives "Value array does not have 1 elements".
+            var dimensions = property.isSpatial
+                ? 1
+                : ((value && value.length) ? value.length : 1);
+            var incoming = [];
+            var outgoing = [];
             var at;
-            for (at = 0; at < dimensions; at += 1) { eases.push(ease); }
-            property.setTemporalEaseAtKey(index, eases, eases);
+            for (at = 0; at < dimensions; at += 1) {
+                incoming.push(new KeyframeEase(0, curve.inInfluence));
+                outgoing.push(new KeyframeEase(0, curve.outInfluence));
+            }
+            property.setTemporalEaseAtKey(index, incoming, outgoing);
         } catch (error) {
             // Older hosts may reject the ease; the motion still lands correctly.
         }
@@ -694,7 +739,7 @@
         return widths;
     }
 
-    function updateTypeOnCentering(comp, layer, plan) {
+    function updateTypeOnCentering(comp, layer, plan, curve) {
         var text = textFromLayer(layer);
         var total = text.length;
         var steps = plan.events.length;
@@ -734,11 +779,11 @@
 
         clearKeys(offset);
         // Half the width still to come, so the visible run stays over the anchor.
-        setEasedKey(offset, layer.inPoint, [(full - widths[0]) / 2, 0, 0]);
+        setEasedKey(offset, layer.inPoint, [(full - widths[0]) / 2, 0, 0], curve);
         for (index = 0; index < steps; index += 1) {
             var at = layer.inPoint + plan.events[index].time +
                 plan.events[index].duration * 0.55;
-            setEasedKey(offset, at, [(full - widths[index]) / 2, 0, 0]);
+            setEasedKey(offset, at, [(full - widths[index]) / 2, 0, 0], curve);
         }
     }
 
@@ -914,7 +959,10 @@
         if (options.controllers) { updateAnimationControls(textLayer, plan); }
         if (options.typeOn) {
             updateTypeOn(textLayer, plan, comp.time);
-            if (options.typeOnCenter) { updateTypeOnCentering(comp, textLayer, plan); }
+            if (options.typeOnCenter) {
+                updateTypeOnCentering(comp, textLayer, plan,
+                    typeOnCurve(options.typeOnCurve));
+            }
         }
         return truncated;
     }
@@ -1428,6 +1476,20 @@
             " place instead of growing out of the left edge. For centre-justified text." +
             "\n讓已顯示的文字保持置中並平滑滑動，而不是從左邊長出來。適用於置中對齊的文字。";
 
+        var curveRow = panel.add("group");
+        curveRow.orientation = "row";
+        curveRow.add("statictext", undefined, "Center curve / 置中曲線");
+        var typeOnCurveList = curveRow.add("dropdownlist", undefined, (function () {
+            var labels = [];
+            var at;
+            for (at = 0; at < TYPEON_CURVES.length; at += 1) { labels.push(TYPEON_CURVES[at].label); }
+            return labels;
+        }()));
+        typeOnCurveList.selection = 0;
+        typeOnCurveList.helpTip = "Shape of the recentring glide. These are ordinary keyframes," +
+            " so the curve can still be reshaped in the Graph Editor afterwards." +
+            "\n置中滑動的曲線形狀。產生的是一般關鍵影格，之後仍可在圖表編輯器裡自由調整。";
+
         var applyButton = panel.add("button", undefined,
             "Apply to selected text layers / 套用到選取文字圖層");
         applyButton.preferredSize.height = 34;
@@ -1537,7 +1599,8 @@
                     fitDuration: fitDuration.value,
                     controllers: controllers.value,
                     typeOn: typeOn.value,
-                    typeOnCenter: typeOnCenter.value
+                    typeOnCenter: typeOnCenter.value,
+                    typeOnCurve: typeOnCurveList.selection ? typeOnCurveList.selection.index : 0
                 });
                 status.text = "Applied to " + applied.count + " layer(s) / 已套用 " +
                     applied.count + " 個圖層";

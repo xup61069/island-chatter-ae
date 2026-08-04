@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.6 - 2026-08-04
+
+- Add a curve control for the Type-On recentring glide, defaulting to fast-to-slow so the
+  line leaves at speed and decelerates into place. Slow-to-fast, smooth and linear are also
+  available, and because these are ordinary keyframes the shape can still be reworked in the
+  Graph Editor afterwards.
+- Fix the easing added in 1.0.5 never actually reaching the keyframes. Two silent failures
+  compounded: reading `value` on a text animator's Position throws "invalid numeric result",
+  and Position is a spatial property, which takes exactly one temporal ease rather than one
+  per dimension. Both threw after the interpolation type had already been set, so the keys
+  looked eased while carrying no ease, and the motion was the symmetric slow-fast-slow shape
+  After Effects applies by default.
+
 ## 1.0.5 - 2026-08-04
 
 - Add Center to Type-On. The opacity-based reveal does not reflow the text, so on a
