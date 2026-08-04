@@ -32,7 +32,7 @@
         var names = ["valuesDiffer", "setPropertyValue", "clearKeys", "setHoldKey",
             "setEasedKey", "findNamedProperty", "findPropertyByMatchName",
             "setRevealSmoothness", "textFromLayer", "measureRevealWidths",
-            "typeOnCurve", "updateTypeOnCentering", "updateTypeOn"];
+            "clamp", "typeOnCurve", "updateTypeOnCentering", "updateTypeOn"];
         var code = [];
         for (var n = 0; n < names.length; n += 1) { code.push(take(names[n])); }
         // Constants the extracted functions compare against.
@@ -40,8 +40,13 @@
         code.push(source.substring(defaultStart, source.indexOf(";", defaultStart) + 1));
         var centerStart = source.indexOf("var CENTER_ANIMATOR_NAME =");
         code.push(source.substring(centerStart, source.indexOf(";", centerStart) + 1));
-        var curvesStart = source.indexOf("var TYPEON_CURVES =");
-        code.push(source.substring(curvesStart, source.indexOf("];", curvesStart) + 2));
+        var influenceNames = ["MIN_INFLUENCE", "MAX_INFLUENCE",
+            "DEFAULT_OUT_INFLUENCE", "DEFAULT_IN_INFLUENCE"];
+        var inf;
+        for (inf = 0; inf < influenceNames.length; inf += 1) {
+            var start = source.indexOf("var " + influenceNames[inf] + " =");
+            code.push(source.substring(start, source.indexOf(";", start) + 1));
+        }
         eval(code.join("\n"));
         log("extracted from the repository panel: " + names.join(", "));
 
@@ -236,11 +241,13 @@
             }
         }
 
-        // Every curve preset must reach the host intact.
-        var curveNames = ["fast-to-slow", "slow-to-fast", "smooth", "linear"];
-        var curveIndex;
-        for (curveIndex = 0; curveIndex < 4; curveIndex += 1) {
-            updateTypeOnCentering(comp, layer, plan, typeOnCurve(curveIndex));
+        // Any pair of slider values must reach the host intact, including the
+        // clamped ends of the range.
+        var pairs = [[0.1, 80], [80, 0.1], [50, 50], [0.1, 0.1], [100, 100], [-5, 250]];
+        var pairIndex;
+        for (pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
+            var wanted = typeOnCurve(pairs[pairIndex][0], pairs[pairIndex][1]);
+            updateTypeOnCentering(comp, layer, plan, wanted);
             var animatorsNow = layer.property("ADBE Text Properties").property("ADBE Text Animators");
             var centerNow = null;
             var n;
@@ -257,25 +264,19 @@
                 }
             }
             var key = Math.min(2, offsetNow.numKeys);
-            var expected = typeOnCurve(curveIndex);
-            if (expected.linear) {
-                var isLinear =
-                    offsetNow.keyOutInterpolationType(key) === KeyframeInterpolationType.LINEAR;
-                log((isLinear ? "PASS  " : "FAIL  ") + curveNames[curveIndex] + " is linear");
-                if (!isLinear) { ok = false; }
-            } else {
-                var gotOut = offsetNow.keyOutTemporalEase(key)[0].influence;
-                var gotIn = offsetNow.keyInTemporalEase(key)[0].influence;
-                var matches = Math.abs(gotOut - expected.outInfluence) < 1 &&
-                    Math.abs(gotIn - expected.inInfluence) < 1;
-                log((matches ? "PASS  " : "FAIL  ") + curveNames[curveIndex] +
-                    " -> out " + gotOut.toFixed(1) + ", in " + gotIn.toFixed(1) +
-                    " (wanted " + expected.outInfluence + "/" + expected.inInfluence + ")");
-                if (!matches) { ok = false; }
-            }
+            var gotOut = offsetNow.keyOutTemporalEase(key)[0].influence;
+            var gotIn = offsetNow.keyInTemporalEase(key)[0].influence;
+            var matches = Math.abs(gotOut - wanted.outInfluence) < 1 &&
+                Math.abs(gotIn - wanted.inInfluence) < 1;
+            log((matches ? "PASS  " : "FAIL  ") + "leave " + pairs[pairIndex][0] +
+                " / arrive " + pairs[pairIndex][1] + " -> out " + gotOut.toFixed(1) +
+                ", in " + gotIn.toFixed(1) + " (wanted " + wanted.outInfluence +
+                "/" + wanted.inInfluence + ")");
+            if (!matches) { ok = false; }
         }
+
         // Restore the default for the repeat check below.
-        updateTypeOnCentering(comp, layer, plan, typeOnCurve(0));
+        updateTypeOnCentering(comp, layer, plan, typeOnCurve());
         if (true) {
             if (true) {
             }

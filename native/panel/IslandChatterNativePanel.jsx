@@ -543,29 +543,32 @@
      * Influence is clamped by the host to 0.1 - 100; 0.1 is as close to linear
      * as a Bezier key gets.
      */
-    var TYPEON_CURVES = [
-        { label: "Fast to slow / 由快到慢", outInfluence: 0.1, inInfluence: 80 },
-        { label: "Slow to fast / 由慢到快", outInfluence: 80, inInfluence: 0.1 },
-        { label: "Smooth / 兩端平滑", outInfluence: 50, inInfluence: 50 },
-        { label: "Linear / 線性", linear: true }
-    ];
+    // After Effects clamps influence to this range; the low end is as close to
+    // linear as a Bezier key gets.
+    var MIN_INFLUENCE = 0.1;
+    var MAX_INFLUENCE = 100;
+    // Leaves at speed, decelerates into place.
+    var DEFAULT_OUT_INFLUENCE = 0.1;
+    var DEFAULT_IN_INFLUENCE = 80;
 
-    function typeOnCurve(index) {
-        return TYPEON_CURVES[index >= 0 && index < TYPEON_CURVES.length ? index : 0];
+    function typeOnCurve(outInfluence, inInfluence) {
+        return {
+            outInfluence: clamp(
+                outInfluence === undefined ? DEFAULT_OUT_INFLUENCE : outInfluence,
+                MIN_INFLUENCE, MAX_INFLUENCE),
+            inInfluence: clamp(
+                inInfluence === undefined ? DEFAULT_IN_INFLUENCE : inInfluence,
+                MIN_INFLUENCE, MAX_INFLUENCE)
+        };
     }
 
     // Smooth keyframe, used for the recentring glide. Hold keys would make the
     // text jump sideways on every character.
     function setEasedKey(property, time, value, curve) {
         property.setValueAtTime(time, value);
-        curve = curve || typeOnCurve(0);
+        curve = curve || typeOnCurve();
         try {
             var index = property.nearestKeyIndex(time);
-            if (curve.linear) {
-                property.setInterpolationTypeAtKey(index,
-                    KeyframeInterpolationType.LINEAR, KeyframeInterpolationType.LINEAR);
-                return;
-            }
             property.setInterpolationTypeAtKey(index,
                 KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
             // Two traps here, both of which fail silently inside this catch and
@@ -961,7 +964,7 @@
             updateTypeOn(textLayer, plan, comp.time);
             if (options.typeOnCenter) {
                 updateTypeOnCentering(comp, textLayer, plan,
-                    typeOnCurve(options.typeOnCurve));
+                    typeOnCurve(options.typeOnEaseOut, options.typeOnEaseIn));
             }
         }
         return truncated;
@@ -1476,19 +1479,20 @@
             " place instead of growing out of the left edge. For centre-justified text." +
             "\n讓已顯示的文字保持置中並平滑滑動，而不是從左邊長出來。適用於置中對齊的文字。";
 
-        var curveRow = panel.add("group");
-        curveRow.orientation = "row";
-        curveRow.add("statictext", undefined, "Center curve / 置中曲線");
-        var typeOnCurveList = curveRow.add("dropdownlist", undefined, (function () {
-            var labels = [];
-            var at;
-            for (at = 0; at < TYPEON_CURVES.length; at += 1) { labels.push(TYPEON_CURVES[at].label); }
-            return labels;
-        }()));
-        typeOnCurveList.selection = 0;
-        typeOnCurveList.helpTip = "Shape of the recentring glide. These are ordinary keyframes," +
-            " so the curve can still be reshaped in the Graph Editor afterwards." +
-            "\n置中滑動的曲線形狀。產生的是一般關鍵影格，之後仍可在圖表編輯器裡自由調整。";
+        // Two influences shape the glide, the same pair After Effects exposes on
+        // a keyframe. Low leaves at speed, high draws the motion out.
+        var easeOut = addSlider(panel, "Leave / 離開", MIN_INFLUENCE, MAX_INFLUENCE,
+            DEFAULT_OUT_INFLUENCE);
+        easeOut.valueField.helpTip = easeOut.helpTip = "How the text leaves each position." +
+            " Low leaves at full speed." +
+            "\n文字離開每個位置的方式，低值代表全速離開。";
+        var easeIn = addSlider(panel, "Arrive / 抵達", MIN_INFLUENCE, MAX_INFLUENCE,
+            DEFAULT_IN_INFLUENCE);
+        easeIn.valueField.helpTip = easeIn.helpTip = "How the text settles into each position." +
+            " High decelerates into place." +
+            "\n文字停進每個位置的方式，高值代表減速停入。" +
+            "\n\nLeave 低 + Arrive 高 = 由快到慢（預設）。兩者都低則接近等速。" +
+            "\n產生的是一般關鍵影格，之後仍可在圖表編輯器裡自由調整。";
 
         var applyButton = panel.add("button", undefined,
             "Apply to selected text layers / 套用到選取文字圖層");
@@ -1600,7 +1604,8 @@
                     controllers: controllers.value,
                     typeOn: typeOn.value,
                     typeOnCenter: typeOnCenter.value,
-                    typeOnCurve: typeOnCurveList.selection ? typeOnCurveList.selection.index : 0
+                    typeOnEaseOut: easeOut.value,
+                    typeOnEaseIn: easeIn.value
                 });
                 status.text = "Applied to " + applied.count + " layer(s) / 已套用 " +
                     applied.count + " 個圖層";

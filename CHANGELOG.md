@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.7 - 2026-08-04
+
+- Replace the Type-On centring curve dropdown with two sliders, Leave and Arrive, which are
+  the same pair of influences After Effects exposes on a keyframe. The default is still
+  fast-to-slow: leave at full speed, decelerate into place. Setting both low gives near
+  linear motion, so nothing was lost with the preset list.
+
 ## 1.0.6 - 2026-08-04
 
 - Add a curve control for the Type-On recentring glide, defaulting to fast-to-slow so the
