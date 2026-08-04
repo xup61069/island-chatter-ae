@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.8 - 2026-08-04
+
+- The Type-On reveal now follows the same curve as the recentring glide instead of using
+  hold keyframes. This is what makes Smoothness do anything: with hold keys the selector
+  edge jumped instantly and there was nothing to soften. The trade-off is that characters
+  now fade in around their syllable rather than popping exactly on it.
+- Drop the Arrive slider. The arriving side is pinned to full influence so motion always
+  settles rather than stopping dead, leaving Leave as the single shape control for both the
+  reveal and the glide.
+- Smoothness is a slider rather than a fixed 0, defaulting to 40. Because it is now a panel
+  control it is written on every Apply.
+
 ## 1.0.7 - 2026-08-04
 
 - Replace the Type-On centring curve dropdown with two sliders, Leave and Arrive, which are
