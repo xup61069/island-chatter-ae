@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.2",
+    [string]$Version = "1.0.3",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = ""
 )
@@ -56,7 +56,14 @@ if ($newestSource -and $newestSource.LastWriteTime -gt $aexTime) {
         "  plug-in: $resolvedAex ($aexTime)`n" +
         "  source:  $($newestSource.FullName) ($($newestSource.LastWriteTime))")
 }
+# The bake tool is built from the same sources and must come from the same
+# build directory as the plug-in, never from a stale one elsewhere.
+$resolvedBake = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $resolvedAex))) "Release\island_chatter_bake.exe"
+if (-not (Test-Path -LiteralPath $resolvedBake -PathType Leaf)) {
+    throw "Build island_chatter_bake first. Missing: $resolvedBake"
+}
 Write-Host "Packaging plug-in: $resolvedAex ($aexTime)"
+Write-Host "Packaging bake tool: $resolvedBake"
 
 $distRoot = Join-Path $repoRoot "dist"
 $stageRoot = Join-Path $distRoot "Island-Chatter-AE-$Version-Windows-x64"
@@ -67,6 +74,7 @@ if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force 
 New-Item -ItemType Directory -Path (Join-Path $stageRoot "installer") -Force | Out-Null
 
 Copy-Item -LiteralPath $resolvedAex -Destination (Join-Path $stageRoot "IslandChatterNative.aex")
+Copy-Item -LiteralPath $resolvedBake -Destination (Join-Path $stageRoot "island_chatter_bake.exe")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterNativePanel.jsx") `
     -Destination (Join-Path $stageRoot "IslandChatterNativePanel.jsx")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterMandarinReadings.jsxinc") `

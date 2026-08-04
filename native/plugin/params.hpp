@@ -20,11 +20,15 @@ enum ParamIndex : int {
     kParamClarity,
     kParamCuteness,
     kParamSeed,
+    // Appended in 1.0.3. Projects saved by 1.0.2 and earlier simply get its
+    // default of off, which reproduces their existing timing exactly.
+    kParamTempoLock,
 };
 
 inline constexpr std::size_t kMaxTextUnits = 64;
-inline constexpr int kParamCount = kParamSeed + 1;
+inline constexpr int kParamCount = kParamTempoLock + 1;
 
-static_assert(kParamCount == 76, "Changing the parameter count breaks saved AE projects");
+static_assert(kParamSeed == 75, "Published parameter indices must never move");
+static_assert(kParamCount == 77, "Changing the parameter count breaks saved AE projects");
 
 }  // namespace island_chatter::ae

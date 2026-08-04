@@ -39,6 +39,7 @@ foreach ($target in $targets) {
     if ($PSCmdlet.ShouldProcess($target, "Uninstall Island Chatter")) {
         $paths = @(
             (Join-Path $target "Plug-ins\Island Chatter\IslandChatterNative.aex"),
+            (Join-Path $target "Plug-ins\Island Chatter\island_chatter_bake.exe"),
             (Join-Path $target "Scripts\ScriptUI Panels\IslandChatterNativePanel.jsx"),
             (Join-Path $target "Scripts\ScriptUI Panels\IslandChatterMandarinReadings.jsxinc")
         )

@@ -13,6 +13,9 @@ This directory contains the Windows native-audio plug-in work. The DSP library i
 - After Effects audio effect entry point and PiPL: implemented
 - Windows x64 `.aex` build against AE SDK 25.6: verified
 - Direct text-layer synthesized audio with no generated files: implemented
+- Lazy per-block synthesis so a parameter change no longer stalls the audio thread: implemented
+- Tempo-locked timing for musical sync: implemented
+- `island_chatter_bake` command-line renderer behind the panel's Bake button: implemented
 
 ## Build and test the DSP
 
@@ -60,7 +63,11 @@ See `THIRD_PARTY_NOTICES.md` for the Unicode data license.
 
 The panel writes Source Text into 64 hidden UTF-16 numeric parameters when Apply is clicked. After editing Source Text, click Apply again.
 
-Voice, Pitch, Speed, Volume, and Initial are keyframeable, but they are meant to be set once per layer. After Effects passes an audio effect one parameter snapshot per audio block, so an animated value re-synthesizes the whole utterance for every block, and animating Speed shifts each syllable's start time enough to step audibly at block boundaries. Animate the layer's own Audio Levels for volume moves.
+Voice, Pitch, Speed, and Initial are meant to be set once per layer. After Effects passes an audio effect one parameter snapshot per audio block, so an animated value replans the utterance for every block, and animating Speed shifts each syllable's start time enough to step audibly at block boundaries.
+
+Volume is the exception. The utterance is synthesized once at a fixed reference level and Volume is applied as a gain when samples are copied out, so it is outside the cache key and free to animate.
+
+Bake is handled by `island_chatter_bake`, a small command-line renderer built from the same sources and installed beside the `.aex`. It writes a WAV directly, so Bake never touches the render queue, the work area, or any other layer. Paths reach it as hex UTF-8 because `system.callSystem()` would otherwise flatten them to the console code page.
 
 The panel's `estimateSpeech()` mirrors the engine's text planning, including the CJK punctuation block, surrogate pairs, tone sandhi, and the phrase and neutral-particle tables. `npm test` fails if the two drift apart.
 

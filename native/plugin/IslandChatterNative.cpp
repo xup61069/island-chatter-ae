@@ -97,11 +97,13 @@ island_chatter::Settings settings_from_params(PF_ParamDef* params[], std::uint32
     settings.cuteness = quantize(params[island_chatter::ae::kParamCuteness]->u.fs_d.value, 0.1) / 100.0;
     settings.seed = static_cast<std::uint32_t>(std::max<A_long>(0,
         params[island_chatter::ae::kParamSeed]->u.sd.value));
+    settings.tempo_lock = params[island_chatter::ae::kParamTempoLock]->u.bd.value != 0;
     settings.sample_rate = sample_rate;
     return settings;
 }
 
-std::shared_ptr<const island_chatter::Result> cached_synthesis(const island_chatter::Settings& settings) {
+std::shared_ptr<const island_chatter::Utterance> cached_synthesis(
+    const island_chatter::Settings& settings) {
     static island_chatter::SynthesisCache cache;
     return cache.get(settings);
 }
@@ -168,6 +170,8 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
         PF_Precision_TENTHS, PF_ValueDisplayFlag_PERCENT, PF_ParamFlag_NONE, 74);
     AEFX_CLR_STRUCT(def);
     PF_ADD_SLIDER("Seed / 種子", 0, 999999, 0, 9999, 0, 75);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_CHECKBOXX("Tempo Lock / 節拍鎖定", 0, 0, 76);
     out_data->num_params = island_chatter::ae::kParamCount;
     return PF_Err_NONE;
 }
@@ -192,12 +196,18 @@ PF_Err audio_render(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* param
     }
     const auto settings = settings_from_params(params, rate);
     const auto rendered = cached_synthesis(settings);
-    island_chatter::copy_region(
-        *rendered,
+    if (!rendered) {
+        return PF_Err_NONE;
+    }
+    // Only the syllables inside this block are synthesized, and Volume is
+    // applied here rather than baked in, so neither a new block nor a Volume
+    // change costs a re-render of the whole utterance.
+    rendered->copy_region(
         static_cast<std::int64_t>(in_data->start_sampL),
         static_cast<float*>(out_data->dest_snd.dataP),
         frames,
-        channels);
+        channels,
+        settings.volume);
     return PF_Err_NONE;
 }
 

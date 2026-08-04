@@ -128,6 +128,16 @@ for (const fragment of [
     throw new Error(`Missing text-layer controller fragment: ${fragment}`);
   }
 }
+// Bake hands a path to an external tool through system.callSystem(), which
+// converts the command line to the console code page. A path passed as plain
+// text loses every character outside it, so it must go over as hex UTF-8.
+if (!nativePanelSource.includes("--out-hex ")) {
+  throw new Error("Bake must pass the output path as hex UTF-8 (--out-hex), not plain text");
+}
+if (/--out [^-]/.test(nativePanelSource)) {
+  throw new Error("Bake passes a plain-text output path; use --out-hex");
+}
+
 if (nativePanelSource.includes("app.scheduleTask")) {
   throw new Error("Native panel must not poll while AE modal dialogs are open");
 }
@@ -171,14 +181,17 @@ for (const filePath of extendScriptFiles) {
 // The 76-slot parameter ABI is split across three files. Keep them in lockstep.
 const paramsHeader = fs.readFileSync(
   path.join(root, "native", "plugin", "params.hpp"), "utf8");
-if (!/static_assert\(kParamCount == 76/.test(paramsHeader)) {
-  throw new Error("params.hpp no longer asserts the published 76-slot parameter count");
+if (!/static_assert\(kParamCount == 77/.test(paramsHeader)) {
+  throw new Error("params.hpp no longer asserts the published parameter count");
+}
+if (!/static_assert\(kParamSeed == 75/.test(paramsHeader)) {
+  throw new Error("params.hpp must pin the published indices so appends cannot shift them");
 }
 for (const [constant, index] of [
   ["PARAM_VOICE", 1], ["PARAM_PITCH", 2], ["PARAM_SPEED", 3], ["PARAM_VOLUME", 4],
   ["PARAM_CONSONANT", 5], ["PARAM_TEXT_LENGTH", 6], ["PARAM_TEXT_FIRST", 7],
   ["PARAM_EMOTION", 71], ["PARAM_CHARACTER_SIZE", 72], ["PARAM_CLARITY", 73],
-  ["PARAM_CUTENESS", 74], ["PARAM_SEED", 75],
+  ["PARAM_CUTENESS", 74], ["PARAM_SEED", 75], ["PARAM_TEMPO_LOCK", 76],
 ]) {
   if (!new RegExp(`var ${constant} = ${index};`).test(nativePanelSource)) {
     throw new Error(`Panel ${constant} must stay at published index ${index}`);
@@ -372,6 +385,7 @@ for (const scriptName of ["installer/Install-IslandChatter.ps1",
 
 for (const releaseFile of [
   "IslandChatterNative.aex",
+  "island_chatter_bake.exe",
   "IslandChatterNativePanel.jsx",
   "IslandChatterMandarinReadings.jsxinc",
 ]) {
@@ -383,7 +397,7 @@ for (const smokeFragment of [
   'comp.layers.addText("你好，中文聲音測試！")',
   'effects.addProperty(TONE_MATCH_NAME)',
   'effects.addProperty(EFFECT_NAME)',
-  "EXPECTED_PARAMETERS = 76",
+  "EXPECTED_PARAMETERS = 77",
   '"External audio files: 0"',
 ]) {
   if (!aeSmokeSource.includes(smokeFragment)) {

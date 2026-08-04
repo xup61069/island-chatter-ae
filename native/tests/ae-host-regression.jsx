@@ -109,7 +109,7 @@
             check(tone.propertyIndex < chatter.propertyIndex, "Tone sits before the native effect");
             check(tone.propertyIndex === chatter.propertyIndex - 1, "Tone is immediately before it");
             check(tone.property(6).value === 0, "Tone level is zero");
-            check(chatter.numProperties === 76, "native effect exposes 76 parameters, got " + chatter.numProperties);
+            check(chatter.numProperties === 77, "native effect exposes 77 parameters, got " + chatter.numProperties);
             check(Math.round(chatter.property(6).value) === TEXT.length,
                 "text length parameter is " + TEXT.length + ", got " + Math.round(chatter.property(6).value));
             var textOk = true;
@@ -227,6 +227,61 @@
             truncated = applyToTextLayer(comp, longLayer, "", settings, options);
         });
         check(truncated !== "", "over-long Source Text is reported as truncated");
+
+        // --- 8. remove everything the panel added ----------------------------
+        var cleanup = comp.layers.addText("清除測試");
+        attempt("apply before removing", function () {
+            applyToTextLayer(comp, cleanup, "", settings, options);
+        });
+        var beforeRemove = cleanup.property("ADBE Effect Parade").numProperties;
+        check(beforeRemove >= 7, "the layer carries the full rig before removal (" + beforeRemove + ")");
+        attempt("remove from layer", function () { removeFromLayer(cleanup); });
+        check(cleanup.property("ADBE Effect Parade").numProperties === 0,
+            "every effect was removed, " + cleanup.property("ADBE Effect Parade").numProperties + " left");
+        check(cleanup.property("ADBE Marker").numKeys === 0, "IC: markers were removed");
+        check(cleanup.property("ADBE Text Properties").property("ADBE Text Animators").numProperties === 0,
+            "the Type-On animator was removed");
+        check(cleanup.property("ADBE Text Properties")
+            .property("ADBE Text Document").value.text === "清除測試",
+            "Source Text survived the removal");
+        attempt("remove again on an already clean layer", function () { removeFromLayer(cleanup); });
+
+        // Removal must leave effects the user owns alone.
+        var mixed = comp.layers.addText("混合測試");
+        var userBlur = mixed.property("ADBE Effect Parade").addProperty("ADBE Gaussian Blur 2");
+        userBlur.name = "My Blur";
+        attempt("apply to a layer that has a user effect", function () {
+            applyToTextLayer(comp, mixed, "", settings, options);
+        });
+        attempt("remove from that layer", function () { removeFromLayer(mixed); });
+        var survivors = mixed.property("ADBE Effect Parade");
+        check(survivors.numProperties === 1 && survivors.property(1).name === "My Blur",
+            "the user's own effect survived removal");
+
+        // --- 9. tempo mode -----------------------------------------------------
+        check(Math.abs(speedForTempo(120, 2) - 0.8) < 1e-9,
+            "speedForTempo(120, 2) should be 0.8, got " + speedForTempo(120, 2));
+        check(Math.abs(speedForTempo(60, 1) - 0.2) < 1e-9,
+            "speedForTempo(60, 1) should be 0.2, got " + speedForTempo(60, 1));
+        var tempoLayer = comp.layers.addText("節拍測試一二三四");
+        var tempoSettings = {
+            voice: 0, pitch: 1, speed: speedForTempo(120, 2), volume: 0.78, consonant: 1.25,
+            emotion: 0, characterSize: 2, clarity: 0.78, cuteness: 0.55, seed: 7, tempoLock: true
+        };
+        attempt("apply with tempo lock", function () {
+            applyToTextLayer(comp, tempoLayer, "", tempoSettings, options);
+        });
+        var tempoEffect = findNativeEffect(tempoLayer);
+        check(tempoEffect && Math.round(tempoEffect.property(PARAM_TEMPO_LOCK).value) === 1,
+            "the Tempo Lock parameter was written");
+        var tempoMarkers = tempoLayer.property("ADBE Marker");
+        var onGrid = true;
+        var slot = 60.0 / 120.0 / 2.0;
+        for (var m = 1; m <= tempoMarkers.numKeys; m += 1) {
+            var at = tempoMarkers.keyTime(m) - tempoLayer.inPoint;
+            if (Math.abs(at / slot - Math.round(at / slot)) > 0.02) { onGrid = false; }
+        }
+        check(onGrid, "every marker landed on the tempo grid");
 
         log("");
         log("checks: " + checks + "   failures: " + failures);

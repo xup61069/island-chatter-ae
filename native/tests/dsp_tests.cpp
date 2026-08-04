@@ -56,7 +56,7 @@ int main() {
     require(chunked == first.samples, "variable AE audio blocks introduced gaps or overlaps");
 
     island_chatter::SynthesisCache cache(4);
-    std::vector<std::shared_ptr<const island_chatter::Result>> concurrent_results(12);
+    std::vector<std::shared_ptr<const island_chatter::Utterance>> concurrent_results(12);
     std::mutex gate_mutex;
     std::condition_variable gate;
     bool start = false;
@@ -270,7 +270,7 @@ int main() {
     {
         island_chatter::Settings bounded;
         bounded.text = "你好，島民";
-        const auto single = island_chatter::synthesize(bounded).samples.size();
+        const auto single = island_chatter::Utterance(bounded).sample_count();
         island_chatter::SynthesisCache small(1024, single * 3);
         for (std::uint32_t seed = 1; seed <= 24; ++seed) {
             auto keyed = bounded;
@@ -364,6 +364,146 @@ int main() {
         const auto rendered = island_chatter::synthesize(limited);
         require(rendered.diagnostics.peak < 0.999F, "band-limited synthesis clipped");
         require(!rendered.samples.empty(), "band-limited synthesis produced no audio");
+    }
+
+    // Lazy block rendering must be indistinguishable from a single eager
+    // synthesize(), whatever block sizes the host happens to ask for.
+    {
+        island_chatter::Settings lazy_settings;
+        lazy_settings.text = "你好，島民！今天天氣真好。";
+        lazy_settings.sample_rate = 48000;
+        lazy_settings.seed = 4242;
+        for (const double volume : {0.0, 0.3, 0.78, 1.0, 1.5, 2.0}) {
+            lazy_settings.volume = volume;
+            const auto eager = island_chatter::synthesize(lazy_settings);
+            const island_chatter::Utterance lazy(lazy_settings);
+            require(lazy.sample_count() == eager.samples.size(),
+                "the lazy renderer planned a different length");
+            require(lazy.diagnostics().readings == eager.diagnostics.readings,
+                "the lazy renderer planned different syllables");
+            std::vector<float> out(lazy.sample_count(), -7.0F);
+            const std::size_t block_sizes[] = {1, 4096, 173, 20011, 999};
+            std::size_t cursor = 0;
+            std::size_t which = 0;
+            while (cursor < out.size()) {
+                const auto count = std::min(block_sizes[which++ % 5], out.size() - cursor);
+                lazy.copy_region(static_cast<std::int64_t>(cursor), out.data() + cursor,
+                    count, 1, volume);
+                cursor += count;
+            }
+            require(out == eager.samples,
+                "lazy block rendering does not match a single eager synthesis");
+        }
+    }
+
+    // Only the syllables a block touches get rendered.
+    {
+        island_chatter::Settings partial;
+        partial.text = "你好，島民！今天天氣真好。";
+        partial.sample_rate = 48000;
+        const island_chatter::Utterance utterance(partial);
+        require(utterance.rendered_events() == 0, "planning should render no audio");
+        std::vector<float> block(4800);
+        utterance.copy_region(0, block.data(), block.size(), 1, 0.78);
+        const auto after_first = utterance.rendered_events();
+        require(after_first > 0, "the first block rendered nothing");
+        require(after_first < utterance.diagnostics().event_count,
+            "the first block rendered the entire utterance instead of its own syllables");
+        utterance.copy_region(0, block.data(), block.size(), 1, 0.78);
+        require(utterance.rendered_events() == after_first,
+            "re-requesting the same block rendered syllables twice");
+    }
+
+    // Volume is a gain applied on the way out, so it must not change the plan
+    // and must not be part of the cache key.
+    {
+        island_chatter::SynthesisCache volume_cache(8);
+        island_chatter::Settings quiet;
+        quiet.text = "你好，島民";
+        quiet.volume = 0.2;
+        auto loud = quiet;
+        loud.volume = 1.9;
+        const auto a = volume_cache.get(quiet);
+        const auto b = volume_cache.get(loud);
+        require(a == b, "changing Volume created a second cache entry");
+        require(volume_cache.size() == 1, "Volume must not be part of the cache key");
+
+        std::vector<float> soft(600), hard(600);
+        a->copy_region(0, soft.data(), soft.size(), 1, 0.2);
+        a->copy_region(0, hard.data(), hard.size(), 1, 1.9);
+        double soft_peak = 0.0;
+        double hard_peak = 0.0;
+        for (std::size_t i = 0; i < soft.size(); ++i) {
+            soft_peak = std::max(soft_peak, std::abs(static_cast<double>(soft[i])));
+            hard_peak = std::max(hard_peak, std::abs(static_cast<double>(hard[i])));
+        }
+        require(hard_peak > soft_peak, "a higher Volume was not louder");
+        require(hard_peak <= 0.99, "the output limiter let the signal reach full scale");
+    }
+
+    // The default Volume must stay transparent: gain of exactly one.
+    {
+        island_chatter::Settings reference;
+        reference.text = "你好，島民";
+        reference.volume = 0.78;
+        const island_chatter::Utterance utterance(reference);
+        const auto eager = island_chatter::synthesize(reference);
+        std::vector<float> out(eager.samples.size());
+        utterance.copy_region(0, out.data(), out.size(), 1, 0.78);
+        require(out == eager.samples, "the default Volume is no longer transparent");
+    }
+
+    // Tempo lock: a Speed derived from a tempo must put every syllable exactly
+    // on the beat, including across punctuation, without altering the voice.
+    {
+        const auto speed_for_tempo = [](double bpm, double per_beat) {
+            return bpm * per_beat * 0.200 / 60.0;
+        };
+        for (const double bpm : {60.0, 90.0, 120.0, 174.0}) {
+            for (const double per_beat : {1.0, 2.0, 4.0}) {
+                island_chatter::Settings tempo;
+                tempo.text = "你好島民你好島民";
+                tempo.sample_rate = 48000;
+                tempo.tempo_lock = true;
+                tempo.speed = speed_for_tempo(bpm, per_beat);
+                const auto rendered = island_chatter::synthesize(tempo);
+                const double slot = 60.0 / bpm / per_beat;
+                for (std::size_t index = 0; index < rendered.diagnostics.start_samples.size(); ++index) {
+                    const double at =
+                        static_cast<double>(rendered.diagnostics.start_samples[index]) / 48000.0;
+                    require(std::abs(at - slot * static_cast<double>(index)) < 0.002,
+                        "a tempo-locked syllable did not land on the beat");
+                }
+            }
+        }
+
+        island_chatter::Settings punctuated;
+        punctuated.text = "你好，島民！今天";
+        punctuated.sample_rate = 48000;
+        punctuated.speed = speed_for_tempo(120.0, 2.0);
+        punctuated.tempo_lock = true;
+        const auto locked = island_chatter::synthesize(punctuated);
+        const double slot = 60.0 / 120.0 / 2.0;
+        for (const auto start : locked.diagnostics.start_samples) {
+            const double at = static_cast<double>(start) / 48000.0;
+            require(std::abs(at / slot - std::round(at / slot)) < 0.01,
+                "punctuation pushed a tempo-locked syllable off the grid");
+        }
+        punctuated.tempo_lock = false;
+        require(island_chatter::synthesize(punctuated).samples != locked.samples,
+            "tempo lock made no difference");
+
+        island_chatter::Settings plain;
+        plain.text = "你好";
+        plain.sample_rate = 48000;
+        auto strict = plain;
+        strict.tempo_lock = true;
+        require(island_chatter::synthesize(plain).diagnostics.readings ==
+                island_chatter::synthesize(strict).diagnostics.readings,
+            "tempo lock changed the Mandarin planning");
+        require(island_chatter::synthesize(strict).diagnostics.length_samples[0] ==
+                static_cast<std::size_t>(std::llround(0.188 / strict.speed * 48000)),
+            "a tempo-locked syllable is not exactly one slot long");
     }
 
     std::cout << "Native DSP tests passed: " << first.samples.size() << " samples, peak "

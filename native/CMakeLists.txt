@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(IslandChatterNative VERSION 1.0.2 LANGUAGES CXX)
+project(IslandChatterNative VERSION 1.0.3 LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
 
@@ -29,6 +29,11 @@ target_link_libraries(island_chatter_native_tests PRIVATE island_chatter_dsp Thr
 
 add_executable(island_chatter_render tools/render_preview.cpp)
 target_link_libraries(island_chatter_render PRIVATE island_chatter_dsp)
+
+# Ships next to the .aex so the panel's Bake command can render a WAV without
+# involving the After Effects render queue.
+add_executable(island_chatter_bake tools/bake_cli.cpp)
+target_link_libraries(island_chatter_bake PRIVATE island_chatter_dsp)
 
 enable_testing()
 add_test(NAME island_chatter_native_tests COMMAND island_chatter_native_tests)

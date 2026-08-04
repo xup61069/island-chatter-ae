@@ -27,7 +27,9 @@ public:
     SynthesisCache(const SynthesisCache&) = delete;
     SynthesisCache& operator=(const SynthesisCache&) = delete;
 
-    std::shared_ptr<const Result> get(const Settings& settings);
+    // Volume is deliberately excluded from the cache key: it is applied as a
+    // gain when samples are copied out, so moving the slider costs nothing.
+    std::shared_ptr<const Utterance> get(const Settings& settings);
     std::size_t size() const;
     std::size_t resident_samples() const;
 
