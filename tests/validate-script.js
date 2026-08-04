@@ -450,7 +450,13 @@ for (const launcher of ["Install.bat", "Uninstall.bat"]) {
   if (!bytes.every((byte) => byte < 0x80)) {
     throw new Error(`installer/${launcher} must stay ASCII; a .bat has no BOM to declare UTF-8`);
   }
+  // cmd.exe can mis-handle labels and goto in a .bat with LF endings, and both
+  // launchers use goto for their error paths. .gitattributes pins this, so a
+  // failure here means that pin was lost.
   const text = bytes.toString("ascii");
+  if (/goto/.test(text) && text.indexOf("\r\n") < 0) {
+    throw new Error(`installer/${launcher} has LF endings; a .bat using goto needs CRLF`);
+  }
   if (!/net session/.test(text)) {
     throw new Error(`installer/${launcher} must elevate; Program Files is not user-writable`);
   }
