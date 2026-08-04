@@ -9,7 +9,7 @@
     "generate:ae-readings": "node native/tools/generate-ae-readings.js",
     "package:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1"
   },
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=18"
   }

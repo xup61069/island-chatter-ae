@@ -4,7 +4,7 @@
 
 /*
  * Island Chatter Native helper panel
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: LicenseRef-IslandChatter-Source-Available-1.0
  *
  * Applies the audio effect directly to text layers, batch-syncs Source Text,
  * and creates optional timing markers without generating audio files.

@@ -4,7 +4,7 @@
 /*
  * Island Chatter for After Effects
  * Copyright (c) 2026 Island Chatter contributors
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: LicenseRef-IslandChatter-Source-Available-1.0
  *
  * Original procedural character-chatter synthesis. No game audio, samples,
  * code, characters, or other proprietary assets are included.
