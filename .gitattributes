@@ -1,2 +1,7 @@
 * text=auto eol=lf
 *.jsx text eol=lf
+
+# cmd.exe can mis-handle labels and goto in a .bat with LF endings, and the
+# launchers rely on goto for their error paths.
+*.bat text eol=crlf
+*.cmd text eol=crlf

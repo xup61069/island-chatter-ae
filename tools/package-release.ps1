@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.8",
+    [string]$Version = "1.0.9",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = ""
 )
@@ -81,6 +81,12 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterMandarinR
     -Destination (Join-Path $stageRoot "IslandChatterMandarinReadings.jsxinc")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install-IslandChatter.ps1") `
     -Destination (Join-Path $stageRoot "installer/Install-IslandChatter.ps1")
+# The double-click launchers go at the top of the extracted folder so the first
+# thing anyone sees is the thing to run.
+Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install.bat") `
+    -Destination (Join-Path $stageRoot "Install.bat")
+Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Uninstall.bat") `
+    -Destination (Join-Path $stageRoot "Uninstall.bat")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Uninstall-IslandChatter.ps1") `
     -Destination (Join-Path $stageRoot "installer/Uninstall-IslandChatter.ps1")
 Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $stageRoot "README.md")

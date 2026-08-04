@@ -32,15 +32,19 @@
 
 ### Release 安裝包
 
-1. 從 GitHub Releases 下載最新的 `Island-Chatter-AE-*-Windows-x64.zip` 並解壓縮。
+1. 解壓縮 `Island-Chatter-AE-*-Windows-x64.zip`。
 2. 關閉 After Effects。
-3. 以 PowerShell 執行：
+3. **雙擊 `Install.bat`**，出現使用者帳戶控制的視窗時按「是」。
+4. 重新開啟 After Effects，選擇 `Window > IslandChatterNativePanel.jsx`。
+
+要移除就雙擊 `Uninstall.bat`。
+
+`Install.bat` 只是替你開好權限並執行 `installer\Install-IslandChatter.ps1`，兩個都是純文字檔，
+可以先打開看內容。想自己下指令也可以：
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-IslandChatter.ps1
    ```
-
-4. 重新開啟 After Effects，選擇 `Window > IslandChatterNativePanel.jsx`。
 
 安裝器預設安裝到最新版本的 AE；加上 `-AllVersions` 可安裝到所有偵測到的版本。也可以用 `-AfterEffectsRoot "...\Support Files"` 指定位置。
 
