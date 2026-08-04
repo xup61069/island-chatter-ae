@@ -435,6 +435,30 @@ if (JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).license
 // Windows PowerShell 5.1 reads a .ps1 as the system ANSI codepage unless the
 // file starts with a UTF-8 BOM, which turns any non-ASCII message into mojibake
 // and can break the parse outright.
+// The double-click launchers are what a buyer actually runs, so the packager
+// must place them at the top of the extracted folder, not bury them.
+const packager = fs.readFileSync(path.join(root, "tools", "package-release.ps1"), "utf8");
+for (const launcher of ["Install.bat", "Uninstall.bat"]) {
+  if (!fs.existsSync(path.join(root, "installer", launcher))) {
+    throw new Error(`installer/${launcher} is missing`);
+  }
+  if (!new RegExp(`Join-Path \\$stageRoot "${launcher}"`).test(packager)) {
+    throw new Error(`${launcher} is not staged at the root of the release package`);
+  }
+  // A .bat is read in the console code page, so non-ASCII would arrive mangled.
+  const bytes = fs.readFileSync(path.join(root, "installer", launcher));
+  if (!bytes.every((byte) => byte < 0x80)) {
+    throw new Error(`installer/${launcher} must stay ASCII; a .bat has no BOM to declare UTF-8`);
+  }
+  const text = bytes.toString("ascii");
+  if (!/net session/.test(text)) {
+    throw new Error(`installer/${launcher} must elevate; Program Files is not user-writable`);
+  }
+  if (!/pause/.test(text)) {
+    throw new Error(`installer/${launcher} must pause, or errors vanish with the window`);
+  }
+}
+
 for (const scriptName of ["installer/Install-IslandChatter.ps1",
   "installer/Uninstall-IslandChatter.ps1", "tools/package-release.ps1"]) {
   const bytes = fs.readFileSync(path.join(root, scriptName));

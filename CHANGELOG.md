@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.9 - 2026-08-04
+
+- Add `Install.bat` and `Uninstall.bat` at the top of the release package, so installing is
+  a double-click and a UAC prompt rather than opening PowerShell and knowing about execution
+  policy. They request elevation themselves, refuse to run while After Effects is open, and
+  hold the window at the end so a failure is readable instead of vanishing.
+- Both launchers stay ASCII. A `.bat` is read in the console code page and has no BOM to
+  declare otherwise, so the bilingual messages come from the PowerShell script they call.
+
 ## 1.0.8 - 2026-08-04
 
 - The Type-On reveal now follows the same curve as the recentring glide instead of using
