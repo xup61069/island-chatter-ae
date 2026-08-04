@@ -410,6 +410,23 @@ for (const [text, emotion, size, events, duration, readings] of [
     throw new Error(`${label}: planned readings ${planned}, expected ${readings}`);
   }
 }
+// Builds are sold, so the licence and the README have to point at the same
+// storefront. A link that rots in one place and not the other sends buyers
+// somewhere that no longer sells anything.
+const purchaseUrls = new Set();
+for (const doc of ["LICENSE", "README.md"]) {
+  const found = fs.readFileSync(path.join(root, doc), "utf8")
+    .match(/https:\/\/[a-z0-9.-]*gumroad\.com\/[^\s)"'`;,]+/gi) || [];
+  if (found.length === 0) {
+    throw new Error(`${doc} does not say where to buy a build`);
+  }
+  found.forEach((url) => purchaseUrls.add(url.replace(/[.,]$/, "")));
+}
+if (purchaseUrls.size !== 1) {
+  throw new Error(
+    `LICENSE and README point at different storefronts: ${[...purchaseUrls].join(", ")}`);
+}
+
 // The project is source-available, not MIT: builds are sold, so nothing may
 // re-grant redistribution rights. A stray MIT header would do exactly that.
 const licenseText = fs.readFileSync(path.join(root, "LICENSE"), "utf8");
