@@ -116,7 +116,12 @@ npm run package:windows
 
 ## 開源與商標
 
-程式碼使用 [MIT License](LICENSE)。Unicode 讀音資料的授權請見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+本專案是 **source-available**，不是 OSI 定義的開源：原始碼公開，你可以閱讀、自行編譯、
+自己使用（包含商業接案），但**不能把編譯出來的檔案轉發給別人**。完整條款見 [LICENSE](LICENSE)。
+
+想直接安裝不想自己編譯的話，請購買官方安裝包。
+
+Unicode 讀音資料維持它自己的授權，請見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 After Effects 是 Adobe 的商標；Nintendo 與 Animal Crossing 是其各自權利人的商標。本專案與上述公司沒有關聯或背書關係。
 

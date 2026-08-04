@@ -369,6 +369,28 @@ for (const [text, emotion, size, events, duration, readings] of [
     throw new Error(`${label}: planned readings ${planned}, expected ${readings}`);
   }
 }
+// The project is source-available, not MIT: builds are sold, so nothing may
+// re-grant redistribution rights. A stray MIT header would do exactly that.
+const licenseText = fs.readFileSync(path.join(root, "LICENSE"), "utf8");
+if (!/Island Chatter AE Source-Available License/.test(licenseText)) {
+  throw new Error("LICENSE is not the source-available licence");
+}
+if (/^MIT License/m.test(licenseText)) {
+  throw new Error("LICENSE reverted to MIT; builds are sold under a source-available licence");
+}
+for (const licensed of [
+  "IslandChatter.jsx",
+  path.join("native", "panel", "IslandChatterNativePanel.jsx"),
+]) {
+  const header = fs.readFileSync(path.join(root, licensed), "utf8").slice(0, 800);
+  if (/SPDX-License-Identifier:\s*MIT/.test(header)) {
+    throw new Error(`${licensed} still declares SPDX MIT`);
+  }
+}
+if (JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")).license === "MIT") {
+  throw new Error("package.json still declares MIT");
+}
+
 // Windows PowerShell 5.1 reads a .ps1 as the system ANSI codepage unless the
 // file starts with a UTF-8 BOM, which turns any non-ASCII message into mojibake
 // and can break the parse outright.

@@ -8,4 +8,6 @@ Thanks for helping improve Island Chatter.
 4. Do not add copyrighted game audio, extracted assets, character art, or trademarks as branding.
 5. Describe which After Effects version and operating system you tested.
 
-By contributing, you agree that your contribution is licensed under the MIT License.
+By contributing, you grant the copyright holder the licence set out in clause 5 of
+[LICENSE](LICENSE), which includes the right to ship your contribution in the
+commercially sold builds.

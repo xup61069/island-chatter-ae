@@ -1,21 +1,99 @@
-MIT License
+Island Chatter AE Source-Available License
+Version 1.0
 
-Copyright (c) 2026 Island Chatter contributors
+Copyright (c) 2026 xup61069
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+READ THIS FIRST
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+This project's source code is published so you can read it, learn from it, audit
+it, and build it for yourself. It is NOT open source under the Open Source
+Initiative definition, because it does not let you pass builds on to other
+people. Ready-to-install builds are sold separately by the copyright holder.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. DEFINITIONS
+
+   "Software" means the source code, build scripts, generated data files, and
+   documentation in this repository.
+
+   "Build" means any compiled or packaged form of the Software, including the
+   .aex plug-in, the bake tool, and any installer or archive containing them.
+
+   "You" means the individual or organisation exercising the permissions below.
+
+2. WHAT YOU MAY DO
+
+   a. Read, study, and copy the Software for your own reference.
+
+   b. Compile the Software and use the resulting Build yourself, on machines you
+      or your organisation control.
+
+   c. Use the Software and its audio output in your own work, including paid
+      client work and commercial productions. Audio you generate with it is
+      yours; this licence places no conditions on it.
+
+   d. Modify the Software for your own use under the terms above.
+
+   e. Submit changes back to the copyright holder.
+
+3. WHAT YOU MAY NOT DO
+
+   a. Distribute the Software or any Build to anyone else, whether modified or
+      unmodified, whether for payment or free of charge. This includes
+      publishing a Build for download, bundling it in a product or template,
+      and sending it to a colleague or client.
+
+   b. Sell, rent, sublicense, or offer the Software or a Build as a service.
+
+   c. Remove or alter this licence, the copyright notices, or the third-party
+      notices.
+
+   Publicly forking this repository on a code-hosting service, so long as the
+   fork carries this licence unchanged and contains no Build, is not
+   distribution for the purpose of clause 3(a).
+
+4. OFFICIAL BUILDS
+
+   Builds supplied by the copyright holder are licensed separately, under the
+   terms accompanying them. Nothing here grants you rights to redistribute them.
+
+5. CONTRIBUTIONS
+
+   By submitting a contribution you grant the copyright holder a perpetual,
+   worldwide, irrevocable, royalty-free licence to use, modify, relicense, and
+   distribute it as part of the Software, including in Builds sold commercially.
+   You confirm you have the right to grant this.
+
+6. THIRD-PARTY MATERIAL
+
+   The Software includes data derived from third-party sources, listed in
+   THIRD_PARTY_NOTICES.md. That material stays under its own licence, which this
+   licence neither replaces nor restricts. Adobe's After Effects SDK is not
+   included in this repository and is governed by Adobe's own terms.
+
+7. TRADEMARKS
+
+   This licence grants no rights to the names "Island Chatter" or "Island
+   Chatter AE", or to any logo of the copyright holder.
+
+8. TERMINATION
+
+   Your rights under this licence end automatically if you breach it. They are
+   restored if you stop the breach within 30 days of becoming aware of it, and
+   the copyright holder has not already notified you of the breach.
+
+9. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+   OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+10. EARLIER RELEASES
+
+    Releases v1.0.0 through v1.0.3 were published under the MIT License. Anyone
+    who obtained the Software while that grant was in effect keeps it for those
+    versions; an MIT grant cannot be withdrawn retroactively. This licence
+    governs the repository from the commit that introduced it onward.
