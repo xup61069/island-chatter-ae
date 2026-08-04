@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -23,6 +25,23 @@ constexpr double kTwoPi = kPi * 2.0;
 // ends of the range.
 constexpr double kMinimumSpeed = 0.10;
 constexpr double kMaximumSpeed = 12.0;
+
+// The utterance is always synthesized at this Volume so that the cached audio
+// is independent of the Volume control. It matches the parameter's default, so
+// a project left at 78% renders exactly as it did before Volume became a gain.
+constexpr double kReferenceVolume = 0.78;
+
+// One Mandarin syllable slot: 0.188 s of voice plus the 0.012 s gap after it,
+// before Speed is applied. Tempo lock quantises rests to this grid, and the
+// panel derives Speed from a tempo with speed = BPM * syllables_per_beat / 300,
+// which is 60 / (kSyllableStride * 300 / ...) expressed for whole beats.
+constexpr double kSyllableStride = 0.200;
+
+// Output level below which the Volume gain is applied untouched, and the
+// ceiling the limiter approaches above it. Stopping short of full scale leaves
+// headroom for the host's own resampling.
+constexpr double kSoftKnee = 0.80;
+constexpr double kOutputCeiling = 0.98;
 
 struct Vowel {
     char name;
@@ -845,8 +864,13 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
                 events.back().question_rise = events.back().question_rise || unit.question;
                 events.back().emphatic = events.back().emphatic || unit.emphatic;
             }
-            cursor += static_cast<std::size_t>(
-                std::llround(unit.pause_seconds / speed * sample_rate));
+            // Under tempo lock a rest has to be a whole number of syllable
+            // slots, otherwise punctuation would push everything after it off
+            // the beat. Short marks round down to no extra time at all.
+            const double pause = settings.tempo_lock
+                ? std::round(unit.pause_seconds / kSyllableStride) * kSyllableStride
+                : unit.pause_seconds;
+            cursor += static_cast<std::size_t>(std::llround(pause / speed * sample_rate));
             continue;
         }
 
@@ -878,7 +902,10 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         Event event;
         event.start = cursor;
         const double clarity = clamp(settings.clarity, 0.0, 1.0);
-        const double duration_variation = 0.025 + (1.0 - clarity) * 0.12;
+        // random.next() is still consumed when locked, so the phase and per-event
+        // seeds below are unchanged and the voice keeps its character.
+        const double duration_variation =
+            settings.tempo_lock ? 0.0 : 0.025 + (1.0 - clarity) * 0.12;
         const double duration = (has_mandarin_reading ? 0.188 : 0.148) / speed *
             (1.0 - duration_variation * 0.5 + random.next() * duration_variation);
         event.length = std::max<std::size_t>(64, static_cast<std::size_t>(std::llround(duration * sample_rate)));
@@ -1056,6 +1083,95 @@ double render_vowel(Event& event, std::size_t local, double phase, const Voice& 
     return ((voiced * 1.85 + formants + breath + buzz) * oral_gain + nasal) * envelope;
 }
 
+// Renders one syllable into `destination`, which must have room for
+// event.length samples. Every event carries its own seed and filter state, so
+// an event renders identically whether or not its neighbours were rendered.
+// That independence is what makes the lazy block renderer in Utterance produce
+// output identical to a single eager synthesize() call.
+void render_event(Event& event, const Settings& settings, const Voice& voice, float* destination) {
+    Random random(event.seed);
+    for (std::size_t local = 0; local < event.length; ++local) {
+        const double time = static_cast<double>(local) / settings.sample_rate;
+        const double progress = static_cast<double>(local) / event.length;
+        const double attack = std::min(1.0, local / (settings.sample_rate * 0.002));
+        const double release = std::min(1.0, (event.length - local) / (settings.sample_rate * 0.010));
+        const double wobble = 1.0 + voice.wobble * std::sin(kTwoPi * 9.2 * time);
+        const double lexical_gesture = event.mandarin ? tone_multiplier(event.tone, progress) :
+            (1.0 + 0.018 * (0.5 - progress));
+        const double question = event.question_rise
+            ? 1.0 + 0.20 * std::pow(clamp((progress - 0.52) / 0.48, 0.0, 1.0), 1.35)
+            : 1.0;
+        const double emphasis_pitch = event.emphatic ? 1.0 + 0.045 * std::sin(kPi * progress) : 1.0;
+        double gesture = lexical_gesture * question * emphasis_pitch;
+        if (settings.emotion == Emotion::robot) {
+            gesture = std::pow(2.0, std::round(std::log2(std::max(gesture, 0.01)) * 12.0) / 12.0);
+        }
+        const double phase = kTwoPi * event.frequency * wobble * gesture * time + event.phase;
+        const double consonant = render_consonant(event, local, phase, random, settings.sample_rate);
+        const double vowel = render_vowel(event, local, phase, voice, random, settings.sample_rate);
+        const double clarity = clamp(settings.clarity, 0.0, 1.0);
+        const double cute_softening = 1.0 - clamp(settings.cuteness, 0.0, 1.0) * 0.12;
+        const double consonant_gain = (event.mandarin ? 0.68 + clarity * 0.28 : 1.0) * cute_softening;
+        const double emphasis_gain = event.emphatic ? 1.12 : 1.0;
+        // Volume is deliberately absent here: the utterance is rendered once at
+        // kReferenceVolume and Volume is applied afterwards as a gain, so moving
+        // the slider no longer invalidates the cache.
+        const double mixed = (consonant * clamp(settings.consonant, 0.0, 6.0) * consonant_gain + vowel) *
+            attack * release * kReferenceVolume * emphasis_gain;
+        destination[local] = static_cast<float>((2.0 / kPi) * std::atan(mixed) * 0.915);
+    }
+}
+
+double output_gain(const Settings& settings) {
+    return clamp(settings.volume, 0.0, 2.0) / kReferenceVolume;
+}
+
+// Transparent below kSoftKnee so the default Volume of 78% is bit-identical to
+// the previous releases; above it the curve bends smoothly towards full scale
+// instead of clipping.
+float limited(float sample, double gain) {
+    const double scaled = static_cast<double>(sample) * gain;
+    const double magnitude = std::abs(scaled);
+    if (magnitude <= kSoftKnee) {
+        return static_cast<float>(scaled);
+    }
+    // Normalising by the same range the curve spans keeps the slope continuous
+    // at the knee, so there is no audible corner where limiting begins.
+    const double range = kOutputCeiling - kSoftKnee;
+    const double shaped = kSoftKnee + range * std::tanh((magnitude - kSoftKnee) / range);
+    return static_cast<float>(scaled < 0.0 ? -shaped : shaped);
+}
+
+Diagnostics describe(
+    const std::vector<Event>& events, std::size_t sample_count, std::uint32_t sample_rate) {
+    Diagnostics diagnostics;
+    diagnostics.event_count = events.size();
+    diagnostics.duration_seconds = static_cast<double>(sample_count) / sample_rate;
+    for (const auto& event : events) {
+        diagnostics.vowel_names.push_back(event.vowel_name);
+        diagnostics.consonant_kinds.push_back(event.consonant.kind);
+        diagnostics.readings.push_back(event.reading);
+        diagnostics.source_codepoints.push_back(event.source_codepoint);
+        diagnostics.start_samples.push_back(event.start);
+        diagnostics.length_samples.push_back(event.length);
+        diagnostics.lexical_tones.push_back(event.lexical_tone);
+        diagnostics.tones.push_back(event.tone);
+        if (event.mandarin) {
+            ++diagnostics.mandarin_event_count;
+        }
+    }
+    return diagnostics;
+}
+
+void apply_output_gain(float* samples, std::size_t count, double gain) {
+    if (gain == 1.0) {
+        return;
+    }
+    for (std::size_t index = 0; index < count; ++index) {
+        samples[index] = limited(samples[index], gain);
+    }
+}
+
 }  // namespace
 
 const std::vector<Voice>& voices() {
@@ -1079,53 +1195,14 @@ Result synthesize(const Settings& requested) {
 
     Result result;
     result.samples.assign(sample_count, 0.0F);
-    result.diagnostics.event_count = events.size();
-    result.diagnostics.duration_seconds = static_cast<double>(sample_count) / settings.sample_rate;
-    for (const auto& event : events) {
-        result.diagnostics.vowel_names.push_back(event.vowel_name);
-        result.diagnostics.consonant_kinds.push_back(event.consonant.kind);
-        result.diagnostics.readings.push_back(event.reading);
-        result.diagnostics.source_codepoints.push_back(event.source_codepoint);
-        result.diagnostics.start_samples.push_back(event.start);
-        result.diagnostics.length_samples.push_back(event.length);
-        result.diagnostics.lexical_tones.push_back(event.lexical_tone);
-        result.diagnostics.tones.push_back(event.tone);
-        if (event.mandarin) {
-            ++result.diagnostics.mandarin_event_count;
-        }
-    }
+    result.diagnostics = describe(events, sample_count, settings.sample_rate);
 
     for (auto& event : events) {
-        Random random(event.seed);
-        for (std::size_t local = 0; local < event.length; ++local) {
-            const double time = static_cast<double>(local) / settings.sample_rate;
-            const double progress = static_cast<double>(local) / event.length;
-            const double attack = std::min(1.0, local / (settings.sample_rate * 0.002));
-            const double release = std::min(1.0, (event.length - local) / (settings.sample_rate * 0.010));
-            const double wobble = 1.0 + voice.wobble * std::sin(kTwoPi * 9.2 * time);
-            const double lexical_gesture = event.mandarin ? tone_multiplier(event.tone, progress) :
-                (1.0 + 0.018 * (0.5 - progress));
-            const double question = event.question_rise
-                ? 1.0 + 0.20 * std::pow(clamp((progress - 0.52) / 0.48, 0.0, 1.0), 1.35)
-                : 1.0;
-            const double emphasis_pitch = event.emphatic ? 1.0 + 0.045 * std::sin(kPi * progress) : 1.0;
-            double gesture = lexical_gesture * question * emphasis_pitch;
-            if (settings.emotion == Emotion::robot) {
-                gesture = std::pow(2.0, std::round(std::log2(std::max(gesture, 0.01)) * 12.0) / 12.0);
-            }
-            const double phase = kTwoPi * event.frequency * wobble * gesture * time + event.phase;
-            const double consonant = render_consonant(event, local, phase, random, settings.sample_rate);
-            const double vowel = render_vowel(event, local, phase, voice, random, settings.sample_rate);
-            const double clarity = clamp(settings.clarity, 0.0, 1.0);
-            const double cute_softening = 1.0 - clamp(settings.cuteness, 0.0, 1.0) * 0.12;
-            const double consonant_gain = (event.mandarin ? 0.68 + clarity * 0.28 : 1.0) * cute_softening;
-            const double emphasis_gain = event.emphatic ? 1.12 : 1.0;
-            const double mixed = (consonant * clamp(settings.consonant, 0.0, 6.0) * consonant_gain + vowel) *
-                attack * release * clamp(settings.volume, 0.0, 2.0) * emphasis_gain;
-            const float sample = static_cast<float>((2.0 / kPi) * std::atan(mixed) * 0.915);
-            result.samples[event.start + local] = sample;
-            result.diagnostics.peak = std::max(result.diagnostics.peak, std::abs(sample));
-        }
+        render_event(event, settings, voice, result.samples.data() + event.start);
+    }
+    apply_output_gain(result.samples.data(), result.samples.size(), output_gain(settings));
+    for (const float sample : result.samples) {
+        result.diagnostics.peak = std::max(result.diagnostics.peak, std::abs(sample));
     }
     return result;
 }
@@ -1144,6 +1221,103 @@ void copy_region(
         const float value = source_index >= 0 && static_cast<std::size_t>(source_index) < result.samples.size()
             ? result.samples[static_cast<std::size_t>(source_index)]
             : 0.0F;
+        for (std::size_t channel = 0; channel < channels; ++channel) {
+            destination[frame * channels + channel] = value;
+        }
+    }
+}
+
+struct Utterance::State {
+    Settings settings;
+    Voice voice{};
+    std::vector<Event> events;
+    std::size_t sample_count = 0;
+    Diagnostics diagnostics;
+    // Rendered at kReferenceVolume; Volume is applied when copying out.
+    mutable std::vector<float> samples;
+    mutable std::vector<char> rendered;
+    mutable std::mutex mutex;
+};
+
+Utterance::Utterance(const Settings& requested) : state_(std::make_unique<State>()) {
+    State& state = *state_;
+    state.settings = requested;
+    if (state.settings.sample_rate < 8000U || state.settings.sample_rate > 192000U) {
+        throw std::invalid_argument("sample_rate must be between 8000 and 192000");
+    }
+    if (state.settings.text.size() > 10000U) {
+        throw std::invalid_argument("text is too long");
+    }
+    state.voice = kVoices[std::min(state.settings.voice_index, kVoices.size() - 1U)];
+    apply_character_style(state.settings, state.voice);
+    auto [events, sample_count] = build_events(state.settings, state.voice);
+    if (sample_count > static_cast<std::size_t>(state.settings.sample_rate) * 600U) {
+        throw std::invalid_argument("rendered audio exceeds 10 minutes");
+    }
+    state.events = std::move(events);
+    state.sample_count = sample_count;
+    state.diagnostics = describe(state.events, sample_count, state.settings.sample_rate);
+    state.samples.assign(sample_count, 0.0F);
+    state.rendered.assign(state.events.size(), 0);
+}
+
+Utterance::~Utterance() = default;
+
+std::size_t Utterance::sample_count() const {
+    return state_->sample_count;
+}
+
+const Diagnostics& Utterance::diagnostics() const {
+    return state_->diagnostics;
+}
+
+std::size_t Utterance::rendered_events() const {
+    const std::lock_guard<std::mutex> lock(state_->mutex);
+    std::size_t count = 0;
+    for (const char flag : state_->rendered) {
+        if (flag) ++count;
+    }
+    return count;
+}
+
+void Utterance::copy_region(
+    std::int64_t start_sample,
+    float* destination,
+    std::size_t frame_count,
+    std::size_t channels,
+    double volume) const {
+    if (destination == nullptr || channels == 0U) {
+        return;
+    }
+    State& state = *state_;
+    const std::int64_t last = start_sample + static_cast<std::int64_t>(frame_count);
+    {
+        // Render only the syllables this block actually touches, once each.
+        const std::lock_guard<std::mutex> lock(state.mutex);
+        for (std::size_t index = 0; index < state.events.size(); ++index) {
+            if (state.rendered[index]) {
+                continue;
+            }
+            Event& event = state.events[index];
+            const auto event_start = static_cast<std::int64_t>(event.start);
+            const auto event_end = event_start + static_cast<std::int64_t>(event.length);
+            if (event_end <= start_sample || event_start >= last) {
+                continue;
+            }
+            render_event(event, state.settings, state.voice, state.samples.data() + event.start);
+            state.rendered[index] = 1;
+        }
+    }
+
+    Settings scaled = state.settings;
+    scaled.volume = volume;
+    const double gain = output_gain(scaled);
+    for (std::size_t frame = 0; frame < frame_count; ++frame) {
+        const std::int64_t source_index = start_sample + static_cast<std::int64_t>(frame);
+        const float value =
+            source_index >= 0 && static_cast<std::size_t>(source_index) < state.samples.size()
+                ? limited(state.samples[static_cast<std::size_t>(source_index)], gain)
+                : 0.0F;
         for (std::size_t channel = 0; channel < channels; ++channel) {
             destination[frame * channels + channel] = value;
         }

@@ -34,6 +34,11 @@
     var PARAM_CLARITY = 73;
     var PARAM_CUTENESS = 74;
     var PARAM_SEED = 75;
+    var PARAM_TEMPO_LOCK = 76;
+    // One syllable slot in seconds before Speed is applied, matching
+    // kSyllableStride in native/src/dsp.cpp. Speed for a tempo is therefore
+    // BPM * syllablesPerBeat / (60 / kSyllableStride) = BPM * perBeat / 300.
+    var SYLLABLE_STRIDE = 0.200;
 
     function clamp(value, minimum, maximum) {
         return Math.max(minimum, Math.min(maximum, value));
@@ -109,6 +114,7 @@
         setPropertyValue(effect.property(PARAM_CLARITY), settings.clarity * 100, time);
         setPropertyValue(effect.property(PARAM_CUTENESS), settings.cuteness * 100, time);
         setPropertyValue(effect.property(PARAM_SEED), Math.round(settings.seed), time);
+        setPropertyValue(effect.property(PARAM_TEMPO_LOCK), settings.tempoLock ? 1 : 0, time);
         setPropertyValue(effect.property(PARAM_TEXT_LENGTH), units, time);
         var index;
         for (index = 0; index < MAX_TEXT_UNITS; index += 1) {
@@ -373,7 +379,7 @@
         return units;
     }
 
-    function estimateSpeech(text, speed) {
+    function estimateSpeech(text, speed, tempoLock) {
         var units = buildSpeechUnits(text);
         var cursor = 0;
         var events = [];
@@ -382,7 +388,14 @@
         speed = clamp(speed, MIN_SPEED, MAX_SPEED);
         for (index = 0; index < units.length; index += 1) {
             var unit = units[index];
-            if (unit.pause > 0) { cursor += unit.pause / speed; continue; }
+            if (unit.pause > 0) {
+                // Mirrors the tempo-lock rest quantisation in build_events().
+                var pause = tempoLock
+                    ? Math.round(unit.pause / SYLLABLE_STRIDE) * SYLLABLE_STRIDE
+                    : unit.pause;
+                cursor += pause / speed;
+                continue;
+            }
             var mandarin = unit.reading !== "";
             var reading = mandarin ? unit.reading : "a5";
             var character = characterFromCode(unit.code);
@@ -412,6 +425,13 @@
     // Speed again by emotion and character size, so every timing the panel
     // writes has to use the same effective value or Fit Duration, markers, the
     // rig and Type-On all drift away from what you hear.
+    // Speed that makes one syllable land on each beat subdivision. Derived from
+    // the syllable slot, so it needs no calibration: at 120 BPM with one
+    // syllable per beat a syllable occupies exactly 0.5 s.
+    function speedForTempo(bpm, syllablesPerBeat) {
+        return clamp(bpm, 20, 400) * syllablesPerBeat * SYLLABLE_STRIDE / 60.0;
+    }
+
     function effectiveSpeed(settings) {
         var speed = settings.speed;
         if (settings.characterSize === 0) { speed *= 1.08; }
@@ -545,6 +565,33 @@
         return null;
     }
 
+    // A Range Selector arrives with Smoothness at 100%, which ramps each
+    // character in across the selector edge. Type-On reveals one character at a
+    // time on a syllable, so that ramp just softens every reveal; 0 makes each
+    // character land cleanly.
+    //
+    // Only After Effects' own default is replaced. Any other value is treated as
+    // a deliberate choice and left alone, so this does not fight the user on
+    // every Apply.
+    var AE_DEFAULT_SMOOTHNESS = 100;
+
+    function setRevealSmoothness(selector, time) {
+        if (!selector) { return; }
+        var advanced = findPropertyByMatchName(selector, "ADBE Text Range Advanced");
+        if (!advanced) { return; }
+        var smoothness = findPropertyByMatchName(advanced, "ADBE Text Selector Smoothness");
+        if (!smoothness) { smoothness = findNamedProperty(advanced, "Smoothness"); }
+        if (!smoothness) { return; }
+        try {
+            if (smoothness.numKeys === 0 &&
+                    !valuesDiffer(smoothness.value, AE_DEFAULT_SMOOTHNESS)) {
+                smoothness.setValue(0);
+            }
+        } catch (ignored) {
+            // Older hosts may not expose it; the reveal still works.
+        }
+    }
+
     function updateTypeOn(layer, plan, time) {
         // addProperty() invalidates every Property handle obtained before it,
         // so the animator group is reacquired from the text property each time
@@ -579,6 +626,9 @@
             created.name = "Island Chatter Reveal";
             animator = typeOnAnimator();
         }
+        setRevealSmoothness(
+            findNamedProperty(animator.property("ADBE Text Selectors"), "Island Chatter Reveal"),
+            time);
         var opacity = findPropertyByMatchName(
             animator.property("ADBE Text Animator Properties"), "ADBE Text Opacity");
         var selector = findNamedProperty(
@@ -705,7 +755,7 @@
         }
         setEffectParameters(effect, spokenText, settings, comp.time);
 
-        var plan = estimateSpeech(text, effectiveSpeed(settings));
+        var plan = estimateSpeech(text, effectiveSpeed(settings), settings.tempoLock);
         if (options.fitDuration) {
             textLayer.outPoint = Math.min(comp.duration,
                 Math.max(textLayer.inPoint + comp.frameDuration, textLayer.inPoint + plan.duration));
@@ -714,6 +764,182 @@
         if (options.controllers) { updateAnimationControls(textLayer, plan); }
         if (options.typeOn) { updateTypeOn(textLayer, plan, comp.time); }
         return truncated;
+    }
+
+    // Everything the panel adds to a layer, so it can be taken off again in one
+    // step instead of hunting through the effect stack.
+    function removeFromLayer(layer) {
+        var removed = 0;
+        var names = ["IC Mouth", "IC Volume", "IC Pitch", "IC Head Bounce", "IC Blink"];
+        var effects = layer.property("ADBE Effect Parade");
+        var index;
+        // Downward: removing an effect renumbers everything above it.
+        for (index = effects.numProperties; index >= 1; index -= 1) {
+            var effect = effects.property(index);
+            var mine = effect.matchName === EFFECT_NAME ||
+                (effect.matchName === TONE_MATCH_NAME && effect.name === TONE_DISPLAY_NAME);
+            var slot;
+            for (slot = 0; slot < names.length; slot += 1) {
+                if (effect.name === names[slot]) { mine = true; }
+            }
+            if (mine) { effect.remove(); removed += 1; }
+        }
+        var markers = layer.property("ADBE Marker");
+        for (index = markers.numKeys; index >= 1; index -= 1) {
+            if (String(markers.keyValue(index).comment).indexOf("IC:") === 0) {
+                markers.removeKey(index);
+                removed += 1;
+            }
+        }
+        var animators = layer.property("ADBE Text Properties").property("ADBE Text Animators");
+        for (index = animators.numProperties; index >= 1; index -= 1) {
+            if (animators.property(index).name === "Island Chatter Type-On") {
+                animators.property(index).remove();
+                removed += 1;
+            }
+        }
+        return removed;
+    }
+
+    /*
+     * Bake: write the voice to a WAV and bring it back as an audio layer, so
+     * playback costs nothing and the project still plays for someone without
+     * the plug-in.
+     *
+     * This does not use the After Effects render queue. Driving the queue meant
+     * output-module templates that differ per install, muting every other layer,
+     * moving the work area, and a blocking render window. island_chatter_bake
+     * runs the same synthesis engine as the effect and writes the file directly,
+     * so a bake is a few hundred milliseconds and touches nothing else in the
+     * project.
+     */
+    var BAKE_FOLDER_NAME = "Island Chatter Audio";
+
+    function bakeToolFile() {
+        // Ships beside the .aex: Support Files/Plug-ins/Island Chatter/.
+        var panelFile = new File($.fileName);
+        var supportFiles = panelFile.parent.parent.parent;
+        var tool = new File(supportFiles.fsName +
+            "/Plug-ins/Island Chatter/island_chatter_bake.exe");
+        return tool.exists ? tool : null;
+    }
+
+    // UTF-8 bytes as hex, so the text survives the command line whatever the
+    // console code page is.
+    function hexUtf8(text) {
+        var hex = "";
+        var index = 0;
+        while (index < text.length) {
+            var code = codePointAt(text, index);
+            index += code > 0xFFFF ? 2 : 1;
+            var bytes = [];
+            if (code <= 0x7F) { bytes = [code]; }
+            else if (code <= 0x7FF) { bytes = [0xC0 | (code >> 6), 0x80 | (code & 0x3F)]; }
+            else if (code <= 0xFFFF) {
+                bytes = [0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F)];
+            } else {
+                bytes = [0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F),
+                    0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F)];
+            }
+            var at;
+            for (at = 0; at < bytes.length; at += 1) {
+                var pair = bytes[at].toString(16);
+                hex += pair.length < 2 ? "0" + pair : pair;
+            }
+        }
+        return hex;
+    }
+
+    // Beside the .aep, so baked audio travels with the project.
+    function bakeFolder() {
+        if (!app.project.file) {
+            throw new Error("Save the project first so the audio can go beside it." +
+                "\n請先儲存專案，音訊才能存在專案旁邊。");
+        }
+        var folder = new Folder(app.project.file.parent.fsName + "/" + BAKE_FOLDER_NAME);
+        if (!folder.exists && !folder.create()) {
+            throw new Error("Could not create " + folder.fsName +
+                "\n無法建立資料夾：" + folder.fsName);
+        }
+        return folder;
+    }
+
+    function quoted(value) {
+        return '"' + String(value) + '"';
+    }
+
+    // A text layer's name is its own text, so it can be a whole sentence with
+    // punctuation. Keep the file name readable but short and legal on Windows.
+    function bakeFileName(layer) {
+        var name = String(layer.name)
+            .replace(/[\\\/:*?"<>|]/g, "")
+            .replace(/[\r\n\t]+/g, " ");
+        name = trim(name);
+        if (name.length > 40) { name = name.substring(0, 40); }
+        name = trim(name);
+        // Trailing dots and spaces are not addressable on Windows.
+        name = name.replace(/[. ]+$/, "");
+        return name ? name : ("Layer " + layer.index);
+    }
+
+    // Reads the values actually written to the layer, so a bake always matches
+    // what the effect is playing rather than whatever the panel happens to show.
+    function bakeLayer(layer, folder) {
+        var tool = bakeToolFile();
+        if (!tool) {
+            throw new Error("island_chatter_bake.exe is missing. Reinstall Island Chatter." +
+                "\n找不到 island_chatter_bake.exe，請重新安裝 Island Chatter。");
+        }
+        var effect = findNativeEffect(layer);
+        if (!effect) {
+            throw new Error("Apply Island Chatter to this layer first. / 請先對此圖層按 Apply。");
+        }
+        var target = new File(folder.fsName + "/" + bakeFileName(layer) + ".wav");
+        if (target.exists) { target.remove(); }
+
+        // The path goes over as hex UTF-8 for the same reason the text does:
+        // system.callSystem() hands the command line to the console code page,
+        // which turns anything it cannot represent into "?" before the tool
+        // sees it. A Chinese layer name or project folder would fail outright.
+        var command = quoted(tool.fsName) +
+            " --out-hex " + hexUtf8(target.fsName) +
+            " --text " + hexUtf8(textFromEffect(effect)) +
+            " --voice " + (Math.round(effect.property(PARAM_VOICE).value) - 1) +
+            " --emotion " + (Math.round(effect.property(PARAM_EMOTION).value) - 1) +
+            " --size " + (Math.round(effect.property(PARAM_CHARACTER_SIZE).value) - 1) +
+            " --seed " + Math.round(effect.property(PARAM_SEED).value) +
+            " --rate 48000" +
+            " --pitch " + effect.property(PARAM_PITCH).value +
+            " --speed " + effect.property(PARAM_SPEED).value +
+            " --volume " + (effect.property(PARAM_VOLUME).value / 100) +
+            " --consonant " + effect.property(PARAM_CONSONANT).value +
+            " --clarity " + (effect.property(PARAM_CLARITY).value / 100) +
+            " --cuteness " + (effect.property(PARAM_CUTENESS).value / 100) +
+            " --tempo-lock " + (Math.round(effect.property(PARAM_TEMPO_LOCK).value) ? 1 : 0);
+
+        var reply = system.callSystem(command);
+        if (String(reply).indexOf("OK ") !== 0 || !target.exists) {
+            throw new Error("Bake failed for " + layer.name + "\n轉檔失敗：" + layer.name +
+                "\n\n" + target.fsName + "\n" + reply);
+        }
+        return target;
+    }
+
+    function bakeToLayer(comp, layer, folder) {
+        var file = bakeLayer(layer, folder);
+        var imported = app.project.importFile(new ImportOptions(file));
+        imported.name = layer.name + " (baked)";
+        var audioLayer = comp.layers.add(imported);
+        audioLayer.startTime = layer.inPoint;
+        audioLayer.name = layer.name + " (baked)";
+        audioLayer.moveAfter(layer);
+        // Silence the live effect so the voice is not heard twice. It is left in
+        // place so Apply still works and the bake can be redone.
+        var effect = findNativeEffect(layer);
+        if (effect) { effect.enabled = false; }
+        var tone = findToneBootstrap(layer);
+        if (tone) { tone.enabled = false; }
+        return file;
     }
 
     function createOrUpdate(text, pronunciation, settings, options) {
@@ -809,6 +1035,49 @@
         var cuteness = addSlider(panel, "Cuteness / 可愛度", 0.00, 1.00, 0.55);
         var seed = addSlider(panel, "Seed / 種子", 0, 999999, 0);
 
+        // Tempo. Speed stays the underlying control; these just drive it.
+        var tempoRow = panel.add("group");
+        tempoRow.orientation = "row";
+        var tempoOn = tempoRow.add("checkbox", undefined, "Tempo / 節拍");
+        tempoOn.helpTip = "Derive Speed from a tempo instead of setting it by hand." +
+            "\n用節拍速度推算語速，取代手動設定。";
+        tempoRow.add("statictext", undefined, "BPM");
+        var bpmField = tempoRow.add("edittext", undefined, "120");
+        bpmField.characters = 5;
+        var perBeat = tempoRow.add("dropdownlist", undefined,
+            ["1 / beat", "2 / beat", "3 / beat", "4 / beat"]);
+        perBeat.selection = 1;
+        var perBeatValues = [1, 2, 3, 4];
+        var tempoReadout = panel.add("statictext", undefined, "");
+        tempoReadout.alignment = ["fill", "top"];
+
+        function currentSyllablesPerBeat() {
+            return perBeatValues[perBeat.selection ? perBeat.selection.index : 1];
+        }
+        function refreshTempo() {
+            if (!tempoOn.value) {
+                tempoReadout.text = "Speed set manually / 語速為手動設定";
+                return;
+            }
+            var bpm = parseFloat(bpmField.text);
+            if (isNaN(bpm)) { bpm = 120; bpmField.text = "120"; }
+            var derived = speedForTempo(bpm, currentSyllablesPerBeat());
+            setSliderValue(speed, clamp(derived, 0.10, 10.00));
+            var perSyllable = 60.0 / clamp(bpm, 20, 400) / currentSyllablesPerBeat();
+            tempoReadout.text = "Speed " + derived.toFixed(3) + "  ->  " +
+                perSyllable.toFixed(3) + " s / 字" +
+                (derived > 10.0 || derived < 0.10 ? "  (out of range / 超出範圍)" : "");
+        }
+        tempoOn.onClick = refreshTempo;
+        bpmField.onChange = refreshTempo;
+        perBeat.onChange = refreshTempo;
+        speed.onChanging = function () {
+            // Dragging Speed by hand means the tempo is no longer driving it.
+            if (tempoOn.value) { tempoOn.value = false; refreshTempo(); }
+            if (speed.valueField) { speed.valueField.text = speed.value.toFixed(2); }
+        };
+        refreshTempo();
+
         var characterRow = panel.add("group");
         var preset = characterRow.add("dropdownlist", undefined,
             ["Custom / 自訂", "Mimi / 咪咪", "Captain / 隊長", "Grandma / 奶奶", "Robot / 機器人"]);
@@ -834,7 +1103,10 @@
             setSliderValue(seed, values[7]);
         }
         preset.onChange = function () {
-            applyPreset(builtInPresets[preset.selection ? preset.selection.index : 0]);
+            var at = preset.selection ? preset.selection.index : 0;
+            if (at < builtInPresets.length) { applyPreset(builtInPresets[at]); return; }
+            var saved = savedPresets[at - builtInPresets.length];
+            if (saved) { applyPreset(saved.values); }
         };
         randomButton.onClick = function () {
             voice.selection = Math.floor(Math.random() * voice.items.length);
@@ -847,23 +1119,85 @@
             setSliderValue(seed, 1 + Math.floor(Math.random() * 9999));
             preset.selection = 0;
         };
+        // Saved characters live in one settings string as "name=v,v,v|name=...".
+        // Previously there was a single unnamed slot, and its Load button was
+        // only built when the panel opened, so a character saved during a
+        // session stayed invisible until the panel was closed and reopened.
+        function readSavedPresets() {
+            var saved = [];
+            if (!app.settings.haveSetting("IslandChatter", "characterPreset")) { return saved; }
+            var raw = app.settings.getSetting("IslandChatter", "characterPreset");
+            var chunks = raw.split("|");
+            var index;
+            for (index = 0; index < chunks.length; index += 1) {
+                if (!chunks[index]) { continue; }
+                var split = chunks[index].indexOf("=");
+                // A 1.0.2 setting is a bare comma list with no name.
+                var name = split < 0 ? "Saved / 已儲存" : chunks[index].substring(0, split);
+                var body = split < 0 ? chunks[index] : chunks[index].substring(split + 1);
+                var parts = body.split(",");
+                var values = [];
+                var part;
+                for (part = 0; part < parts.length; part += 1) { values.push(parseFloat(parts[part])); }
+                if (values.length >= 8) { saved.push({ name: name, values: values }); }
+            }
+            return saved;
+        }
+
+        function writeSavedPresets(saved) {
+            var chunks = [];
+            var index;
+            for (index = 0; index < saved.length; index += 1) {
+                chunks.push(saved[index].name + "=" + saved[index].values.join(","));
+            }
+            app.settings.saveSetting("IslandChatter", "characterPreset", chunks.join("|"));
+        }
+
+        function refreshPresetList() {
+            var wanted = ["Custom / 自訂", "Mimi / 咪咪", "Captain / 隊長",
+                "Grandma / 奶奶", "Robot / 機器人"];
+            var saved = readSavedPresets();
+            var index;
+            for (index = 0; index < saved.length; index += 1) { wanted.push(saved[index].name); }
+            while (preset.items.length > 0) { preset.remove(preset.items[preset.items.length - 1]); }
+            for (index = 0; index < wanted.length; index += 1) { preset.add("item", wanted[index]); }
+            preset.selection = 0;
+            return saved;
+        }
+
+        var savedPresets = refreshPresetList();
         saveButton.onClick = function () {
+            var name = prompt("Name this character / 幫這個角色取個名字",
+                "Character " + (savedPresets.length + 1));
+            if (!name) { return; }
+            name = trim(name).replace(/[|=,]/g, " ");
+            if (!name) { return; }
             var values = [voice.selection.index, emotion.selection.index, characterSize.selection.index,
                 pitch.value, speed.value, clarity.value, cuteness.value, Math.round(seed.value)];
-            app.settings.saveSetting("IslandChatter", "characterPreset", values.join(","));
-            alert("Character preset saved. / 角色預設已儲存。");
+            var index;
+            var replaced = false;
+            for (index = 0; index < savedPresets.length; index += 1) {
+                if (savedPresets[index].name === name) {
+                    savedPresets[index].values = values;
+                    replaced = true;
+                }
+            }
+            if (!replaced) { savedPresets.push({ name: name, values: values }); }
+            writeSavedPresets(savedPresets);
+            savedPresets = refreshPresetList();
+            status.text = "Saved / 已儲存: " + name;
         };
-        if (app.settings.haveSetting("IslandChatter", "characterPreset")) {
-            var loadButton = characterRow.add("button", undefined, "Load / 載入");
-            loadButton.onClick = function () {
-                var parts = app.settings.getSetting("IslandChatter", "characterPreset").split(",");
-                var values = [];
-                var index;
-                for (index = 0; index < parts.length; index += 1) { values.push(parseFloat(parts[index])); }
-                applyPreset(values);
-                preset.selection = 0;
-            };
-        }
+        var deleteButton = characterRow.add("button", undefined, "Delete / 刪除");
+        deleteButton.onClick = function () {
+            var at = (preset.selection ? preset.selection.index : 0) - builtInPresets.length;
+            if (at < 0) {
+                alert("Select a saved character first. / 請先選取自訂角色。");
+                return;
+            }
+            savedPresets.splice(at, 1);
+            writeSavedPresets(savedPresets);
+            savedPresets = refreshPresetList();
+        };
         var workflowRow = panel.add("group");
         var markers = workflowRow.add("checkbox", undefined, "Markers / 逐字標記");
         markers.value = true;
@@ -878,7 +1212,82 @@
         var applyButton = panel.add("button", undefined,
             "Apply to selected text layers / 套用到選取文字圖層");
         applyButton.preferredSize.height = 34;
+
+        var toolRow = panel.add("group");
+        toolRow.orientation = "row";
+        var bakeButton = toolRow.add("button", undefined, "Bake / 轉成音訊");
+        bakeButton.helpTip = "Write the voice to " + BAKE_FOLDER_NAME + " beside the project" +
+            " file and bring it back as an audio layer. No render queue, no dialogs." +
+            "\n把語音寫進專案檔旁邊的「" + BAKE_FOLDER_NAME + "」資料夾並放回專案，不需要算圖佇列。";
+        var removeButton = toolRow.add("button", undefined, "Remove / 移除");
+        removeButton.helpTip = "Take Island Chatter off the selected layers: the effect, the" +
+            " Tone bootstrap, the rig sliders, the IC: markers and the Type-On animator." +
+            "\n把 Island Chatter 從選取圖層完全移除。";
         var status = panel.add("statictext", undefined, "Edit text, then apply / 修改文字後按套用");
+        bakeButton.onClick = function () {
+            var comp = app.project ? app.project.activeItem : null;
+            if (!(comp && comp instanceof CompItem)) {
+                alert("Open an active composition first. / 請先開啟合成。");
+                return;
+            }
+            var layers = selectedTextLayers(comp);
+            if (!layers.length) {
+                alert("Select a text layer. / 請選取文字圖層。");
+                return;
+            }
+            var ready = [];
+            var pick;
+            for (pick = 0; pick < layers.length; pick += 1) {
+                if (findNativeEffect(layers[pick])) { ready.push(layers[pick]); }
+            }
+            if (!ready.length) {
+                alert("Apply Island Chatter first, then bake. / 請先按 Apply 再轉成音訊。");
+                return;
+            }
+            app.beginUndoGroup(SCRIPT_NAME + " - Bake");
+            try {
+                var folder = bakeFolder();
+                var made = 0;
+                var index;
+                for (index = 0; index < ready.length; index += 1) {
+                    bakeToLayer(comp, ready[index], folder);
+                    made += 1;
+                }
+                status.text = "Baked / 已轉成音訊 " + made + " -> " + BAKE_FOLDER_NAME;
+            } catch (error) {
+                status.text = "Error / 錯誤";
+                alert(error.toString());
+            } finally {
+                app.endUndoGroup();
+            }
+        };
+        removeButton.onClick = function () {
+            var comp = app.project ? app.project.activeItem : null;
+            if (!(comp && comp instanceof CompItem)) {
+                alert("Open an active composition first. / 請先開啟合成。");
+                return;
+            }
+            var layers = selectedTextLayers(comp);
+            if (!layers.length) {
+                alert("Select a text layer. / 請選取文字圖層。");
+                return;
+            }
+            app.beginUndoGroup(SCRIPT_NAME + " - Remove");
+            try {
+                var removed = 0;
+                var index;
+                for (index = 0; index < layers.length; index += 1) {
+                    removed += removeFromLayer(layers[index]);
+                }
+                status.text = "Removed / 已移除 " + removed + " item(s) from " +
+                    layers.length + " layer(s)";
+            } catch (error) {
+                status.text = "Error / 錯誤";
+                alert(error.toString());
+            } finally {
+                app.endUndoGroup();
+            }
+        };
         applyButton.onClick = function () {
             var text = trim(textInput.text);
             var comp = app.project ? app.project.activeItem : null;
@@ -901,7 +1310,9 @@
                     characterSize: characterSize.selection ? characterSize.selection.index : 2,
                     clarity: clarity.value,
                     cuteness: cuteness.value,
-                    seed: seed.value
+                    seed: seed.value,
+                    // Locking the grid is only meaningful when a tempo drives Speed.
+                    tempoLock: tempoOn.value
                 }, {
                     markers: markers.value,
                     fitDuration: fitDuration.value,

@@ -7,12 +7,13 @@ param(
 $ErrorActionPreference = "Stop"
 # Part of the release synchronisation list in CLAUDE.md; tests/validate-script.js
 # checks this against package.json.
-$IslandChatterVersion = "1.0.2"
+$IslandChatterVersion = "1.0.3"
 # After Effects releases this plug-in is built and verified against.
 $MinimumSupportedYear = 2025
 $payloadRoot = Split-Path -Parent $PSScriptRoot
 $requiredFiles = @(
     "IslandChatterNative.aex",
+    "island_chatter_bake.exe",
     "IslandChatterNativePanel.jsx",
     "IslandChatterMandarinReadings.jsxinc"
 )
@@ -81,6 +82,8 @@ foreach ($target in $targets) {
             New-Item -ItemType Directory -Path $panelDirectory -Force | Out-Null
             Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterNative.aex") `
                 -Destination (Join-Path $pluginDirectory "IslandChatterNative.aex") -Force
+            Copy-Item -LiteralPath (Join-Path $payloadRoot "island_chatter_bake.exe") `
+                -Destination (Join-Path $pluginDirectory "island_chatter_bake.exe") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterNativePanel.jsx") `
                 -Destination (Join-Path $panelDirectory "IslandChatterNativePanel.jsx") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterMandarinReadings.jsxinc") `

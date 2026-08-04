@@ -93,13 +93,27 @@ effect.
    `dsp.cpp`. Markers, the rig, Type-On, and Fit Duration all read that plan, so any change
    to one side must land on the other. `npm test` compares the shared tables, the timing
    constants, and the planner's output against pinned values.
-8c. **Animated voice parameters cost a full re-synthesis.** After Effects hands an audio
-   effect one parameter snapshot per audio block, and the effect reads only the block-start
-   half of `params[]`. Every distinct Pitch/Speed/Volume/Consonant value is therefore a new
-   cache key and a fresh render of the whole utterance; animating Speed also moves every
-   syllable, so block boundaries can step audibly. Values are quantised to slider precision
-   to limit the damage. Do not present these as smoothly animatable without first reading the
-   second parameter set and proving the result in an AE host test.
+8c. **Animated voice parameters cost a fresh plan.** After Effects hands an audio effect one
+   parameter snapshot per audio block, and the effect reads only the block-start half of
+   `params[]`. Every distinct Pitch/Speed/Consonant value is a new cache key; animating Speed
+   also moves every syllable, so block boundaries can step audibly. Values are quantised to
+   slider precision to limit the damage. Do not present these as smoothly animatable without
+   first reading the second parameter set and proving the result in an AE host test.
+   **Volume is exempt** and must stay that way: the utterance is rendered at `kReferenceVolume`
+   and Volume is applied as a gain in `Utterance::copy_region`, so it is absent from the cache
+   key. `kReferenceVolume` equals the parameter default, which is what keeps a project left at
+   78% rendering bit-identically to 1.0.2.
+8d. **Rendering is lazy and must stay bit-identical to `synthesize()`.** `Utterance` plans the
+   syllables up front (about 0.6 ms) and renders only those overlapping each requested block.
+   That is safe because every `Event` carries its own seed and filter state, so a syllable
+   renders the same whether or not its neighbours did. Any change that makes one syllable
+   depend on another breaks this, and `dsp_tests.cpp` compares the two paths across awkward
+   block sizes and every Volume setting.
+8e. **The panel's Bake calls `island_chatter_bake`, not the render queue.** The tool ships
+   beside the `.aex` and is built from the same sources; `tools/package-release.ps1` refuses to
+   package without it. Paths and text cross the boundary as hex UTF-8: `system.callSystem()`
+   converts the command line to the console code page, which turns any character outside it
+   into `?`. `tests/bake-cli.test.js` covers exactly that case.
 9. **Generated reading tables stay synchronized.** Regenerate them with the scripts in
    `native/tools/`; do not patch individual generated entries.
 10. **Source Text remains authoritative.** The user explicitly presses Apply again after editing.
@@ -132,8 +146,13 @@ Host verification order:
 ### Scripted host suites
 
 These run unattended and each writes a report to the repository root. They build and remove
-their own composition, save nothing, and do not quit After Effects. Drive them with
-`AfterFX.exe -r <script>` while AE is already open, then read the report:
+their own composition, save nothing, and do not quit After Effects.
+
+Drive them with **`AfterFX.exe -ro <script>`**, not `-r`. With `-r`, After Effects refuses to
+start a second script whenever one is already running — an open ScriptUI panel counts — and
+says so in a modal dialog. Automation sees no error, no report, and an idle process that looks
+like a hang. `-ro` overrides that. Wait for the report file rather than for the process to
+exit, since the launcher returns immediately:
 
 | Script | Covers |
 | --- | --- |

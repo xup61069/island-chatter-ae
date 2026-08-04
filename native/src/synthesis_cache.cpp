@@ -25,7 +25,7 @@ std::string settings_key(const Settings& settings) {
     append_binary(key, settings.voice_index);
     append_binary(key, settings.pitch);
     append_binary(key, settings.speed);
-    append_binary(key, settings.volume);
+    // settings.volume is absent on purpose; see SynthesisCache::get.
     append_binary(key, settings.consonant);
     append_binary(key, settings.emotion);
     append_binary(key, settings.character_size);
@@ -33,6 +33,7 @@ std::string settings_key(const Settings& settings) {
     append_binary(key, settings.cuteness);
     append_binary(key, settings.seed);
     append_binary(key, settings.sample_rate);
+    append_binary(key, settings.tempo_lock);
     return key;
 }
 
@@ -44,7 +45,7 @@ public:
         : maximum_entries_(std::max<std::size_t>(1, maximum_entries)),
           maximum_samples_(std::max<std::size_t>(1, maximum_samples)) {}
 
-    std::shared_ptr<const Result> get(const Settings& settings) {
+    std::shared_ptr<const Utterance> get(const Settings& settings) {
         const auto key = settings_key(settings);
         std::shared_ptr<Entry> entry;
         {
@@ -65,12 +66,12 @@ public:
         }
 
         try {
-            auto rendered = std::make_shared<const Result>(synthesize(settings));
+            auto rendered = std::make_shared<const Utterance>(settings);
             {
                 const std::lock_guard<std::mutex> lock(mutex_);
                 entry->result = rendered;
                 entry->rendering = false;
-                resident_samples_ += rendered->samples.size();
+                resident_samples_ += rendered->sample_count();
                 // The size of a render is only known now, so the bound has to
                 // be reapplied here as well as on the miss path. This entry is
                 // the most recently used, so eviction reaches it last.
@@ -100,7 +101,7 @@ private:
     struct Entry {
         bool rendering = true;
         std::uint64_t last_use = 0;
-        std::shared_ptr<const Result> result;
+        std::shared_ptr<const Utterance> result;
         std::exception_ptr error;
         std::condition_variable ready;
     };
@@ -119,7 +120,7 @@ private:
             // bound; deleting one would allow duplicate synthesis again.
             if (oldest == entries_.end()) return;
             if (oldest->second->result) {
-                resident_samples_ -= oldest->second->result->samples.size();
+                resident_samples_ -= oldest->second->result->sample_count();
             }
             entries_.erase(oldest);
         }
@@ -144,7 +145,7 @@ SynthesisCache::SynthesisCache(std::size_t maximum_entries, std::size_t maximum_
 
 SynthesisCache::~SynthesisCache() = default;
 
-std::shared_ptr<const Result> SynthesisCache::get(const Settings& settings) {
+std::shared_ptr<const Utterance> SynthesisCache::get(const Settings& settings) {
     return implementation_->get(settings);
 }
 

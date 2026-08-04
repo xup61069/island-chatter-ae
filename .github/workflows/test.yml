@@ -27,3 +27,6 @@ jobs:
       - run: cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build native/build --config Release
       - run: ctest --test-dir native/build -C Release --output-on-failure
+      # Bake writes files whose names come from layer text, so the path must
+      # survive characters the console code page cannot represent.
+      - run: node tests/bake-cli.test.js

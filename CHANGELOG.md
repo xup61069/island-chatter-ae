@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.0.3 - 2026-08-04
+
+Performance:
+
+- Synthesize only the syllables each requested audio block touches, instead of the
+  whole utterance every time. Planning an utterance now costs about 0.6 ms rather
+  than a 60-135 ms stall on the audio thread, which is what made scrubbing and
+  slider drags stutter. The audio is bit-identical to a single full render.
+- Volume is applied as a gain when samples are copied out rather than baked into
+  the synthesis, so it is no longer part of the cache key. Moving the Volume slider
+  costs 0.04 ms instead of 63 ms. Volume above 100% is now genuinely louder rather
+  than being squashed by the saturation stage, and a soft limiter keeps the output
+  below full scale. **A project left at the default 78% renders bit-identically to
+  1.0.2; other Volume values will sound slightly different.**
+
+Panel:
+
+- Add a Bake command. It writes the voice to `Island Chatter Audio` beside the project file
+  and imports it as an audio layer, then mutes the live effect so nothing is heard twice.
+  Bake is handled by a new `island_chatter_bake` tool built from the same sources and
+  installed beside the plug-in, so it does not involve the render queue, output-module
+  templates, the work area, or any other layer, and finishes in a few hundred milliseconds.
+  Paths and text reach the tool as hex UTF-8; passing them as plain text flattened them to
+  the console code page, so a Chinese layer name produced `?????.wav` and failed to write.
+- Add a Remove command that takes off the effect, the Tone bootstrap, the rig sliders, the
+  `IC:` markers and the Type-On animator in one step, leaving effects the user added alone.
+- Character presets can now be named, kept several at a time, and deleted. Previously there
+  was a single unnamed slot whose Load button only appeared after reopening the panel.
+- Default the Type-On range selector's Smoothness to 0 so each character lands cleanly
+  instead of ramping in. Only After Effects' own default of 100 is replaced; any other value
+  is left alone.
+
+Tempo:
+
+- Add Tempo mode to the panel: enter a BPM and how many syllables fall on each beat,
+  and Speed is derived as `BPM x syllables_per_beat / 300`. Dragging Speed by hand
+  switches tempo mode back off.
+- Add a Tempo Lock parameter (index 76, appended). It removes the per-syllable length
+  jitter and rounds punctuation rests to whole syllable slots, so every syllable lands
+  exactly on the beat. Verified on the grid to within 0.03 ms across 60-174 BPM at 1,
+  2 and 4 syllables per beat. Projects saved before 1.0.3 get its default of off and
+  keep their existing timing.
+
 ## 1.0.2 - 2026-08-04
 
 Timing and animation:

@@ -1,6 +1,7 @@
 # Island Chatter AE
 
-讓 After Effects 的文字圖層直接發出原創的遊戲式角色語音，主要針對繁體／簡體中文設計。不需要先輸出 WAV，也不會在專案旁產生一堆音訊檔。
+讓 After Effects 的文字圖層直接發出原創的遊戲式角色語音，主要針對繁體／簡體中文設計。不需要先輸出 WAV 就能直接預覽與算圖；
+需要交檔或想省效能時，再按一次 Bake 轉成音訊檔即可。
 
 > 這是獨立開發的程序式語音合成器，沒有使用、擷取或附帶任天堂／《動物森友會》的聲音與素材。
 
@@ -13,6 +14,8 @@
 - 拼音、注音與行內讀音覆寫，例如 `[重|chong2]新`
 - 8 種角色聲線、7 種情緒、4 種角色體型
 - 音高（0.10–4.00）、速度（0.10–10.00）、音量（0–200%）、聲母強度（0–6.00）、清晰度、可愛度與固定隨機種子
+- 配合 BPM 節拍，可精準落在拍點上
+- 一鍵轉成音訊（Bake），播放零運算
 - 多選文字圖層批次套用
 - 可選擇自動配合圖層長度、建立 `IC:` 逐字時間標記
 - 可建立 `IC Mouth`、`IC Volume`、`IC Pitch`、`IC Head Bounce`、`IC Blink` 動畫控制器
@@ -43,7 +46,7 @@
 
 ### 手動安裝
 
-- 把 `IslandChatterNative.aex` 放到 `Support Files\Plug-ins\Island Chatter\`
+- 把 `IslandChatterNative.aex` 與 `island_chatter_bake.exe` 放到 `Support Files\Plug-ins\Island Chatter\`
 - 把 `IslandChatterNativePanel.jsx` 與 `IslandChatterMandarinReadings.jsxinc` 放到 `Support Files\Scripts\ScriptUI Panels\`
 - 重新啟動 After Effects
 
@@ -55,10 +58,28 @@
 4. 視需要勾選 Markers、Fit Duration、Rig 或 Type-On。
 5. 按下 **Apply to selected text layers**。
 6. 修改 Source Text 後再按一次 Apply，即可同步文字、時間與動畫資料。
+7. 不想要了就按 **Remove／移除**，會一次清掉特效、Tone、動畫控制器、`IC:` 標記與逐字動畫器。
 
-> 音高、速度、音量、聲母這幾個參數請「設定一次」就好。After Effects 對音訊特效是一個區塊給一組參數值，
+> 音高、速度、聲母這幾個參數請「設定一次」就好。After Effects 對音訊特效是一個區塊給一組參數值，
 > 對它們下 keyframe 會讓整段語音在每個區塊重新合成，速度動畫還會讓每個字的位置跑掉，接縫處可能聽得到跳動。
-> 要做音量變化，請改用圖層本身的 Audio Levels，它在特效之後套用，完全平滑。
+> 音量不受這個限制 —— 它是合成後才套用的增益，隨時調整都不需要重新運算。
+
+## 配合節拍（BPM）
+
+勾選 **Tempo／節拍**，填入 BPM 與「每拍幾個字」，語速會自動換算（`速度 = BPM × 每拍字數 ÷ 300`）。
+手動拖動語速滑桿會自動關掉節拍模式。
+
+勾選節拍模式時會同時開啟特效的 **Tempo Lock／節拍鎖定**：關掉每個字長度的隨機微調，並把標點停頓
+對齊到整數個字的長度，讓每個字精準落在拍點上。實測 60–174 BPM、每拍 1／2／4 字，誤差都在
+0.03 毫秒以內。
+
+## 轉成音訊（Bake）
+
+按 **Bake／轉成音訊**，語音會寫成 WAV 放進專案檔旁邊的 `Island Chatter Audio` 資料夾，並自動匯入成
+音訊圖層放在原圖層下方，同時把即時特效靜音以免重複發聲。
+
+轉檔後播放完全不需要運算，時間軸上看得到波形，專案給沒安裝外掛的人也聽得到。這一步不經過 After Effects
+的算圖佇列，也不會動到工作區或其他圖層，通常幾百毫秒就完成。專案需要先存檔，音訊才知道要放在哪裡。
 
 面板會在同一文字圖層加入零音量的 AE 內建 Tone 作為音訊來源，再由 `Island Chatter Native` 取代輸出樣本。這是為了避開 AE 26 對第三方文字圖層音訊合成的宿主崩潰路徑；不會建立載體圖層或外部 WAV。
 
@@ -101,4 +122,4 @@ After Effects 是 Adobe 的商標；Nintendo 與 Animal Crossing 是其各自權
 
 ## English
 
-Island Chatter AE is an original, procedural Mandarin character-voice effect for Adobe After Effects. It runs directly on text layers, creates no audio files, supports Traditional and Simplified Chinese readings, pronunciation overrides, character presets, timing markers, rig controllers, and Type-On animation. See the installation section above or the release archive for the Windows installer.
+Island Chatter AE is an original, procedural Mandarin character-voice effect for Adobe After Effects. It runs directly on text layers, needs no audio files to preview or render, and can bake to WAV on demand. It supports Traditional and Simplified Chinese readings, pronunciation overrides, character presets, timing markers, rig controllers, and Type-On animation. See the installation section above or the release archive for the Windows installer.

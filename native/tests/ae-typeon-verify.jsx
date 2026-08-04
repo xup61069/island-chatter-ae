@@ -30,9 +30,13 @@
         }
 
         var names = ["valuesDiffer", "setPropertyValue", "clearKeys", "setHoldKey",
-            "findNamedProperty", "findPropertyByMatchName", "updateTypeOn"];
+            "findNamedProperty", "findPropertyByMatchName", "setRevealSmoothness",
+            "updateTypeOn"];
         var code = [];
         for (var n = 0; n < names.length; n += 1) { code.push(take(names[n])); }
+        // setRevealSmoothness() compares against this.
+        var defaultStart = source.indexOf("var AE_DEFAULT_SMOOTHNESS =");
+        code.push(source.substring(defaultStart, source.indexOf(";", defaultStart) + 1));
         eval(code.join("\n"));
         log("extracted from the repository panel: " + names.join(", "));
 
@@ -90,6 +94,36 @@
             if (props.property(p).matchName === "ADBE Text Opacity") { opacity = props.property(p); }
         }
         log("Opacity value: " + opacity.value + " (expected 0)");
+
+        var advanced = null;
+        for (var v = 1; v <= reveal.numProperties; v += 1) {
+            if (reveal.property(v).matchName === "ADBE Text Range Advanced") {
+                advanced = reveal.property(v);
+            }
+        }
+        var smoothness = null;
+        if (advanced) {
+            for (var w = 1; w <= advanced.numProperties; w += 1) {
+                if (advanced.property(w).matchName === "ADBE Text Selector Smoothness") {
+                    smoothness = advanced.property(w);
+                }
+            }
+        }
+        log("Smoothness: " + (smoothness ? smoothness.value : "<not found>") + " (expected 0)");
+        if (!smoothness || smoothness.value !== 0) {
+            ok = false;
+            log("FAIL  Smoothness was not defaulted to 0");
+        } else {
+            log("PASS  Smoothness defaulted to 0");
+        }
+        // A deliberate value must survive a later apply.
+        smoothness.setValue(35);
+        updateTypeOn(layer, plan, 0);
+        log(smoothness.value === 35
+            ? "PASS  a user's own Smoothness (35) was left alone"
+            : "FAIL  a user's own Smoothness was overwritten with " + smoothness.value);
+        if (smoothness.value !== 35) { ok = false; }
+        smoothness.setValue(0);
 
         // Now the case the previous fix was aimed at: user keyframes the
         // properties the panel writes, then applies again.
