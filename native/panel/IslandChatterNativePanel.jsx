@@ -132,6 +132,24 @@
         }
     }
 
+    // The inverse of setEffectParameters(): what the layer is actually set to,
+    // which is not necessarily what the panel is showing.
+    function settingsFromEffect(effect) {
+        return {
+            voice: Math.round(effect.property(PARAM_VOICE).value) - 1,
+            pitch: effect.property(PARAM_PITCH).value,
+            speed: effect.property(PARAM_SPEED).value,
+            volume: effect.property(PARAM_VOLUME).value / 100,
+            consonant: effect.property(PARAM_CONSONANT).value,
+            emotion: Math.round(effect.property(PARAM_EMOTION).value) - 1,
+            characterSize: Math.round(effect.property(PARAM_CHARACTER_SIZE).value) - 1,
+            clarity: effect.property(PARAM_CLARITY).value / 100,
+            cuteness: effect.property(PARAM_CUTENESS).value / 100,
+            seed: Math.round(effect.property(PARAM_SEED).value),
+            tempoLock: Math.round(effect.property(PARAM_TEMPO_LOCK).value) !== 0
+        };
+    }
+
     function textFromEffect(effect) {
         var units = Math.min(Math.round(effect.property(PARAM_TEXT_LENGTH).value), MAX_TEXT_UNITS);
         var value = "";
@@ -425,24 +443,44 @@
     // Speed again by emotion and character size, so every timing the panel
     // writes has to use the same effective value or Fit Duration, markers, the
     // rig and Type-On all drift away from what you hear.
-    // Speed that makes one syllable land on each beat subdivision. Derived from
-    // the syllable slot, so it needs no calibration: at 120 BPM with one
-    // syllable per beat a syllable occupies exactly 0.5 s.
-    function speedForTempo(bpm, syllablesPerBeat) {
-        return clamp(bpm, 20, 400) * syllablesPerBeat * SYLLABLE_STRIDE / 60.0;
+    // apply_character_style() in native/src/dsp.cpp scales Speed again by
+    // emotion and character size before anything is timed. Every calculation
+    // that has to agree with the audio must go through this.
+    function styleSpeedMultiplier(emotion, characterSize) {
+        var factor = 1.0;
+        if (characterSize === 0) { factor *= 1.08; }
+        else if (characterSize === 1) { factor *= 1.04; }
+        else if (characterSize === 3) { factor *= 0.91; }
+        if (emotion === 1) { factor *= 1.08; }
+        else if (emotion === 2) { factor *= 1.12; }
+        else if (emotion === 3) { factor *= 1.14; }
+        else if (emotion === 5) { factor *= 0.78; }
+        else if (emotion === 6) { factor *= 0.96; }
+        return factor;
     }
 
     function effectiveSpeed(settings) {
-        var speed = settings.speed;
-        if (settings.characterSize === 0) { speed *= 1.08; }
-        else if (settings.characterSize === 1) { speed *= 1.04; }
-        else if (settings.characterSize === 3) { speed *= 0.91; }
-        if (settings.emotion === 1) { speed *= 1.08; }
-        else if (settings.emotion === 2) { speed *= 1.12; }
-        else if (settings.emotion === 3) { speed *= 1.14; }
-        else if (settings.emotion === 5) { speed *= 0.78; }
-        else if (settings.emotion === 6) { speed *= 0.96; }
-        return speed;
+        return settings.speed *
+            styleSpeedMultiplier(settings.emotion, settings.characterSize);
+    }
+
+    // Speed that puts one syllable on each beat subdivision.
+    //
+    // The tempo fixes the *effective* speed, but the slider holds the value
+    // before the style multiplier, so it has to be divided back out. Without
+    // this the tempo drifts with the character: Sleepy ran 28% slow and
+    // Scared with a Tiny character 19% fast, while Neutral/Adult looked exact
+    // because both of their multipliers are 1.
+    function speedForTempo(bpm, syllablesPerBeat, emotion, characterSize) {
+        var target = clamp(bpm, 20, 400) * syllablesPerBeat * SYLLABLE_STRIDE / 60.0;
+        return target / styleSpeedMultiplier(emotion, characterSize);
+    }
+
+    // The inverse, used when reading a tempo-locked layer back into the panel so
+    // the BPM field reproduces the Speed the layer already has.
+    function tempoForSpeed(speed, syllablesPerBeat, emotion, characterSize) {
+        return speed * styleSpeedMultiplier(emotion, characterSize) * 60.0 /
+            (SYLLABLE_STRIDE * syllablesPerBeat);
     }
 
     function updateTimingMarkers(layer, plan) {
@@ -1002,12 +1040,26 @@
         panel.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
         var textInput = panel.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });
         textInput.preferredSize = [390, 88];
-        var selectedButton = panel.add("button", undefined, "Use selected text layer / 使用選取文字圖層");
+        var selectedButton = panel.add("button", undefined,
+            "Read selected layer / 讀取選取圖層");
+        selectedButton.helpTip = "Load the layer's text and, if Island Chatter is already on" +
+            " it, every voice setting back into this panel." +
+            "\n把圖層的文字讀進來；若已套用過 Island Chatter，連語音設定一起讀回面板。";
         selectedButton.onClick = function () {
             var comp = app.project ? app.project.activeItem : null;
             var layer = comp && comp instanceof CompItem ? selectedTextLayer(comp) : null;
-            if (!layer) { alert("Select a text layer. / 請選取文字圖層。"); }
-            else { textInput.text = textFromLayer(layer); }
+            if (!layer) {
+                alert("Select a text layer. / 請選取文字圖層。");
+                return;
+            }
+            textInput.text = textFromLayer(layer);
+            var effect = findNativeEffect(layer);
+            if (!effect) {
+                status.text = "Read text only / 只讀到文字（此圖層尚未套用）";
+                return;
+            }
+            applySettingsToUI(settingsFromEffect(effect));
+            status.text = "Read settings from / 已讀取設定：" + layer.name;
         };
         panel.add("statictext", undefined,
             "Pronunciation override (optional) / 讀音覆寫（可留空）");
@@ -1051,6 +1103,11 @@
         var tempoReadout = panel.add("statictext", undefined, "");
         tempoReadout.alignment = ["fill", "top"];
 
+        // refreshTempo() writes the Speed slider itself. Guard against that write
+        // being mistaken for the user dragging it, which would switch tempo mode
+        // straight back off.
+        var writingSpeed = false;
+
         function currentSyllablesPerBeat() {
             return perBeatValues[perBeat.selection ? perBeat.selection.index : 1];
         }
@@ -1061,19 +1118,55 @@
             }
             var bpm = parseFloat(bpmField.text);
             if (isNaN(bpm)) { bpm = 120; bpmField.text = "120"; }
-            var derived = speedForTempo(bpm, currentSyllablesPerBeat());
+            var emotionIndex = emotion.selection ? emotion.selection.index : 0;
+            var sizeIndex = characterSize.selection ? characterSize.selection.index : 2;
+            var derived = speedForTempo(bpm, currentSyllablesPerBeat(), emotionIndex, sizeIndex);
+            writingSpeed = true;
             setSliderValue(speed, clamp(derived, 0.10, 10.00));
+            writingSpeed = false;
             var perSyllable = 60.0 / clamp(bpm, 20, 400) / currentSyllablesPerBeat();
-            tempoReadout.text = "Speed " + derived.toFixed(3) + "  ->  " +
-                perSyllable.toFixed(3) + " s / 字" +
-                (derived > 10.0 || derived < 0.10 ? "  (out of range / 超出範圍)" : "");
+            var style = styleSpeedMultiplier(emotionIndex, sizeIndex);
+            tempoReadout.text = perSyllable.toFixed(3) + " s / 字   Speed " + derived.toFixed(3) +
+                (valuesDiffer(style, 1.0) ? "  (x" + style.toFixed(2) + " 角色補償)" : "") +
+                (derived > 10.0 || derived < 0.10 ? "   OUT OF RANGE / 超出範圍" : "");
         }
+        // Loads a layer's stored settings back into the controls. A tempo-locked
+        // layer only stores the resulting Speed, so the BPM is derived back from
+        // it against the subdivision currently selected; feeding that BPM through
+        // speedForTempo() returns the same Speed, so the round trip is stable.
+        function applySettingsToUI(loaded) {
+            voice.selection = loaded.voice;
+            emotion.selection = loaded.emotion;
+            characterSize.selection = loaded.characterSize;
+            setSliderValue(pitch, clamp(loaded.pitch, 0.10, 4.00));
+            setSliderValue(volume, clamp(loaded.volume, 0.00, 2.00));
+            setSliderValue(consonant, clamp(loaded.consonant, 0.00, 6.00));
+            setSliderValue(clarity, clamp(loaded.clarity, 0.00, 1.00));
+            setSliderValue(cuteness, clamp(loaded.cuteness, 0.00, 1.00));
+            setSliderValue(seed, clamp(loaded.seed, 0, 999999));
+            preset.selection = 0;
+            tempoOn.value = loaded.tempoLock;
+            if (loaded.tempoLock) {
+                var bpm = tempoForSpeed(loaded.speed, currentSyllablesPerBeat(),
+                    loaded.emotion, loaded.characterSize);
+                bpmField.text = String(Math.round(bpm * 100) / 100);
+            }
+            writingSpeed = true;
+            setSliderValue(speed, clamp(loaded.speed, 0.10, 10.00));
+            writingSpeed = false;
+            refreshTempo();
+        }
+
         tempoOn.onClick = refreshTempo;
         bpmField.onChange = refreshTempo;
         perBeat.onChange = refreshTempo;
+        // Emotion and character size change the engine's speed multiplier, so
+        // the derived Speed has to be recomputed when either of them moves.
+        emotion.onChange = refreshTempo;
+        characterSize.onChange = refreshTempo;
         speed.onChanging = function () {
             // Dragging Speed by hand means the tempo is no longer driving it.
-            if (tempoOn.value) { tempoOn.value = false; refreshTempo(); }
+            if (!writingSpeed && tempoOn.value) { tempoOn.value = false; refreshTempo(); }
             if (speed.valueField) { speed.valueField.text = speed.value.toFixed(2); }
         };
         refreshTempo();
@@ -1101,6 +1194,9 @@
             setSliderValue(clarity, values[5]);
             setSliderValue(cuteness, values[6]);
             setSliderValue(seed, values[7]);
+            // A preset carries an emotion and a size, both of which move the
+            // engine's speed multiplier, so a live tempo has to be recomputed.
+            refreshTempo();
         }
         preset.onChange = function () {
             var at = preset.selection ? preset.selection.index : 0;
@@ -1118,6 +1214,7 @@
             setSliderValue(cuteness, 0.25 + Math.random() * 0.72);
             setSliderValue(seed, 1 + Math.floor(Math.random() * 9999));
             preset.selection = 0;
+            refreshTempo();
         };
         // Saved characters live in one settings string as "name=v,v,v|name=...".
         // Previously there was a single unnamed slot, and its Load button was
