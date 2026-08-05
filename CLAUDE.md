@@ -47,7 +47,7 @@ effect.
 | `native/panel/IslandChatterNativePanel.jsx` | ExtendScript/ScriptUI UI, Source Text transfer, Tone/native-effect setup, markers, rig sliders, Type-On |
 | `native/plugin/IslandChatterNative.cpp` | Thin Adobe SDK adapter and `PF_Cmd_AUDIO_RENDER` implementation |
 | `native/plugin/params.hpp` | Persistent After Effects parameter ABI |
-| `native/src/dsp.cpp` | UTF-8 planning, Mandarin readings, sandhi, phoneme/event planning, synthesis, random-access copying |
+| `native/src/dsp.cpp` | UTF-8 planning, Mandarin readings, sandhi, kana, phoneme/event planning, synthesis, random-access copying |
 | `native/src/synthesis_cache.cpp` | Bounded thread-safe single-flight cache for AE block rendering |
 | `native/generated/mandarin_readings.hpp` | Generated Unihan lookup table; do not hand-edit |
 | `native/tools/bake_cli.cpp` | `island_chatter_bake`: renders a WAV, and reports the timing plan with `--plan` |
@@ -147,6 +147,18 @@ effect.
    that works — the undo history goes but the RAM preview survives. Bake renders before
    it touches the project and only releases the previous bake if the write failed, so a
    first bake never purges. `native/tests/ae-rebake-probe.jsx` is the diagnostic.
+8h. **Kana is spoken, kanji is not guessed.** A syllabary needs no dictionary, so Japanese
+   costs nothing to install and nothing to keep synchronised. Kanji is another matter: the
+   reading depends on the word, so unmarked kanji keeps its Mandarin reading and the panel
+   warns. The same applies to は and へ, which are particles only sometimes — こんにちは is
+   wa, おはよう is ha, and no local rule separates them. `kKanaPhrases` holds only the fixed
+   greetings where there is no ambiguity; keep it tiny, like `kPhrasePronunciations`.
+   Do not add a heuristic here without a Japanese corpus to measure it against.
+8i. **The panel's interface language is not a render setting.** It never reaches the effect:
+   kana is read as Japanese and Han characters as Mandarin whatever the panel is showing.
+   Labels stay written as `"English / 中文"` throughout and `localiseTree()` translates them
+   in one pass after the panel is built, so `IC_JAPANESE_UI` is keyed by those literals and
+   `npm test` fails when a renamed label strands its translation.
 9. **Generated reading tables stay synchronized.** Regenerate them with the scripts in
    `native/tools/`; do not patch individual generated entries.
 10. **Source Text remains authoritative.** The user explicitly presses Apply again after editing.

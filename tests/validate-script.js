@@ -346,6 +346,58 @@ for (const bpm of [60, 90, 120, 174]) {
   }
 }
 
+// The interface language layer. The panel is written throughout as
+// "English / 中文" and translated in one pass, so the Japanese table is keyed by
+// those literals — and a renamed label would leave its translation stranded
+// with nothing to say so.
+{
+  const table = nativePanelSource.match(/var IC_JAPANESE_UI = \{([\s\S]*?)\n    \};/);
+  if (!table) throw new Error("The panel has no Japanese interface table");
+  const keys = [...table[1].matchAll(/^\s*"((?:[^"\\]|\\.)*)":/gm)].map((m) => m[1]);
+  if (keys.length < 40) {
+    throw new Error(`Only ${keys.length} interface strings are translated; the panel has far more`);
+  }
+  // Everything outside the table itself, so a key cannot match its own entry.
+  const panelWithoutTable = nativePanelSource.replace(table[0], "");
+  for (const key of keys) {
+    if (!panelWithoutTable.includes(key)) {
+      throw new Error(
+        `The Japanese interface table translates "${key}", which the panel no longer says`);
+    }
+    if (key.indexOf(" / ") <= 0) {
+      throw new Error(`Interface key "${key}" is not in the "English / 中文" form T() expects`);
+    }
+  }
+  const localiser = { String };
+  vm.createContext(localiser);
+  vm.runInContext([
+    takeVariable("UI_LANGUAGE"),
+    nativePanelSource.slice(nativePanelSource.indexOf("var IC_JAPANESE_UI = {")).slice(
+      0, nativePanelSource.slice(nativePanelSource.indexOf("var IC_JAPANESE_UI = {"))
+        .indexOf("\n    };") + 7),
+    takeFunction("T"),
+  ].join("\n"), localiser);
+  for (const [language, literal, expected] of [
+    ["zh", "Pitch / 音高", "音高"],
+    ["en", "Pitch / 音高", "Pitch"],
+    ["ja", "Pitch / 音高", "ピッチ"],
+    // Not in the table: Japanese has to fall back rather than show nothing.
+    ["ja", "Nonsense / 亂寫", "Nonsense"],
+    // No separator at all: left alone in every language.
+    ["ja", "IC Mouth", "IC Mouth"],
+    ["zh", "IC Mouth", "IC Mouth"],
+    // Every object inherits these names; the table must not answer for them.
+    ["ja", "constructor", "constructor"],
+    ["ja", "toString / 字串", "toString"],
+  ]) {
+    localiser.UI_LANGUAGE = language;
+    const got = vm.runInContext(`T(${JSON.stringify(literal)})`, localiser);
+    if (got !== expected) {
+      throw new Error(`T("${literal}") in ${language} returned "${got}", expected "${expected}"`);
+    }
+  }
+}
+
 // Decoding the engine's plan. The plan itself is covered against the real tool
 // in tests/bake-cli.test.js and against the engine in native/tests/dsp_tests.cpp;
 // what is checked here is that the panel reads it correctly, including the cases
