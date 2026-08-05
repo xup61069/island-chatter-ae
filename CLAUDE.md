@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v1.0.2` (Windows x64).
+- Current public release: `v1.0.10` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -57,6 +57,7 @@ effect.
 | `tests/validate-script.js` | ExtendScript syntax and cross-file release/invariant validation |
 | `IslandChatter.jsx` | Legacy file-based prototype; retained and tested, but not the primary native release path |
 | `installer/` and `tools/package-release.ps1` | Windows installation and release packaging |
+| `installer/README.txt` | The only instruction a buyer gets; UTF-8 with a BOM, CRLF |
 
 ## Compatibility invariants
 
@@ -114,6 +115,13 @@ effect.
    package without it. Paths and text cross the boundary as hex UTF-8: `system.callSystem()`
    converts the command line to the console code page, which turns any character outside it
    into `?`. `tests/bake-cli.test.js` covers exactly that case.
+8f. **The release package root holds only decisions.** `Install.bat`, `Uninstall.bat`,
+   `README.txt` and `LICENSE`; everything else lives in `resources\`. Nine items with three
+   plausible-looking `.aex`/`.jsx` files in the middle left first-time buyers guessing.
+   `Install-IslandChatter.ps1` searches `$PSScriptRoot`, its parent, and the parent's
+   `resources\` for the payload rather than assuming a shape, so packages built before 1.0.10
+   still install. `tests/validate-script.js` asserts the staging of every payload file, both
+   that it goes into `resources\` and that it does not also appear at the top.
 9. **Generated reading tables stay synchronized.** Regenerate them with the scripts in
    `native/tools/`; do not patch individual generated entries.
 10. **Source Text remains authoritative.** The user explicitly presses Apply again after editing.

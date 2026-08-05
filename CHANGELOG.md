@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.10 - 2026-08-05
+
+- Cut the extracted package from nine items to four. `Install.bat`, `Uninstall.bat`,
+  `README.txt` and `LICENSE` are all that is visible; the plug-in, the bake tool, the panel,
+  the readings table and the install scripts move into `resources\`. Nine items with three
+  plausible-looking `.aex`/`.jsx` files in the middle left first-time buyers guessing which
+  one to open.
+- `Install-IslandChatter.ps1` now searches for its payload instead of assuming it sits one
+  directory up, so it works from the new layout, the old one, and the repository.
+- `README.txt` is the only instruction a buyer gets: UTF-8 with a BOM so Notepad renders the
+  Chinese, CRLF pinned in `.gitattributes`.
+- `npm test` checks the package layout itself — every payload file must be staged into
+  `resources\` and must not also appear at the top, and the launchers must look there.
+- Refuse to encode a version that does not fit `PF_VERSION`'s bit fields. Bug has four bits,
+  so 1.0.16 would encode identically to 1.0.0 and After Effects would read the upgrade as a
+  downgrade.
+
 ## 1.0.9 - 2026-08-04
 
 - Add `Install.bat` and `Uninstall.bat` at the top of the release package, so installing is

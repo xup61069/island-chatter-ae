@@ -7,10 +7,9 @@ param(
 $ErrorActionPreference = "Stop"
 # Part of the release synchronisation list in CLAUDE.md; tests/validate-script.js
 # checks this against package.json.
-$IslandChatterVersion = "1.0.9"
+$IslandChatterVersion = "1.0.10"
 # After Effects releases this plug-in is built and verified against.
 $MinimumSupportedYear = 2025
-$payloadRoot = Split-Path -Parent $PSScriptRoot
 $requiredFiles = @(
     "IslandChatterNative.aex",
     "island_chatter_bake.exe",
@@ -18,11 +17,27 @@ $requiredFiles = @(
     "IslandChatterMandarinReadings.jsxinc"
 )
 
-foreach ($requiredFile in $requiredFiles) {
-    $requiredPath = Join-Path $payloadRoot $requiredFile
-    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
-        throw "Missing release payload: $requiredPath"
-    }
+# The release package hides everything except the two launchers, so this script
+# now sits beside its payload in resources\. Older packages put it in
+# installer\ with the payload one level up, and either arrangement may still be
+# on someone's disk. Look for the files rather than assuming a fixed shape.
+$payloadCandidates = @(
+    $PSScriptRoot,
+    (Split-Path -Parent $PSScriptRoot),
+    (Join-Path (Split-Path -Parent $PSScriptRoot) "resources")
+)
+$payloadRoot = $payloadCandidates | Where-Object {
+    $candidate = $_
+    $candidate -and (Test-Path -LiteralPath $candidate -PathType Container) -and
+        -not ($requiredFiles | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $candidate $_) -PathType Leaf)
+        })
+} | Select-Object -First 1
+
+if (-not $payloadRoot) {
+    throw ("Cannot find the plug-in files. Expected " + ($requiredFiles -join ", ") +
+        " in one of:`n  " + ($payloadCandidates -join "`n  ") +
+        "`nExtract the whole ZIP before running the installer.")
 }
 
 if (Get-Process -Name AfterFX -ErrorAction SilentlyContinue) {

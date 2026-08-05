@@ -43,16 +43,29 @@
 
 要移除就雙擊 `Uninstall.bat`。
 
-`Install.bat` 只是替你開好權限並執行 `installer\Install-IslandChatter.ps1`，兩個都是純文字檔，
+解壓縮出來只有四樣東西，要動的只有第一個：
+
+```
+Island-Chatter-AE-1.0.10-Windows-x64/
+  Install.bat        ← 雙擊這個
+  Uninstall.bat
+  README.txt
+  LICENSE
+  resources/         ← 外掛本體與安裝腳本，不用手動去動它
+```
+
+`Install.bat` 只是替你開好權限並執行 `resources\Install-IslandChatter.ps1`，兩個都是純文字檔，
 可以先打開看內容。想自己下指令也可以：
 
    ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-IslandChatter.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\resources\Install-IslandChatter.ps1
    ```
 
 安裝器預設安裝到最新版本的 AE；加上 `-AllVersions` 可安裝到所有偵測到的版本。也可以用 `-AfterEffectsRoot "...\Support Files"` 指定位置。
 
 ### 手動安裝
+
+四個檔案都在 `resources\` 裡：
 
 - 把 `IslandChatterNative.aex` 與 `island_chatter_bake.exe` 放到 `Support Files\Plug-ins\Island Chatter\`
 - 把 `IslandChatterNativePanel.jsx` 與 `IslandChatterMandarinReadings.jsxinc` 放到 `Support Files\Scripts\ScriptUI Panels\`
