@@ -36,6 +36,12 @@
     var PARAM_CUTENESS = 74;
     var PARAM_SEED = 75;
     var PARAM_TEMPO_LOCK = 76;
+    // Appended in 1.1.0. Defaults reproduce 1.0.x, so an older layer read back
+    // into the panel keeps the voice it had.
+    var PARAM_FORMANT = 77;
+    var PARAM_SOURCE = 78;
+    var PARAM_VIBRATO = 79;
+    var PARAM_VIBRATO_RATE = 80;
     // One syllable slot in seconds before Speed is applied, matching
     // kSyllableStride in native/src/dsp.cpp. Speed for a tempo is therefore
     // BPM * syllablesPerBeat / (60 / kSyllableStride) = BPM * perBeat / 300.
@@ -116,6 +122,10 @@
         setPropertyValue(effect.property(PARAM_CUTENESS), settings.cuteness * 100, time);
         setPropertyValue(effect.property(PARAM_SEED), Math.round(settings.seed), time);
         setPropertyValue(effect.property(PARAM_TEMPO_LOCK), settings.tempoLock ? 1 : 0, time);
+        setPropertyValue(effect.property(PARAM_FORMANT), settings.formant * 100, time);
+        setPropertyValue(effect.property(PARAM_SOURCE), settings.source + 1, time);
+        setPropertyValue(effect.property(PARAM_VIBRATO), settings.vibrato * 100, time);
+        setPropertyValue(effect.property(PARAM_VIBRATO_RATE), settings.vibratoRate, time);
         setPropertyValue(effect.property(PARAM_TEXT_LENGTH), units, time);
         var index;
         for (index = 0; index < MAX_TEXT_UNITS; index += 1) {
@@ -147,7 +157,11 @@
             clarity: effect.property(PARAM_CLARITY).value / 100,
             cuteness: effect.property(PARAM_CUTENESS).value / 100,
             seed: Math.round(effect.property(PARAM_SEED).value),
-            tempoLock: Math.round(effect.property(PARAM_TEMPO_LOCK).value) !== 0
+            tempoLock: Math.round(effect.property(PARAM_TEMPO_LOCK).value) !== 0,
+            formant: effect.property(PARAM_FORMANT).value / 100,
+            source: Math.round(effect.property(PARAM_SOURCE).value) - 1,
+            vibrato: effect.property(PARAM_VIBRATO).value / 100,
+            vibratoRate: effect.property(PARAM_VIBRATO_RATE).value
         };
     }
 
@@ -273,7 +287,11 @@
             " --consonant " + effect.property(PARAM_CONSONANT).value +
             " --clarity " + (effect.property(PARAM_CLARITY).value / 100) +
             " --cuteness " + (effect.property(PARAM_CUTENESS).value / 100) +
-            " --tempo-lock " + (Math.round(effect.property(PARAM_TEMPO_LOCK).value) ? 1 : 0);
+            " --tempo-lock " + (Math.round(effect.property(PARAM_TEMPO_LOCK).value) ? 1 : 0) +
+            " --formant " + (effect.property(PARAM_FORMANT).value / 100) +
+            " --source " + (Math.round(effect.property(PARAM_SOURCE).value) - 1) +
+            " --vibrato " + (effect.property(PARAM_VIBRATO).value / 100) +
+            " --vibrato-rate " + effect.property(PARAM_VIBRATO_RATE).value;
     }
 
     function requireEngineTool() {
@@ -1146,6 +1164,20 @@
         var consonant = addSlider(panel, "Consonant / 聲母", 0.00, 6.00, 1.25);
         var clarity = addSlider(panel, "Clarity / 清晰度", 0.00, 1.00, 0.78);
         var cuteness = addSlider(panel, "Cuteness / 可愛度", 0.00, 1.00, 0.55);
+        // Timbre. Every default reproduces 1.0.x, so nothing here changes an
+        // existing layer until it is moved.
+        var formant = addSlider(panel, "Formant / 共鳴", 0.25, 4.00, 1.00);
+        formant.helpTip = "Scales the vocal tract without touching the pitch." +
+            "\n縮放口腔大小，音高不變：往左變小動物，往右變巨人。";
+        var source = panel.add("dropdownlist", undefined, [
+            "Voice / 人聲", "Reed / 簧片", "Chip / 電子", "Metallic / 金屬",
+            "Granular / 破碎", "Growl / 低吼"
+        ]);
+        source.selection = 0;
+        source.helpTip = "What the vocal folds are replaced with." +
+            "\n換掉發聲源本身，不只是換共鳴。";
+        var vibrato = addSlider(panel, "Vibrato / 顫音", 0.00, 4.00, 1.00);
+        var vibratoRate = addSlider(panel, "Vibrato Rate / 顫音速率", 0.00, 30.00, 9.20);
         var seed = addSlider(panel, "Seed / 種子", 0, 999999, 0);
 
         // Tempo. Speed stays the underlying control; these just drive it.
@@ -1204,6 +1236,10 @@
             setSliderValue(consonant, clamp(loaded.consonant, 0.00, 6.00));
             setSliderValue(clarity, clamp(loaded.clarity, 0.00, 1.00));
             setSliderValue(cuteness, clamp(loaded.cuteness, 0.00, 1.00));
+            setSliderValue(formant, clamp(loaded.formant, 0.25, 4.00));
+            source.selection = clamp(loaded.source, 0, 5);
+            setSliderValue(vibrato, clamp(loaded.vibrato, 0.00, 4.00));
+            setSliderValue(vibratoRate, clamp(loaded.vibratoRate, 0.00, 30.00));
             setSliderValue(seed, clamp(loaded.seed, 0, 999999));
             preset.selection = 0;
             tempoOn.value = loaded.tempoLock;
@@ -1491,7 +1527,11 @@
                     cuteness: cuteness.value,
                     seed: seed.value,
                     // Locking the grid is only meaningful when a tempo drives Speed.
-                    tempoLock: tempoOn.value
+                    tempoLock: tempoOn.value,
+                    formant: formant.value,
+                    source: source.selection ? source.selection.index : 0,
+                    vibrato: vibrato.value,
+                    vibratoRate: vibratoRate.value
                 }, {
                     markers: markers.value,
                     fitDuration: fitDuration.value,

@@ -98,6 +98,13 @@ island_chatter::Settings settings_from_params(PF_ParamDef* params[], std::uint32
     settings.seed = static_cast<std::uint32_t>(std::max<A_long>(0,
         params[island_chatter::ae::kParamSeed]->u.sd.value));
     settings.tempo_lock = params[island_chatter::ae::kParamTempoLock]->u.bd.value != 0;
+    settings.formant = quantize(params[island_chatter::ae::kParamFormant]->u.fs_d.value, 0.1) / 100.0;
+    settings.source = static_cast<island_chatter::SourceType>(std::clamp<A_long>(
+        params[island_chatter::ae::kParamSource]->u.pd.value - 1, 0, 5));
+    settings.vibrato_depth =
+        quantize(params[island_chatter::ae::kParamVibratoDepth]->u.fs_d.value, 0.1) / 100.0;
+    settings.vibrato_rate =
+        quantize(params[island_chatter::ae::kParamVibratoRate]->u.fs_d.value, 0.01);
     settings.sample_rate = sample_rate;
     return settings;
 }
@@ -172,6 +179,20 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
     PF_ADD_SLIDER("Seed / 種子", 0, 999999, 0, 9999, 0, 75);
     AEFX_CLR_STRUCT(def);
     PF_ADD_CHECKBOXX("Tempo Lock / 節拍鎖定", 0, 0, 76);
+    // Appended in 1.1.0. Every default reproduces 1.0.x exactly, so opening an
+    // older project does not change how it sounds.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Formant / 共鳴", 25.0, 400.0, 50.0, 200.0, 100.0,
+        PF_Precision_TENTHS, PF_ValueDisplayFlag_PERCENT, PF_ParamFlag_NONE, 77);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUPX("Timbre / 音源", 6, 1,
+        "Voice|Reed|Chip|Metallic|Granular|Growl", PF_ParamFlag_NONE, 78);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Vibrato / 顫音", 0.0, 400.0, 0.0, 200.0, 100.0,
+        PF_Precision_TENTHS, PF_ValueDisplayFlag_PERCENT, PF_ParamFlag_NONE, 79);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Vibrato Rate / 顫音速率", 0.00, 30.00, 0.50, 20.00, 9.20,
+        PF_Precision_HUNDREDTHS, 0, PF_ParamFlag_NONE, 80);
     out_data->num_params = island_chatter::ae::kParamCount;
     return PF_Err_NONE;
 }

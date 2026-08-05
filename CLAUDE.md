@@ -62,9 +62,11 @@ effect.
 ## Compatibility invariants
 
 1. **Parameter order is a saved-project ABI.** `params.hpp`, the native plug-in, the panel constants,
-   PiPL version, and tests must remain synchronized. There are 76 slots including input: input `0`,
-   visible voice controls `1-5`, text length `6`, 64 UTF-16 units `7-70`, and creative controls
-   `71-75`. Append new parameters; never reorder or reuse a published index.
+   PiPL version, and tests must remain synchronized. There are 81 slots including input: input `0`,
+   visible voice controls `1-5`, text length `6`, 64 UTF-16 units `7-70`, creative controls
+   `71-75`, tempo lock `76`, and timbre `77-80`. Append new parameters; never reorder or reuse a
+   published index. Every appended parameter needs a default that reproduces the previous
+   behaviour, or older projects change how they sound when they are opened.
 2. **ExtendScript is ES3-era.** Avoid modern JavaScript syntax and APIs in `.jsx`/`.jsxinc` files.
 3. **AE invalidates Property handles after effect-stack mutation.** Reacquire effect groups and
    properties after `addProperty()` or reordering effects.

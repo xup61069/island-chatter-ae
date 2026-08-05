@@ -103,7 +103,7 @@
             check(tone.propertyIndex < chatter.propertyIndex, "Tone sits before the native effect");
             check(tone.propertyIndex === chatter.propertyIndex - 1, "Tone is immediately before it");
             check(tone.property(6).value === 0, "Tone level is zero");
-            check(chatter.numProperties === 77, "native effect exposes 77 parameters, got " + chatter.numProperties);
+            check(chatter.numProperties === 81, "native effect exposes 81 parameters, got " + chatter.numProperties);
             check(Math.round(chatter.property(6).value) === TEXT.length,
                 "text length parameter is " + TEXT.length + ", got " + Math.round(chatter.property(6).value));
             var textOk = true;
