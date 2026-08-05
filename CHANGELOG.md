@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.0 - 2026-08-05
+
+English, and twice as much room for it.
+
+- **English is syllabified a word at a time** instead of pairing each consonant with the
+  vowel after it. Spelling only means anything at word scale — though, through and tough
+  share four letters and no sounds — and the old approach gave "strength" four syllables.
+  Handled: vowel digraphs, the silent final e and the length it implies, consonant digraphs
+  that must not be split (mo-ther, never mot-her), the glide letters that decide whether a
+  syllable ends or a new one begins (brown against flo-wer, day against pla-yer), and
+  word-final l, m and n that are syllables without a vowel of their own (rhy-thm, lit-tle).
+- **Stress.** The stressed syllable is longer and higher; unstressed ones shorten to roughly
+  half and reduce to a schwa. That alternation is most of what makes speech sound like
+  English rather than like a list of syllables. Tempo Lock flattens it, because a beat grid
+  and a stress pattern cannot both be satisfied and the grid is what was asked for.
+- This is **not a pronunciation dictionary** and does not pretend to be one. The published
+  NRL letter-to-sound rules would be the obvious choice, but there are over three hundred of
+  them and reproducing them from memory would introduce errors nothing here could detect.
+  What this gets right is the syllable count, the vowel colour and the stress, which is what
+  a character voice needs.
+- **The text limit doubles to 128 UTF-16 units.** Sixty-four is a whole sentence in Chinese
+  but about ten words in English. The second block is appended at index 81; the indices in
+  between were published before it existed and cannot move.
+
 ## 1.2.0 - 2026-08-05
 
 Japanese, and an interface that speaks three languages.

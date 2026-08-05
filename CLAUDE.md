@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v1.0.10` (Windows x64).
+- Current public release: `v1.3.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -27,7 +27,7 @@ Nintendo, Animal Crossing, or other copyrighted game audio or extracted assets.
 
 ```text
 AE text layer Source Text
-  -> ScriptUI panel writes up to 64 UTF-16 code units into hidden effect parameters
+  -> ScriptUI panel writes up to 128 UTF-16 code units into hidden effect parameters
   -> zero-level built-in AE Tone creates the host sound object
   -> Island Chatter Native receives AE audio block requests
   -> SynthesisCache shares one full deterministic render across concurrent block misses
@@ -62,9 +62,10 @@ effect.
 ## Compatibility invariants
 
 1. **Parameter order is a saved-project ABI.** `params.hpp`, the native plug-in, the panel constants,
-   PiPL version, and tests must remain synchronized. There are 81 slots including input: input `0`,
-   visible voice controls `1-5`, text length `6`, 64 UTF-16 units `7-70`, creative controls
-   `71-75`, tempo lock `76`, and timbre `77-80`. Append new parameters; never reorder or reuse a
+   PiPL version, and tests must remain synchronized. There are 145 slots including input: input
+   `0`, visible voice controls `1-5`, text length `6`, text units 0-63 at `7-70`, creative
+   controls `71-75`, tempo lock `76`, timbre `77-80`, and text units 64-127 at `81-144`.
+   Append new parameters; never reorder or reuse a
    published index. Every appended parameter needs a default that reproduces the previous
    behaviour, or older projects change how they sound when they are opened.
 2. **ExtendScript is ES3-era.** Avoid modern JavaScript syntax and APIs in `.jsx`/`.jsxinc` files.
@@ -86,8 +87,14 @@ effect.
    must stay absent until that coverage exists.
 6. **Bound every audio write by the host destination.** Use `dest_snd.num_samples`; never infer the
    output size from requested duration alone.
-7. **The 64 UTF-16-unit text limit is intentional.** It is the current hidden-parameter transport
-   contract. Surrogate pairs consume two units and must decode correctly in the native adapter.
+7. **The text transport is two blocks of 64 UTF-16 units.** Units 0-63 at index 7, units 64-127
+   at index 81, because the indices in between were published before the second block existed
+   and cannot move. Both sides go through one helper — `textUnitProperty()` in the panel,
+   `unit_at()` in the adapter — because `kParamTextFirst + index` walks off the end of the
+   first block and into the creative controls. Surrogate pairs consume two units and must
+   decode correctly; one left stranded by the limit is dropped rather than emitted as CESU-8.
+   The limit exists because this is a parameter transport, not a text field: 128 units is a
+   long line of Chinese and about twenty words of English.
 8. **Synthesis is deterministic.** Text, all voice settings, seed, and sample rate belong in the
    cache key. The runtime remains dependency-free and ships no audio samples.
 8b. **The panel asks the engine for the plan; it must never compute one.** Markers, the
@@ -159,6 +166,16 @@ effect.
    Labels stay written as `"English / 中文"` throughout and `localiseTree()` translates them
    in one pass after the panel is built, so `IC_JAPANESE_UI` is keyed by those literals and
    `npm test` fails when a renamed label strands its translation.
+8j. **English is syllabified, not spelled out.** `english_syllables()` works a word at a time,
+   because English spelling only means anything at that scale — though, through and tough
+   share four letters and no sounds. It is deliberately a small rule set rather than the
+   published NRL letter-to-sound rules: there are over three hundred of those and reproducing
+   them from memory would introduce errors nothing here could detect. It is not a
+   pronunciation dictionary. What it has to get right is the syllable count, the vowel colour
+   and the stress, and `dsp_tests.cpp` pins those against a word list. Unstressed syllables
+   reduce to a schwa and shorten to roughly half; that alternation is most of what makes it
+   sound like English. Tempo lock flattens it, because a beat grid and a stress pattern
+   cannot both be satisfied.
 9. **Generated reading tables stay synchronized.** Regenerate them with the scripts in
    `native/tools/`; do not patch individual generated entries.
 10. **Source Text remains authoritative.** The user explicitly presses Apply again after editing.

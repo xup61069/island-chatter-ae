@@ -17,7 +17,10 @@
     var TONE_DISPLAY_NAME = "Island Chatter Audio Bootstrap";
     var OLD_CONTROL_NAME = "Island Chatter Control";
     var OLD_SOURCE_CONTROL_NAME = "Island Chatter Source";
-    var MAX_TEXT_UNITS = 64;
+    // Units 0-63 live at PARAM_TEXT_FIRST, 64-127 in the block appended in
+    // 1.3.0. The indices in between were already published and cannot move.
+    var TEXT_UNITS_PER_BLOCK = 64;
+    var MAX_TEXT_UNITS = TEXT_UNITS_PER_BLOCK * 2;
     // What the panel asks island_chatter_bake to work at, for both the timing
     // plan and Bake. Independent of the rate After Effects renders the effect
     // at: the plan is in seconds and the engine's timings scale with the rate.
@@ -30,6 +33,7 @@
     var PARAM_CONSONANT = 5;
     var PARAM_TEXT_LENGTH = 6;
     var PARAM_TEXT_FIRST = 7;
+    var PARAM_TEXT_SECOND_FIRST = 81;
     var PARAM_EMOTION = 71;
     var PARAM_CHARACTER_SIZE = 72;
     var PARAM_CLARITY = 73;
@@ -109,6 +113,12 @@
         }
     }
 
+    function textUnitProperty(effect, index) {
+        return index < TEXT_UNITS_PER_BLOCK
+            ? effect.property(PARAM_TEXT_FIRST + index)
+            : effect.property(PARAM_TEXT_SECOND_FIRST + index - TEXT_UNITS_PER_BLOCK);
+    }
+
     function setEffectParameters(effect, text, settings, time) {
         var units = Math.min(text.length, MAX_TEXT_UNITS);
         setPropertyValue(effect.property(PARAM_VOICE), settings.voice + 1, time);
@@ -129,7 +139,7 @@
         setPropertyValue(effect.property(PARAM_TEXT_LENGTH), units, time);
         var index;
         for (index = 0; index < MAX_TEXT_UNITS; index += 1) {
-            setPropertyValue(effect.property(PARAM_TEXT_FIRST + index),
+            setPropertyValue(textUnitProperty(effect, index),
                 index < units ? text.charCodeAt(index) : 0, time);
         }
     }
@@ -139,7 +149,7 @@
         effect.property(PARAM_TEXT_LENGTH).setValue(units);
         var index;
         for (index = 0; index < MAX_TEXT_UNITS; index += 1) {
-            effect.property(PARAM_TEXT_FIRST + index).setValue(index < units ? text.charCodeAt(index) : 0);
+            textUnitProperty(effect, index).setValue(index < units ? text.charCodeAt(index) : 0);
         }
     }
 
@@ -170,7 +180,7 @@
         var value = "";
         var index;
         for (index = 0; index < units; index += 1) {
-            value += String.fromCharCode(Math.round(effect.property(PARAM_TEXT_FIRST + index).value));
+            value += String.fromCharCode(Math.round(textUnitProperty(effect, index).value));
         }
         return value;
     }
