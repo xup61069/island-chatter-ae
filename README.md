@@ -1,7 +1,9 @@
 # Island Chatter AE
 
-讓 After Effects 的文字圖層直接發出原創的遊戲式角色語音，主要針對繁體／簡體中文設計。不需要先輸出 WAV 就能直接預覽與算圖；
-需要交檔或想省效能時，再按一次 Bake 轉成音訊檔即可。
+**繁體中文** · [English](README.en.md) · [日本語](README.ja.md)
+
+讓 After Effects 的文字圖層直接發出原創的遊戲式角色語音，不需要輸出任何音檔，AE內直接預覽生成聲音！
+語音主要針對中文設計，支援ㄅㄆㄇㄈ，也支援日文和英文，可自由調整發音。
 
 > 這是獨立開發的程序式語音合成器，沒有使用、擷取或附帶任天堂／《動物森友會》的聲音與素材。
 
@@ -38,8 +40,6 @@
 ## 安裝
 
 安裝包在 Gumroad 販售：**[購買 Island Chatter AE](https://kadid.gumroad.com/l/IslandChatterAE)**
-
-原始碼是公開的，你也可以自行編譯（見下方「從原始碼測試與建置」）。
 
 ### 安裝步驟
 
@@ -153,23 +153,6 @@ mot-her）、決定音節邊界的滑音字母（brown 是一個音節但 flo-we
 
 這**不是發音字典**，也不假裝是。它要對的是音節數、母音顏色跟重音位置，那是角色語音需要的東西。
 
-## 從原始碼測試與建置
-
-```powershell
-npm test
-cmake -S native -B native/build
-cmake --build native/build --config Release
-ctest --test-dir native/build -C Release --output-on-failure
-```
-
-建置 `.aex` 需要 Adobe After Effects SDK；SDK 不隨本專案散布。詳細指令請看 [`native/README.md`](native/README.md)。
-
-若已完成 `.aex` 建置，可產生 Windows 發行包：
-
-```powershell
-npm run package:windows
-```
-
 ## 維護與程式碼審查
 
 要接手維護或使用 Claude Code 等工具檢視專案，請先閱讀 [`CLAUDE.md`](CLAUDE.md)。其中整理了架構、AE 相容性設計、不可破壞的參數 ABI、測試順序與優先審查項目。
@@ -179,12 +162,8 @@ npm run package:windows
 本專案是 **source-available**，不是 OSI 定義的開源：原始碼公開，你可以閱讀、自行編譯、
 自己使用（包含商業接案），但**不能把編譯出來的檔案轉發給別人**。完整條款見 [LICENSE](LICENSE)。
 
-想直接安裝不想自己編譯的話，請到 [Gumroad](https://kadid.gumroad.com/l/IslandChatterAE) 購買官方安裝包。
+安裝包請到 [Gumroad](https://kadid.gumroad.com/l/IslandChatterAE) 購買。
 
 Unicode 讀音資料維持它自己的授權，請見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 After Effects 是 Adobe 的商標；Nintendo 與 Animal Crossing 是其各自權利人的商標。本專案與上述公司沒有關聯或背書關係。
-
-## English
-
-Island Chatter AE is an original, procedural Mandarin character-voice effect for Adobe After Effects. It runs directly on text layers, needs no audio files to preview or render, and can bake to WAV on demand. It supports Traditional and Simplified Chinese readings, pronunciation overrides, character presets, timing markers, rig controllers, and Type-On animation. The Windows installer is sold at https://kadid.gumroad.com/l/IslandChatterAE; the source here can be built yourself.

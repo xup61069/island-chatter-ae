@@ -492,8 +492,9 @@ for (const [label, broken] of [
 // Builds are sold, so the licence and the README have to point at the same
 // storefront. A link that rots in one place and not the other sends buyers
 // somewhere that no longer sells anything.
+const readmes = ["README.md", "README.en.md", "README.ja.md"];
 const purchaseUrls = new Set();
-for (const doc of ["LICENSE", "README.md"]) {
+for (const doc of ["LICENSE", ...readmes]) {
   const found = fs.readFileSync(path.join(root, doc), "utf8")
     .match(/https:\/\/[a-z0-9.-]*gumroad\.com\/[^\s)"'`;,]+/gi) || [];
   if (found.length === 0) {
@@ -503,7 +504,21 @@ for (const doc of ["LICENSE", "README.md"]) {
 }
 if (purchaseUrls.size !== 1) {
   throw new Error(
-    `LICENSE and README point at different storefronts: ${[...purchaseUrls].join(", ")}`);
+    `The licence and the READMEs point at different storefronts: ${[...purchaseUrls].join(", ")}`);
+}
+// Each translation has to link to the other two, or a reader lands on one and
+// never learns the others exist. The one it is written in is not a link.
+for (const doc of readmes) {
+  const text = fs.readFileSync(path.join(root, doc), "utf8");
+  for (const other of readmes) {
+    const linked = text.includes(`(${other})`);
+    if (other === doc && linked) {
+      throw new Error(`${doc} links to itself in its language switcher`);
+    }
+    if (other !== doc && !linked) {
+      throw new Error(`${doc} does not link to ${other}`);
+    }
+  }
 }
 
 // The project is source-available, not MIT: builds are sold, so nothing may
