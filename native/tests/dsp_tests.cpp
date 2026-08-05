@@ -731,6 +731,124 @@ int main() {
             "the morae after the first should stay as themselves");
     }
 
+    // English, added in 1.3.0. Not a pronunciation dictionary: the goal is the
+    // syllable count, the vowel colour and the stress, which is what a
+    // character voice needs. Spelling only makes sense a word at a time.
+    {
+        const auto syllables_of = [](const std::string& text) {
+            island_chatter::Settings settings;
+            settings.text = text;
+            settings.sample_rate = 48000;
+            const auto plan = island_chatter::synthesize(settings).diagnostics;
+            std::string joined;
+            for (const auto& reading : plan.readings) {
+                if (!joined.empty()) { joined += "|"; }
+                joined += reading;
+            }
+            return joined;
+        };
+        for (const auto& [word, expected] : std::vector<std::pair<std::string, std::string>>{
+            // The four letters that share nothing: -ough is one syllable each time.
+            {"though", "though"},
+            {"through", "through"},
+            {"tough", "tough"},
+            {"thought", "thought"},
+            // A silent final e closes the syllable rather than opening a new one.
+            {"make", "make"},
+            {"name", "name"},
+            {"time", "time"},
+            {"bone", "bone"},
+            // ...but only when there is another vowel to lengthen.
+            {"be", "be"},
+            {"the", "the"},
+            // Two consonants between nuclei split; one goes to the next onset.
+            {"hello", "hel|lo"},
+            {"water", "wa|ter"},
+            {"chatter", "chat|ter"},
+            {"island", "is|land"},
+            {"computer", "com|pu|ter"},
+            {"beautiful", "beau|ti|ful"},
+            {"animation", "a|ni|ma|tion"},
+            {"strength", "strength"},
+            // A word-final l, m or n with no vowel is still a syllable.
+            {"rhythm", "rhy|thm"},
+            {"prism", "pri|sm"},
+            {"little", "lit|tle"},
+            {"simple", "sim|ple"},
+            {"table", "ta|ble"},
+            {"button", "but|ton"},
+            // A digraph is one sound; splitting it invents a consonant.
+            {"mother", "mo|ther"},
+            {"washing", "wa|shing"},
+            // Whole sentences, where the words must not run together.
+            {"the quick brown fox", "the|quick|brown|fox"},
+            {"island chatter", "is|land|chat|ter"},
+        }) {
+            if (syllables_of(word) != expected) {
+                std::cout << "FAIL: \"" << word << "\" split as " << syllables_of(word)
+                          << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+
+        // Stress is what makes it sound like English rather than like a list of
+        // syllables: the stressed one is longer, and the pitch moves with it.
+        island_chatter::Settings english;
+        english.text = "computer";
+        english.sample_rate = 48000;
+        const auto stressed_plan = island_chatter::synthesize(english).diagnostics;
+        require(stressed_plan.event_count == 3, "computer is three syllables");
+        require(stressed_plan.length_samples[1] > stressed_plan.length_samples[0] * 1.4,
+            "the stressed syllable of computer should be much longer than the unstressed ones");
+        require(stressed_plan.frequencies[1] > stressed_plan.frequencies[0],
+            "the stressed syllable should also be higher");
+
+        // A beat grid and a stress pattern cannot both be satisfied. Tempo lock
+        // is the user asking for the grid, so English flattens under it.
+        auto locked = english;
+        locked.text = "island chatter today";
+        locked.tempo_lock = true;
+        locked.speed = 0.8;
+        const auto grid = island_chatter::synthesize(locked).diagnostics;
+        const double slot = 0.200 / 0.8 * 48000.0;
+        for (std::size_t index = 0; index < grid.event_count; ++index) {
+            require(std::abs(static_cast<double>(grid.start_samples[index]) - index * slot) <= 1.0,
+                "a tempo-locked English syllable is off the grid");
+        }
+
+        // Each syllable reports its own letters, so markers can label them.
+        island_chatter::Settings labelled;
+        labelled.text = "hello";
+        labelled.sample_rate = 48000;
+        const auto letters = island_chatter::synthesize(labelled).diagnostics;
+        require(letters.source_units[0] == (std::vector<std::uint32_t>{U'h', U'e', U'l'}) &&
+                letters.source_units[1] == (std::vector<std::uint32_t>{U'l', U'o'}),
+            "an English syllable should carry the letters it speaks");
+
+        // Tone-number pinyin still wins over English: it is unambiguous, and it
+        // is what the pronunciation field is documented to take. It goes through
+        // Mandarin, sandhi and all, which is why the first tone here is a 2.
+        require(syllables_of("ni3 hao3") == "ni2|hao3",
+            "tone-number pinyin should not be read as English");
+        require(syllables_of("wo3 shi4 ren2") == "wo3|shi4|ren2",
+            "tone-number pinyin should not be read as English");
+        // The glide letters, which decide whether a syllable ends or a new one
+        // begins: flo-wer against brown, pla-yer against day.
+        for (const auto& [word, expected] : std::vector<std::pair<std::string, std::string>>{
+            {"brown", "brown"}, {"flower", "flo|wer"},
+            {"day", "day"}, {"player", "pla|yer"},
+            {"now", "now"}, {"yellow", "yel|low"},
+            {"my", "my"}, {"yes", "yes"},
+            {"crystal", "crys|tal"}, {"problem", "prob|lem"},
+        }) {
+            if (syllables_of(word) != expected) {
+                std::cout << "FAIL: \"" << word << "\" split as " << syllables_of(word)
+                          << ", expected " << expected << "\n";
+                return 1;
+            }
+        }
+    }
+
     std::cout << "Native DSP tests passed: " << first.samples.size() << " samples, peak "
               << first.diagnostics.peak << '\n';
     return 0;

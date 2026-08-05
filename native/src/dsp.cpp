@@ -612,6 +612,293 @@ JapaneseSyllable parse_japanese(std::string_view romaji) {
     return syllable;
 }
 
+/*
+ * English.
+ *
+ * English spelling does not map onto sound one letter at a time — though / through
+ * / tough share four letters and share nothing else — so the previous behaviour,
+ * pairing each consonant with the vowel after it, produced a syllable count that
+ * had little to do with the word. "strength" came out as four syllables.
+ *
+ * What follows is a small, testable rule set rather than a published one. The
+ * classic NRL letter-to-sound rules would be the obvious choice, but there are
+ * over three hundred of them and reproducing them from memory would introduce
+ * errors nothing here could detect. This is deliberately narrower: enough to get
+ * the syllable count, the vowel colour and the stress roughly right, which is
+ * what a character voice needs. It is not a pronunciation dictionary and does
+ * not pretend to be one.
+ *
+ * The part that matters most is stress. English reduces unstressed vowels to a
+ * schwa and shortens them, and that alternation is most of what makes speech
+ * sound like English rather than like a list of syllables.
+ */
+
+struct EnglishSyllable {
+    Consonant consonant;
+    int first_vowel = 0;
+    int end_vowel = 0;
+    bool stressed = false;
+    std::string spelling;
+    // Where this syllable sits in the word, in letters. The spans are
+    // contiguous and cover it completely, so a marker can show hel|lo rather
+    // than dropping every consonant that closes a syllable.
+    std::size_t begin = 0;
+    std::size_t end = 0;
+};
+
+bool is_english_vowel(char letter) {
+    return std::string_view("aeiou").find(letter) != std::string_view::npos;
+}
+
+Consonant english_consonant(std::string_view onset) {
+    if (onset.empty()) {
+        return {};
+    }
+    if (begins_with(onset, "th")) return {ConsonantKind::fricative, 0.40, false, false};
+    if (begins_with(onset, "sh")) return {ConsonantKind::sibilant, 0.90, false, false};
+    if (begins_with(onset, "ch")) return {ConsonantKind::affricate, 0.88, true, false};
+    if (begins_with(onset, "ph")) return {ConsonantKind::fricative, 0.24, false, false};
+    if (begins_with(onset, "wh")) return {ConsonantKind::liquid, 0.70, false, false};
+    if (begins_with(onset, "ck")) return {ConsonantKind::stop, 0.88, true, false};
+    if (begins_with(onset, "ng")) return {ConsonantKind::nasal, 0.80, false, false};
+    if (begins_with(onset, "qu")) return {ConsonantKind::stop, 0.88, true, false};
+    // A soft c or g: cent, gem. Anywhere else they are the hard stops.
+    const bool soft_follows = onset.size() > 1 &&
+        std::string_view("eiy").find(onset[1]) != std::string_view::npos;
+    switch (onset.front()) {
+        case 'p': return {ConsonantKind::stop, 0.18, true, false};
+        case 'b': return {ConsonantKind::voiced_stop, 0.18, false, false};
+        case 't': return {ConsonantKind::stop, 0.55, true, false};
+        case 'd': return {ConsonantKind::voiced_stop, 0.55, false, false};
+        case 'k': case 'q': return {ConsonantKind::stop, 0.88, true, false};
+        case 'c': return soft_follows ? Consonant{ConsonantKind::sibilant, 0.72, false, false}
+                                      : Consonant{ConsonantKind::stop, 0.88, true, false};
+        case 'g': return soft_follows ? Consonant{ConsonantKind::affricate, 0.86, false, false}
+                                      : Consonant{ConsonantKind::voiced_stop, 0.88, false, false};
+        case 'f': return {ConsonantKind::fricative, 0.24, false, false};
+        case 'v': return {ConsonantKind::fricative, 0.26, false, false};
+        case 's': return {ConsonantKind::sibilant, 0.72, false, false};
+        case 'z': return {ConsonantKind::sibilant, 0.70, false, false};
+        case 'x': return {ConsonantKind::sibilant, 0.75, false, false};
+        case 'j': return {ConsonantKind::affricate, 0.86, false, false};
+        case 'm': return {ConsonantKind::nasal, 0.22, false, false};
+        case 'n': return {ConsonantKind::nasal, 0.58, false, false};
+        case 'l': return {ConsonantKind::liquid, 0.42, false, false};
+        case 'r': return {ConsonantKind::liquid, 0.62, false, false};
+        case 'w': return {ConsonantKind::liquid, 0.70, false, false};
+        case 'y': return {ConsonantKind::liquid, 0.68, false, false};
+        case 'h': return {ConsonantKind::aspirate, 0.50, true, false};
+        default: return {};
+    }
+}
+
+// The engine's vowel slots: a=0 e=1 i=2 o=3 u=4, 5 is the mid-central colour
+// that stands in for a schwa, and 7 is rhotic.
+constexpr int kSchwaVowel = 5;
+constexpr int kRhoticVowel = 7;
+
+void english_vowel(std::string_view group, bool lengthened, int& first, int& end) {
+    struct Digraph { const char* spelling; int first; int end; };
+    static constexpr std::array<Digraph, 16> kDigraphs{{
+        {"ee", 2, 2}, {"ea", 2, 2}, {"ie", 2, 2},
+        {"oo", 4, 4}, {"ou", 0, 4}, {"ow", 0, 4},
+        {"oi", 3, 2}, {"oy", 3, 2},
+        {"ai", 1, 2}, {"ay", 1, 2}, {"ei", 1, 2}, {"ey", 1, 2},
+        {"au", 3, 3}, {"aw", 3, 3},
+        {"oa", 3, 4}, {"ue", 4, 4},
+    }};
+    for (const auto& digraph : kDigraphs) {
+        if (group.size() >= 2 && group.substr(0, 2) == digraph.spelling) {
+            first = digraph.first;
+            end = digraph.end;
+            return;
+        }
+    }
+    const char letter = group.empty() ? 'e' : group.front();
+    if (lengthened) {
+        // The "silent e" and open-syllable readings: name, be, time, bone, cute.
+        switch (letter) {
+            case 'a': first = 1; end = 2; return;
+            case 'e': first = 2; end = 2; return;
+            case 'i': case 'y': first = 0; end = 2; return;
+            case 'o': first = 3; end = 4; return;
+            case 'u': first = 2; end = 4; return;
+            default: break;
+        }
+    }
+    switch (letter) {
+        case 'a': first = end = 0; return;
+        case 'e': first = end = 1; return;
+        case 'i': case 'y': first = end = 2; return;
+        case 'o': first = end = 3; return;
+        // cut, not coot: the short u is nearer the mid-central colour.
+        case 'u': first = end = kSchwaVowel; return;
+        default: first = end = kSchwaVowel; return;
+    }
+}
+
+std::vector<EnglishSyllable> english_syllables(std::string word) {
+    for (auto& letter : word) {
+        letter = ascii_lower(static_cast<std::uint32_t>(static_cast<unsigned char>(letter)));
+    }
+    word.erase(std::remove(word.begin(), word.end(), '\0'), word.end());
+    if (word.empty()) {
+        return {};
+    }
+
+    // A final e is usually silent and lengthens the vowel before it, but only
+    // when there is another vowel to lengthen: "the" and "be" are not silent.
+    bool silent_final_e = false;
+    if (word.size() > 2 && word.back() == 'e' && !is_english_vowel(word[word.size() - 2])) {
+        for (std::size_t index = 0; index + 1 < word.size(); ++index) {
+            if (is_english_vowel(word[index])) { silent_final_e = true; break; }
+        }
+    }
+    const std::size_t spoken = silent_final_e ? word.size() - 1 : word.size();
+
+    // Vowel groups become nuclei; y counts as one unless it opens the word.
+    struct Group { std::size_t begin; std::size_t end; bool syllabic; };
+    std::vector<Group> nuclei;
+    // w and y are consonants before a vowel and part of the vowel after one:
+    // flower is flo-wer but brown is one syllable, player is pla-yer but day is
+    // one. What separates them is whether a vowel follows.
+    const auto vowel_before = [&word, spoken](std::size_t at) {
+        return at + 1 < spoken && is_english_vowel(word[at + 1]);
+    };
+    for (std::size_t index = 0; index < spoken;) {
+        const bool opens = is_english_vowel(word[index]) ||
+            (word[index] == 'y' && index > 0 && !vowel_before(index));
+        if (!opens) { ++index; continue; }
+        const std::size_t begin = index;
+        while (index < spoken) {
+            if (is_english_vowel(word[index])) { ++index; continue; }
+            const bool glide = (word[index] == 'w' || word[index] == 'y') &&
+                index > begin && !vowel_before(index);
+            if (!glide) { break; }
+            ++index;
+            break;  // a glide closes the group: "ow" is one nucleus, "owe" is not
+        }
+        if (index == begin) { ++index; }
+        nuclei.push_back({begin, index, false});
+    }
+    // A word-final l, m or n with no vowel of its own is still a syllable:
+    // rhythm and prism are two, little and simple are two. The consonant does
+    // the work of the vowel, which comes out as a schwa.
+    if (!nuclei.empty()) {
+        const std::size_t tail_begin = nuclei.back().end;
+        // "-le" after a consonant is the same pattern wearing a silent e.
+        const std::size_t tail_end = silent_final_e && word.back() == 'e' &&
+            word[word.size() - 2] == 'l' ? word.size() - 1 : spoken;
+        if (tail_end > tail_begin + 1) {
+            const char last = word[tail_end - 1];
+            if (last == 'l' || last == 'm' || last == 'n') {
+                nuclei.push_back({tail_end - 1, tail_end, true});
+            }
+        }
+    }
+    if (nuclei.empty()) {
+        // A word with no vowel at all, like "hmm" or an initialism. One
+        // syllable, coloured by the schwa, is closer than saying nothing.
+        EnglishSyllable only;
+        only.consonant = english_consonant(word);
+        only.first_vowel = only.end_vowel = kSchwaVowel;
+        only.stressed = true;
+        only.spelling = word;
+        return {only};
+    }
+
+    std::vector<EnglishSyllable> syllables(nuclei.size());
+    for (std::size_t index = 0; index < nuclei.size(); ++index) {
+        const std::size_t onset_begin = index == 0 ? 0 : nuclei[index - 1].end;
+        std::size_t onset_start = onset_begin;
+        const std::size_t run = nuclei[index].begin - onset_begin;
+        // Two or more consonants between nuclei: the first closes the syllable
+        // before, the rest open this one. Otherwise the whole run opens this
+        // one, which is the usual English split (wa-ter, not wat-er).
+        //
+        // Except that a digraph is one sound and splitting it invents a
+        // consonant that is not there: mother is mo-ther, never mot-her.
+        const auto pair = std::string_view(word).substr(onset_begin, 2);
+        const bool digraph = run == 2 && (pair == "th" || pair == "sh" || pair == "ch" ||
+            pair == "ph" || pair == "ck" || pair == "ng" || pair == "wh" || pair == "gh");
+        if (index > 0 && run >= 2 && !digraph) { onset_start = onset_begin + 1; }
+        const auto onset = std::string_view(word).substr(
+            onset_start, nuclei[index].begin - onset_start);
+        auto& syllable = syllables[index];
+        syllable.consonant = english_consonant(onset);
+
+        if (nuclei[index].syllabic) {
+            // The consonant is the nucleus, so it is not also the onset.
+            syllable.first_vowel = syllable.end_vowel = kSchwaVowel;
+            syllable.begin = onset_start;
+            continue;
+        }
+        const auto group = std::string_view(word).substr(
+            nuclei[index].begin, nuclei[index].end - nuclei[index].begin);
+        const bool last = index + 1 == nuclei.size();
+        const bool lengthened = (last && silent_final_e) ||
+            // An open final syllable is long: go, hi, me.
+            (last && nuclei[index].end == spoken && group.size() == 1 && spoken > 1 &&
+             nuclei[index].begin > 0);
+        english_vowel(group, lengthened, syllable.first_vowel, syllable.end_vowel);
+
+        // A following r colours the vowel rather than standing on its own.
+        const std::size_t after = nuclei[index].end;
+        if (after < spoken && word[after] == 'r' &&
+                (after + 1 >= spoken || !is_english_vowel(word[after + 1]))) {
+            syllable.first_vowel = syllable.end_vowel = kRhoticVowel;
+        }
+        syllable.begin = onset_start;
+    }
+    // Each syllable runs to the start of the next, and the last one takes
+    // everything that is left, including a silent final e.
+    for (std::size_t index = 0; index < syllables.size(); ++index) {
+        syllables[index].end = index + 1 < syllables.size()
+            ? syllables[index + 1].begin : word.size();
+        syllables[index].spelling =
+            word.substr(syllables[index].begin, syllables[index].end - syllables[index].begin);
+    }
+
+    // Stress. First syllable by default, moved by the endings that reliably
+    // pull it and by the unstressed prefixes that reliably push it.
+    std::size_t stress = 0;
+    const auto ends_with = [&word](std::string_view suffix) {
+        return word.size() >= suffix.size() &&
+            std::string_view(word).substr(word.size() - suffix.size()) == suffix;
+    };
+    if (syllables.size() >= 2) {
+        if (ends_with("tion") || ends_with("sion") || ends_with("cian") || ends_with("ic") ||
+                ends_with("ical") || ends_with("ially") || ends_with("ious")) {
+            stress = syllables.size() - 2;
+        } else if (syllables.size() >= 3 && (ends_with("ity") || ends_with("ety") ||
+                ends_with("ogy") || ends_with("graphy"))) {
+            stress = syllables.size() - 3;
+        } else {
+            for (const auto prefix : {"a", "be", "de", "re", "in", "en", "ex", "con",
+                    "com", "pre", "pro", "sur", "to"}) {
+                if (begins_with(word, prefix) && syllables[0].spelling.size() <= 3) {
+                    stress = 1;
+                    break;
+                }
+            }
+        }
+    }
+    stress = std::min(stress, syllables.size() - 1);
+    syllables[stress].stressed = true;
+
+    // Unstressed short vowels reduce to a schwa. Diphthongs and rhotics keep
+    // their colour, as they do in speech.
+    for (std::size_t index = 0; index < syllables.size(); ++index) {
+        auto& syllable = syllables[index];
+        if (syllable.stressed) { continue; }
+        if (syllable.first_vowel == syllable.end_vowel &&
+                syllable.first_vowel != kRhoticVowel) {
+            syllable.first_vowel = syllable.end_vowel = kSchwaVowel;
+        }
+    }
+    return syllables;
+}
+
 double consonant_seconds(const Consonant& consonant) {
     switch (consonant.kind) {
         case ConsonantKind::stop: return consonant.aspirated ? 0.062 : 0.036;
@@ -740,6 +1027,13 @@ struct SpeechUnit {
     // Characters this unit speaks beyond its own codepoint: the small kana in
     // きゃ, or every character covered by an inline override.
     std::vector<std::uint32_t> extra_codepoints;
+    // English is syllabified whole-word, so the phonetics are worked out once
+    // in english_syllables() rather than re-derived from the spelling here.
+    bool english = false;
+    Consonant english_consonant;
+    int english_first_vowel = 0;
+    int english_end_vowel = 0;
+    bool english_stressed = false;
 };
 
 struct PhrasePronunciation {
@@ -1145,6 +1439,41 @@ std::vector<SpeechUnit> build_speech_units(const std::string& text) {
             }
         }
 
+        // An English word, taken whole. Spelling only makes sense a word at a
+        // time — though, through and tough share four letters and no sounds —
+        // so the syllables are worked out here rather than letter by letter.
+        if (ascii_lower(codepoint) != '\0') {
+            std::size_t end = index;
+            std::string word;
+            while (end < codepoints.size() &&
+                    (ascii_lower(codepoints[end]) != '\0' || codepoints[end] == '\'')) {
+                word.push_back(static_cast<char>(codepoints[end]));
+                ++end;
+            }
+            const auto syllables = english_syllables(word);
+            if (!syllables.empty()) {
+                for (std::size_t at = 0; at < syllables.size(); ++at) {
+                    SpeechUnit spoken;
+                    // Each syllable carries its own letters, so a marker reads
+                    // hel then lo, the way a Chinese one carries its character.
+                    spoken.codepoint = codepoints[index + syllables[at].begin];
+                    for (std::size_t cursor = syllables[at].begin + 1;
+                            cursor < syllables[at].end; ++cursor) {
+                        spoken.extra_codepoints.push_back(codepoints[index + cursor]);
+                    }
+                    spoken.reading = syllables[at].spelling;
+                    spoken.english = true;
+                    spoken.english_consonant = syllables[at].consonant;
+                    spoken.english_first_vowel = syllables[at].first_vowel;
+                    spoken.english_end_vowel = syllables[at].end_vowel;
+                    spoken.english_stressed = syllables[at].stressed;
+                    units.push_back(spoken);
+                }
+                index = end;
+                continue;
+            }
+        }
+
         const auto reading = mandarin_reading(codepoint);
         if (!reading.empty()) {
             std::string value(reading);
@@ -1280,8 +1609,13 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         const std::string_view reading(unit.reading);
         const bool has_mandarin_reading = unit.mandarin && !reading.empty();
         const bool has_japanese_reading = unit.japanese && !reading.empty();
+        const bool has_english_reading = unit.english;
         JapaneseSyllable japanese;
-        if (has_japanese_reading) {
+        if (has_english_reading) {
+            consonant = unit.english_consonant;
+            vowel_index = unit.english_first_vowel;
+            end_vowel_index = unit.english_end_vowel;
+        } else if (has_japanese_reading) {
             japanese = parse_japanese(reading);
             consonant = japanese.consonant;
             vowel_index = japanese.first_vowel;
@@ -1314,7 +1648,19 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             settings.tempo_lock ? 0.0 : 0.025 + (1.0 - clarity) * 0.12;
         // A Japanese mora is timed like a Mandarin syllable, not like a latin
         // letter, which is what makes tempo lock land on the beat in Japanese.
-        const double duration = (has_mandarin_reading || has_japanese_reading ? 0.188 : 0.148) / speed *
+        //
+        // English is stress-timed rather than syllable-timed: an unstressed
+        // syllable is roughly half the length of a stressed one, and that
+        // alternation is most of what makes it sound like English. Tempo lock
+        // flattens it, because a beat grid and a stress pattern cannot both be
+        // satisfied and the grid is what the user asked for.
+        double base = 0.148;
+        if (has_mandarin_reading || has_japanese_reading) {
+            base = 0.188;
+        } else if (has_english_reading) {
+            base = settings.tempo_lock ? 0.188 : (unit.english_stressed ? 0.181 : 0.104);
+        }
+        const double duration = base / speed *
             (1.0 - duration_variation * 0.5 + random.next() * duration_variation);
         event.length = std::max<std::size_t>(64, static_cast<std::size_t>(std::llround(duration * sample_rate)));
         const int note_span = 2 + static_cast<int>(std::llround(
@@ -1323,13 +1669,17 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             static_cast<std::uint32_t>(note_span * 2 + 1)) - note_span;
         event.frequency = 245.0 * voice.pitch * clamp(settings.pitch, 0.10, 6.0) *
             std::pow(2.0, note / 24.0);
+        // Length alone does not read as stress; the pitch has to move with it.
+        if (has_english_reading && !settings.tempo_lock) {
+            event.frequency *= unit.english_stressed ? 1.055 : 0.965;
+        }
         event.consonant = consonant;
         event.mandarin = has_mandarin_reading;
         event.tone = has_mandarin_reading ? mandarin.tone : 5;
         event.lexical_tone = has_mandarin_reading ? unit.lexical_tone : 5;
         event.source_codepoint = codepoint;
         event.source_units = std::move(consumed);
-        event.reading = has_mandarin_reading || has_japanese_reading
+        event.reading = has_mandarin_reading || has_japanese_reading || has_english_reading
             ? std::string(reading) : std::string{};
         event.nasal_final = (has_mandarin_reading && mandarin.nasal_final) ||
             (has_japanese_reading && japanese.nasal_final);

@@ -204,7 +204,7 @@ for (const filePath of extendScriptFiles) {
 // The parameter ABI is split across three files. Keep them in lockstep.
 const paramsHeader = fs.readFileSync(
   path.join(root, "native", "plugin", "params.hpp"), "utf8");
-if (!/static_assert\(kParamCount == 81/.test(paramsHeader)) {
+if (!/static_assert\(kParamCount == 145/.test(paramsHeader)) {
   throw new Error("params.hpp no longer asserts the published parameter count");
 }
 if (!/static_assert\(kParamSeed == 75/.test(paramsHeader)) {
@@ -229,9 +229,41 @@ for (const [constant, index] of [
     throw new Error(`Native plug-in does not register a parameter with id ${index}`);
   }
 }
-if (!/var MAX_TEXT_UNITS = 64;/.test(nativePanelSource) ||
-    !/kMaxTextUnits = 64;/.test(paramsHeader)) {
-  throw new Error("The 64 UTF-16 unit transport contract is not synchronized");
+// The transport is two blocks of sixty-four UTF-16 units: 0-63 at index 7 and
+// 64-127 at index 81, because the indices in between were already published.
+// Both sides must agree on the block size or the second half is read as noise.
+if (!/var TEXT_UNITS_PER_BLOCK = 64;/.test(nativePanelSource) ||
+    !/kTextUnitsPerBlock = 64;/.test(paramsHeader)) {
+  throw new Error("The UTF-16 transport block size is not synchronized");
+}
+if (!/var PARAM_TEXT_SECOND_FIRST = 81;/.test(nativePanelSource) ||
+    !/static_assert\(kParamTextSecondFirst == 81/.test(paramsHeader)) {
+  throw new Error("The second text block must stay at its published index 81");
+}
+// Reading or writing a unit must go through the helper that knows about both
+// blocks; PARAM_TEXT_FIRST + index silently walks off the end of the first one
+// and into the creative controls.
+if (/PARAM_TEXT_FIRST \+ index\)/.test(
+  nativePanelSource.replace(/function textUnitProperty[\s\S]*?\n    \}/, ""))) {
+  throw new Error("The panel indexes text units without going through textUnitProperty()");
+}
+// Each registration loop fills one block, so both must be bounded by the block
+// size. Bounding the first one by the total instead overruns its ids into the
+// creative controls, and After Effects then refuses to add the effect at all
+// with "parameter count mismatch" — which reads as the plug-in not being
+// installed, nowhere near the actual mistake.
+{
+  const loops = [...nativePluginSource.matchAll(
+    /for \(std::size_t index = 0; index < island_chatter::ae::(\w+); \+\+index\) \{[\s\S]{0,400}?PF_ADD_SLIDER\("Text code unit"/g)];
+  if (loops.length !== 2) {
+    throw new Error(`Expected two text-unit registration loops, found ${loops.length}`);
+  }
+  for (const loop of loops) {
+    if (loop[1] !== "kTextUnitsPerBlock") {
+      throw new Error(
+        `A text-unit loop is bounded by ${loop[1]}; each block registers kTextUnitsPerBlock`);
+    }
+  }
 }
 
 const dspSource = fs.readFileSync(path.join(root, "native", "src", "dsp.cpp"), "utf8");
@@ -608,7 +640,7 @@ for (const smokeFragment of [
   'comp.layers.addText("你好，中文聲音測試！")',
   'effects.addProperty(TONE_MATCH_NAME)',
   'effects.addProperty(EFFECT_NAME)',
-  "EXPECTED_PARAMETERS = 81",
+  "EXPECTED_PARAMETERS = 145",
   '"External audio files: 0"',
 ]) {
   if (!aeSmokeSource.includes(smokeFragment)) {

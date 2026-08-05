@@ -50,9 +50,16 @@ std::string text_from_params(PF_ParamDef* params[]) {
     const auto length = std::clamp<A_long>(requested, 0, static_cast<A_long>(island_chatter::ae::kMaxTextUnits));
     std::string output;
     output.reserve(static_cast<std::size_t>(length) * 3U);
+    // The first sixty-four units sit where they always have; the rest are in the
+    // block appended in 1.3.0, because the indices in between were already
+    // published and cannot move.
     const auto unit_at = [&params](A_long index) {
+        const auto slot = index < static_cast<A_long>(island_chatter::ae::kTextUnitsPerBlock)
+            ? island_chatter::ae::kParamTextFirst + index
+            : island_chatter::ae::kParamTextSecondFirst + index -
+                static_cast<A_long>(island_chatter::ae::kTextUnitsPerBlock);
         return static_cast<std::uint32_t>(std::clamp<A_long>(
-            params[island_chatter::ae::kParamTextFirst + index]->u.sd.value, 0, 0xFFFF));
+            params[slot]->u.sd.value, 0, 0xFFFF));
     };
     for (A_long index = 0; index < length; ++index) {
         std::uint32_t codepoint = unit_at(index);
@@ -157,7 +164,11 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
     def.ui_flags = PF_PUI_INVISIBLE;
     PF_ADD_SLIDER("Text length", 0, static_cast<A_long>(island_chatter::ae::kMaxTextUnits),
         0, static_cast<A_long>(island_chatter::ae::kMaxTextUnits), 0, 6);
-    for (std::size_t index = 0; index < island_chatter::ae::kMaxTextUnits; ++index) {
+    // kTextUnitsPerBlock, never kMaxTextUnits: this loop fills the first block
+    // only, and its ids run 7-70. Using the total here overruns into the
+    // creative controls and After Effects refuses the effect with "parameter
+    // count mismatch".
+    for (std::size_t index = 0; index < island_chatter::ae::kTextUnitsPerBlock; ++index) {
         AEFX_CLR_STRUCT(def);
         def.ui_flags = PF_PUI_INVISIBLE;
         PF_ADD_SLIDER("Text code unit", 0, 65535, 0, 65535, 0, static_cast<A_long>(7 + index));
@@ -193,6 +204,15 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX("Vibrato Rate / 顫音速率", 0.00, 30.00, 0.50, 20.00, 9.20,
         PF_Precision_HUNDREDTHS, 0, PF_ParamFlag_NONE, 80);
+    // The second half of the text transport, appended in 1.3.0. Widening the
+    // length slider's valid range never invalidates a saved project, because
+    // every value it could already hold is still inside the new range.
+    for (std::size_t index = 0; index < island_chatter::ae::kTextUnitsPerBlock; ++index) {
+        AEFX_CLR_STRUCT(def);
+        def.ui_flags = PF_PUI_INVISIBLE;
+        PF_ADD_SLIDER("Text code unit", 0, 65535, 0, 65535, 0,
+            static_cast<A_long>(island_chatter::ae::kParamTextSecondFirst + index));
+    }
     out_data->num_params = island_chatter::ae::kParamCount;
     return PF_Err_NONE;
 }
