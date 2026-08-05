@@ -176,6 +176,14 @@ effect.
    reduce to a schwa and shorten to roughly half; that alternation is most of what makes it
    sound like English. Tempo lock flattens it, because a beat grid and a stress pattern
    cannot both be satisfied.
+8k. **"Native effect is not installed" usually is not.** `addNativeEffect()` wraps whatever
+   `addProperty()` threw, so a registration bug in the plug-in surfaces as a message about
+   installation. The real error is worth reading before theorising: the one that has already
+   happened once is *"parameter count mismatch in plug-in effect"*, which After Effects raises
+   when `out_data->num_params` disagrees with the number of `PF_ADD_*` calls. The effect still
+   appears in `app.effects`, because that comes from the PiPL, so "it is registered" proves
+   nothing. Apply the effect in a scratch project and print the raw exception; each
+   build-install-launch cycle costs about three minutes, so guessing is expensive.
 9. **Generated reading tables stay synchronized.** Regenerate them with the scripts in
    `native/tools/`; do not patch individual generated entries.
 10. **Source Text remains authoritative.** The user explicitly presses Apply again after editing.
