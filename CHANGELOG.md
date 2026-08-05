@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0 - 2026-08-05
+
+Japanese, and an interface that speaks three languages.
+
+- **Kana is spoken as Japanese.** Unlike Chinese there is nothing to look up: the character
+  is the pronunciation, so this needs no dictionary and nothing extra is installed.
+  Handled: 清音・濁音・半濁音, 拗音 (きゃ is one mora written with two characters), 促音 っ
+  (a rest, not a sound), 撥音 ん (a mora of its own), 長音 ー (holds the vowel before it),
+  and small vowels after non-i kana so loanwords like ファイト and ヴァイオリン come out right.
+  Katakana shares the table with hiragana.
+- **A mora is timed like a Mandarin syllable**, so Tempo Lock lands Japanese on the beat too.
+- **Kanji is deliberately not guessed.** The same character is read differently depending on
+  the word around it, which needs a dictionary and a disambiguator. Unmarked kanji falls
+  through to its Mandarin reading and the panel says so on the status line rather than
+  letting it sound wrong quietly. Mark it instead: `[今日|きょう]はいい[天気|てんき]`.
+- は and へ are read literally, because telling a particle from part of a word needs the
+  same analysis: こんにちは is wa but おはよう is ha, and nothing in the surrounding
+  characters separates them. Four fixed greetings where there is no ambiguity are
+  special-cased; everywhere else, mark it: `きょう[は|わ]いいてんき`.
+- **The panel is available in 繁體中文, English and 日本語**, chosen from a picker at the top
+  and remembered between sessions. It changes nothing about what is spoken.
+
 ## 1.1.0 - 2026-08-05
 
 Timbre. Four new controls, all appended, all defaulting to what 1.0.x did:

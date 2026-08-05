@@ -646,6 +646,91 @@ int main() {
             "Vibrato depth or rate does not reach the render");
     }
 
+    // Japanese, added in 1.2.0. Kana is a syllabary, so the character is the
+    // pronunciation and there is no table to look up or keep synchronised.
+    {
+        const auto readings_of = [](const std::string& text) {
+            island_chatter::Settings settings;
+            settings.text = text;
+            settings.sample_rate = 48000;
+            const auto plan = island_chatter::synthesize(settings).diagnostics;
+            std::string joined;
+            for (const auto& reading : plan.readings) {
+                if (!joined.empty()) { joined += " "; }
+                joined += reading;
+            }
+            return joined;
+        };
+        for (const auto& [text, expected] : std::vector<std::pair<std::string, std::string>>{
+            {"あいうえお", "a i u e o"},
+            {"アイウエオ", "a i u e o"},           // katakana shares the table
+            {"かきくけこ", "ka ki ku ke ko"},
+            {"さしすせそ", "sa shi su se so"},
+            {"たちつてと", "ta chi tsu te to"},
+            {"ばびぶべぼ", "ba bi bu be bo"},
+            {"きゃきゅきょ", "kya kyu kyo"},        // 拗音 is one mora, two characters
+            {"しゃしゅしょ", "sha shu sho"},
+            {"にゃんこ", "nya n ko"},              // ん is a mora of its own
+            {"がっこう", "ga ko u"},                // っ is a rest, not a sound
+            {"コーヒー", "ko o hi i"},              // ー holds the vowel before it
+            {"ファイト", "fa i to"},                // a small vowel after a non-i kana
+            {"ヴァイオリン", "va i o ri n"},
+            {"こんにちは", "ko n ni chi wa"},       // the fixed greeting: は is wa
+            {"コンニチハ", "ko n ni chi wa"},
+            {"おはよう", "o ha yo u"},              // ...but word-internal は stays ha
+            {"きょう[は|わ]いいてんき", "kyo u wa i i te n ki"},
+            {"[今日|きょう]はいい[天気|てんき]", "kyo u ha i i te n ki"},
+        }) {
+            if (readings_of(text) != expected) {
+                std::cout << "FAIL: " << text << " read as \"" << readings_of(text)
+                          << "\", expected \"" << expected << "\"\n";
+                return 1;
+            }
+        }
+
+        // っ costs a rest rather than a sound, so it lengthens the utterance
+        // without adding a mora. That is what makes it audible as a stop.
+        island_chatter::Settings plain;
+        plain.text = "がこう";
+        plain.sample_rate = 48000;
+        island_chatter::Settings geminate = plain;
+        geminate.text = "がっこう";
+        const auto without = island_chatter::synthesize(plain);
+        const auto with = island_chatter::synthesize(geminate);
+        require(without.diagnostics.event_count == with.diagnostics.event_count,
+            "っ should not add a mora");
+        require(with.samples.size() > without.samples.size(),
+            "っ should hold the utterance open for a beat");
+
+        // Morae are timed like Mandarin syllables, so tempo lock works in
+        // Japanese too. Anything else and the Japanese would drift off the beat.
+        island_chatter::Settings locked;
+        locked.text = "あいうえおかきくけこ";
+        locked.sample_rate = 48000;
+        locked.tempo_lock = true;
+        locked.speed = 0.8;
+        const auto beat = island_chatter::synthesize(locked).diagnostics;
+        const double slot = 0.200 / 0.8 * 48000.0;
+        for (std::size_t index = 0; index < beat.event_count; ++index) {
+            require(std::abs(static_cast<double>(beat.start_samples[index]) - index * slot) <= 1.0,
+                "a tempo-locked mora is off the grid");
+        }
+
+        // A kana inline override speaks the kana but still reports the kanji, so
+        // markers and Type-On label what is actually on screen.
+        island_chatter::Settings marked;
+        marked.text = "[今日|きょう]";
+        marked.sample_rate = 48000;
+        const auto labelled = island_chatter::synthesize(marked).diagnostics;
+        require(labelled.event_count == 2, "きょう is two morae");
+        // The first mora reports the kanji it stands for, not the kana that
+        // spelled it, so a marker reads 今日 rather than き.
+        require(labelled.source_units[0] == (std::vector<std::uint32_t>{U'今', U'日'}),
+            "the override should carry the characters it stands for");
+        require(labelled.source_units[1] == (std::vector<std::uint32_t>{U'う'}),
+            "the morae after the first should stay as themselves");
+    }
+
     std::cout << "Native DSP tests passed: " << first.samples.size() << " samples, peak "
               << first.diagnostics.peak << '\n';
     return 0;

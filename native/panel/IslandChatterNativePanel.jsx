@@ -796,6 +796,7 @@
         // The layer's own Source Text is what gets spoken, so the 64-unit limit
         // has to be measured against that and not against the panel's text box.
         var truncated = spokenText.length > MAX_TEXT_UNITS ? textLayer.name : "";
+        var unmarked = unmarkedKanji(spokenText) ? textLayer.name : "";
 
         removeLegacyBridge(comp, textLayer);
         ensureToneBootstrap(textLayer);
@@ -833,7 +834,33 @@
                     typeOnCurve(options.typeOnLeave));
             }
         }
-        return truncated;
+        return { truncated: truncated, unmarkedKanji: unmarked };
+    }
+
+    // Kanji has no reading the engine can look up: the same character is read
+    // differently depending on the word, which needs a dictionary and a
+    // disambiguator. Kana is unambiguous, so a text that mixes the two is
+    // almost certainly Japanese, and its kanji is about to be spoken with
+    // Chinese readings. Say so rather than let it sound wrong quietly.
+    function unmarkedKanji(text) {
+        var depth = 0;
+        var sawKana = false;
+        var kanji = "";
+        var index;
+        for (index = 0; index < text.length; index += 1) {
+            var code = text.charCodeAt(index);
+            if (code === 0x5B) { depth += 1; continue; }
+            if (code === 0x5D) { depth -= 1; continue; }
+            // Hiragana and katakana, but not the prolonged sound mark, which
+            // only ever follows a kana anyway.
+            if (code >= 0x3041 && code <= 0x30FF) { sawKana = true; continue; }
+            // Marked characters are covered by their override.
+            if (depth > 0) { continue; }
+            if ((code >= 0x4E00 && code <= 0x9FFF) || (code >= 0x3400 && code <= 0x4DBF)) {
+                kanji += String.fromCharCode(code);
+            }
+        }
+        return sawKana ? kanji : "";
     }
 
     // Everything the panel adds to a layer, so it can be taken off again in one
@@ -1074,16 +1101,22 @@
         }
         var index;
         var truncated = [];
+        var unmarkedKanjiLayers = [];
         for (index = 0; index < layers.length; index += 1) {
             // One pronunciation override cannot safely describe several
             // different selected layers, so batch mode uses each Source Text.
             var layerPronunciation = layers.length === 1 ? pronunciation : "";
             var overflowed = applyToTextLayer(
                 comp, layers[index], layerPronunciation, settings, options);
-            if (overflowed) { truncated.push(overflowed); }
+            if (overflowed.truncated) { truncated.push(overflowed.truncated); }
+            if (overflowed.unmarkedKanji) { unmarkedKanjiLayers.push(overflowed.unmarkedKanji); }
             layers[index].selected = true;
         }
-        return { count: layers.length, truncated: truncated };
+        return {
+            count: layers.length,
+            truncated: truncated,
+            unmarkedKanji: unmarkedKanjiLayers
+        };
     }
 
     function addSlider(parent, label, minimum, maximum, value) {
@@ -1110,12 +1143,152 @@
         if (slider.valueField) { slider.valueField.text = slider.value.toFixed(2); }
     }
 
+    /*
+     * Interface language. The literals in this file stay written as
+     * "English / 中文" so the source reads naturally and the release checks can
+     * still find them; T() picks one side, or the Japanese below.
+     *
+     * Nothing here reaches the effect. Which language the panel is in has no
+     * bearing on what is spoken: kana is read as Japanese and Han characters as
+     * Mandarin whatever this is set to.
+     */
+    var UI_LANGUAGE = "zh";
+    var UI_LANGUAGE_SETTING = "uiLanguage";
+    var IC_JAPANESE_UI = {
+        "Direct text-layer voice / 文字圖層直接發聲": "テキストレイヤーが直接しゃべる",
+        "Read selected layer / 讀取選取圖層": "選択レイヤーを読み込む",
+        "Pronunciation override (optional) / 讀音覆寫（可留空）": "読み方の指定（省略可）",
+        "Sunny / 明亮": "サニー",
+        "Tiny / 迷你": "タイニー",
+        "Cozy / 溫厚": "コージー",
+        "Buzzy / 電子": "バジー",
+        "Chirpy / 活潑": "チャーピー",
+        "Whisper / 耳語": "ウィスパー",
+        "Elder / 年長": "エルダー",
+        "Droid / 機器": "ドロイド",
+        "Neutral / 中性": "ふつう",
+        "Happy / 開心": "うれしい",
+        "Angry / 生氣": "おこり",
+        "Scared / 害怕": "こわがり",
+        "Question / 疑問": "ぎもん",
+        "Sleepy / 疲倦": "ねむい",
+        "Robot / 機器人": "ロボット",
+        "Young / 少年": "こども",
+        "Adult / 成熟": "おとな",
+        "Giant / 巨大": "きょだい",
+        "Pitch / 音高": "ピッチ",
+        "Speed / 速度": "はやさ",
+        "Volume / 音量": "おんりょう",
+        "Consonant / 聲母": "しいん",
+        "Clarity / 清晰度": "はっきりさ",
+        "Cuteness / 可愛度": "かわいさ",
+        "Formant / 共鳴": "きょうめい",
+        "Vibrato / 顫音": "ビブラート",
+        "Vibrato Rate / 顫音速率": "ビブラート速度",
+        "Seed / 種子": "シード",
+        "Voice / 人聲": "ボイス",
+        "Reed / 簧片": "リード",
+        "Chip / 電子": "チップ",
+        "Metallic / 金屬": "メタリック",
+        "Granular / 破碎": "グラニュラー",
+        "Growl / 低吼": "うなり",
+        "Tempo / 節拍": "テンポ",
+        "Markers / 逐字標記": "マーカー",
+        "Fit Duration / 配合長度": "長さを合わせる",
+        "Rig / 動畫控制": "リグ",
+        "Type-On / 逐字顯示": "一文字ずつ表示",
+        "Center / 維持置中": "中央ぞろえを保つ",
+        "Leave / 離開": "出るカーブ",
+        "Smoothness / 平滑": "なめらかさ",
+        "Apply to selected text layers / 套用到選取文字圖層": "選択したテキストレイヤーに適用",
+        "Bake / 轉成音訊": "音声ファイルに書き出す",
+        "Remove / 移除": "取り除く",
+        "Save / 儲存角色": "キャラを保存",
+        "Delete / 刪除": "削除",
+        "Custom / 自訂": "カスタム",
+        "Random / 隨機": "ランダム",
+        "Name this character / 幫這個角色取個名字": "キャラの名前を入れてください",
+        "Captain / 隊長": "たいちょう",
+        "Grandma / 奶奶": "おばあちゃん",
+        "Mimi / 咪咪": "ミミ",
+        "Edit text, then apply / 修改文字後按套用": "テキストを直したら適用を押す",
+        "Error / 錯誤": "エラー",
+        "Read text only / 只讀到文字（此圖層尚未套用）": "テキストだけ読み込みました（未適用）",
+        "Select a text layer. / 請選取文字圖層。": "テキストレイヤーを選んでください。",
+        "Open an active composition first. / 請先開啟合成。": "先にコンポジションを開いてください。",
+        "Apply Island Chatter first, then bake. / 請先按 Apply 再轉成音訊。": "先に適用してから書き出してください。",
+        "Apply Island Chatter to this layer first. / 請先對此圖層按 Apply。": "このレイヤーにまず適用してください。"
+    };
+
+    function T(literal) {
+        var text = String(literal);
+        if (UI_LANGUAGE === "ja") {
+            var translated = IC_JAPANESE_UI[text];
+            // typeof, because every object inherits names like "constructor".
+            if (typeof translated === "string") { return translated; }
+        }
+        var split = text.indexOf(" / ");
+        if (split < 0) { return text; }
+        // Japanese falls back to the English half rather than the Chinese one:
+        // a reader who chose 日本語 is more likely to get something from
+        // "Formant" than from "共鳴".
+        return UI_LANGUAGE === "zh" ? text.substring(split + 3) : text.substring(0, split);
+    }
+
+    // Every control that carries a translatable label, with the literal it was
+    // built from, so switching language can put it back through T().
+    var localisedControls = [];
+
+    function looksBilingual(value) {
+        return typeof value === "string" && value.indexOf(" / ") > 0;
+    }
+
+    // Walked once after the panel is built, rather than wrapping eighty call
+    // sites. edittext holds what the user typed and is never touched.
+    function localiseTree(node) {
+        var index;
+        if (node.type !== "edittext" && looksBilingual(node.text)) {
+            localisedControls.push({ control: node, literal: String(node.text) });
+            node.text = T(node.text);
+        }
+        if (node.items) {
+            for (index = 0; index < node.items.length; index += 1) {
+                if (looksBilingual(node.items[index].text)) {
+                    localisedControls.push({
+                        control: node.items[index], literal: String(node.items[index].text) });
+                    node.items[index].text = T(node.items[index].text);
+                }
+            }
+        }
+        if (node.children) {
+            for (index = 0; index < node.children.length; index += 1) {
+                localiseTree(node.children[index]);
+            }
+        }
+    }
+
+    function relabelUI() {
+        var index;
+        for (index = 0; index < localisedControls.length; index += 1) {
+            localisedControls[index].control.text = T(localisedControls[index].literal);
+        }
+    }
+
     function buildUI(host) {
         var panel = host instanceof Panel ? host : new Window("palette", SCRIPT_NAME, undefined, { resizeable: true });
         panel.orientation = "column";
         panel.alignChildren = ["fill", "top"];
         panel.margins = 12;
         panel.spacing = 8;
+        // Interface language only; it has no effect on what is spoken.
+        var languageRow = panel.add("group");
+        languageRow.orientation = "row";
+        languageRow.alignment = ["right", "top"];
+        var languageCodes = ["zh", "en", "ja"];
+        var languagePicker = languageRow.add("dropdownlist", undefined,
+            ["繁體中文", "English", "日本語"]);
+        languagePicker.helpTip = "Interface language. What is spoken does not change." +
+            "\n介面語言，不影響唸出來的內容。";
         panel.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
         var textInput = panel.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });
         textInput.preferredSize = [390, 88];
@@ -1543,6 +1716,10 @@
                 });
                 status.text = "Applied to " + applied.count + " layer(s) / 已套用 " +
                     applied.count + " 個圖層";
+                if (applied.unmarkedKanji.length) {
+                    status.text = "Kanji read as Chinese / 漢字以中文讀音唸出: " +
+                        applied.unmarkedKanji.join(", ");
+                }
                 if (applied.truncated.length) {
                     status.text = "Truncated / 已截斷: " + applied.truncated.join(", ");
                     alert("Only the first " + MAX_TEXT_UNITS +
@@ -1557,6 +1734,28 @@
                 app.endUndoGroup();
             }
         };
+        // Built in "English / 中文" throughout, then translated in one pass.
+        if (app.settings.haveSetting(SCRIPT_NAME, UI_LANGUAGE_SETTING)) {
+            var stored = String(app.settings.getSetting(SCRIPT_NAME, UI_LANGUAGE_SETTING));
+            var storedIndex;
+            for (storedIndex = 0; storedIndex < languageCodes.length; storedIndex += 1) {
+                if (languageCodes[storedIndex] === stored) { UI_LANGUAGE = stored; }
+            }
+        }
+        var pickerIndex;
+        for (pickerIndex = 0; pickerIndex < languageCodes.length; pickerIndex += 1) {
+            if (languageCodes[pickerIndex] === UI_LANGUAGE) {
+                languagePicker.selection = pickerIndex;
+            }
+        }
+        localiseTree(panel);
+        languagePicker.onChange = function () {
+            UI_LANGUAGE = languageCodes[languagePicker.selection ? languagePicker.selection.index : 0];
+            app.settings.saveSetting(SCRIPT_NAME, UI_LANGUAGE_SETTING, UI_LANGUAGE);
+            relabelUI();
+            panel.layout.layout(true);
+        };
+
         panel.onResizing = panel.onResize = function () { this.layout.resize(); };
         panel.layout.layout(true);
         return panel;

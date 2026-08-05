@@ -178,6 +178,25 @@ std::vector<std::uint32_t> decode_utf8(const std::string& text) {
     return codepoints;
 }
 
+// The inverse, for handing a run of characters back to the planner.
+void append_utf8(std::string& text, std::uint32_t codepoint) {
+    if (codepoint < 0x80U) {
+        text.push_back(static_cast<char>(codepoint));
+    } else if (codepoint < 0x800U) {
+        text.push_back(static_cast<char>(0xC0U | (codepoint >> 6U)));
+        text.push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+    } else if (codepoint < 0x10000U) {
+        text.push_back(static_cast<char>(0xE0U | (codepoint >> 12U)));
+        text.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+        text.push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+    } else {
+        text.push_back(static_cast<char>(0xF0U | (codepoint >> 18U)));
+        text.push_back(static_cast<char>(0x80U | ((codepoint >> 12U) & 0x3FU)));
+        text.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3FU)));
+        text.push_back(static_cast<char>(0x80U | (codepoint & 0x3FU)));
+    }
+}
+
 bool is_space(std::uint32_t codepoint) {
     return codepoint == 0x20U || codepoint == 0x09U || codepoint == 0x0AU ||
         codepoint == 0x0DU || codepoint == 0x3000U;
@@ -394,6 +413,205 @@ MandarinSyllable parse_mandarin(std::string_view reading) {
     return syllable;
 }
 
+/*
+ * Japanese.
+ *
+ * Kana is a syllabary, so unlike Chinese there is no dictionary to consult: the
+ * character is the pronunciation. That makes it the one language that can be
+ * added without shipping a lookup table.
+ *
+ * Kanji is deliberately absent. The same character is read differently
+ * depending on the word around it, which needs a dictionary and a
+ * disambiguator, so unmarked kanji falls through to the Mandarin reading and
+ * the panel says so. Write kana, or mark it: [今日|きょう].
+ */
+
+// Romaji for U+3041 to U+3094, in code order. Katakana is the same run shifted
+// by 0x60 and shares this table. Two entries are markers rather than sounds:
+// っ doubles the next consonant and ん is a mora of its own.
+constexpr std::array<const char*, 84> kKanaRomaji{{
+    "a", "a", "i", "i", "u", "u", "e", "e", "o", "o",
+    "ka", "ga", "ki", "gi", "ku", "gu", "ke", "ge", "ko", "go",
+    "sa", "za", "shi", "ji", "su", "zu", "se", "ze", "so", "zo",
+    "ta", "da", "chi", "ji", "", "tsu", "zu", "te", "de", "to", "do",
+    "na", "ni", "nu", "ne", "no",
+    "ha", "ba", "pa", "hi", "bi", "pi", "fu", "bu", "pu",
+    "he", "be", "pe", "ho", "bo", "po",
+    "ma", "mi", "mu", "me", "mo",
+    "ya", "ya", "yu", "yu", "yo", "yo",
+    "ra", "ri", "ru", "re", "ro",
+    "wa", "wa", "i", "e", "o", "n", "vu",
+}};
+
+constexpr std::uint32_t kHiraganaFirst = 0x3041U;
+constexpr std::uint32_t kHiraganaLast = 0x3094U;
+constexpr std::uint32_t kKatakanaOffset = 0x60U;
+constexpr std::uint32_t kSmallTsuHiragana = 0x3063U;
+constexpr std::uint32_t kNHiragana = 0x3093U;
+constexpr std::uint32_t kProlongedMark = 0x30FCU;
+
+// Katakana folded onto the hiragana it shares a sound with, or 0.
+std::uint32_t kana_base(std::uint32_t codepoint) {
+    if (codepoint >= kHiraganaFirst && codepoint <= kHiraganaLast) {
+        return codepoint;
+    }
+    if (codepoint >= kHiraganaFirst + kKatakanaOffset &&
+            codepoint <= kHiraganaLast + kKatakanaOffset) {
+        return codepoint - kKatakanaOffset;
+    }
+    return 0;
+}
+
+bool is_kana(std::uint32_t codepoint) {
+    return kana_base(codepoint) != 0 || codepoint == kProlongedMark;
+}
+
+std::string_view kana_romaji(std::uint32_t codepoint) {
+    const auto base = kana_base(codepoint);
+    if (base == 0) {
+        return {};
+    }
+    return kKanaRomaji[base - kHiraganaFirst];
+}
+
+// The small kana: ぁぃぅぇぉ, ゃゅょ, ゎ. They never stand alone.
+bool is_small_kana(std::uint32_t codepoint) {
+    switch (kana_base(codepoint)) {
+        case 0x3041U: case 0x3043U: case 0x3045U: case 0x3047U: case 0x3049U:
+        case 0x3083U: case 0x3085U: case 0x3087U: case 0x308EU:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// きゃ, しゅ, ふぉ: a small kana replaces the vowel of the one before it, and
+// after an -i syllable it leaves a palatal on-glide behind. Returns an empty
+// string when the pair is not one of those, so the caller can fall back.
+std::string combine_small_kana(std::string_view base, std::uint32_t small) {
+    const auto tail = kana_romaji(small);
+    if (base.empty() || tail.empty()) {
+        return {};
+    }
+    const char vowel = tail.back();
+    if (std::string_view("aiueo").find(vowel) == std::string_view::npos) {
+        return {};
+    }
+    // し/ち/じ keep their own palatal shape: しゃ is sha, not shya.
+    if (base == "shi" || base == "chi" || base == "ji") {
+        return std::string(base.substr(0, base.size() - 1)) + vowel;
+    }
+    if (base.size() > 1 && base.back() == 'i') {
+        // ki + ゃ becomes kya. The y is what carries the palatal glide.
+        return std::string(base.substr(0, base.size() - 1)) + "y" + vowel;
+    }
+    if (std::string_view("aiueo").find(base.back()) != std::string_view::npos) {
+        // ふ + ぉ becomes fo, which is how loanwords are written.
+        return std::string(base.substr(0, base.size() - 1)) + vowel;
+    }
+    return {};
+}
+
+/*
+ * は and へ are read wa and e when they are grammatical particles, and ha and
+ * he when they are part of a word. Telling those apart needs a morphological
+ * analyser: こんにちは is wa, おはよう is ha, and nothing about the surrounding
+ * characters separates them. Guessing would be wrong constantly in one
+ * direction or the other, so the kana are read literally and only these fixed
+ * greetings, where there is no ambiguity at all, are special-cased. Everything
+ * else is marked by hand: きょう[は|わ]いいてんき.
+ *
+ * Deliberately tiny and auditable, exactly like kPhrasePronunciations.
+ */
+struct KanaPhrase {
+    const char32_t* kana;
+    const char* romaji;
+};
+
+constexpr std::array<KanaPhrase, 4> kKanaPhrases{{
+    {U"こんにちは", "ko n ni chi wa"},
+    {U"こんばんは", "ko n ba n wa"},
+    {U"では", "de wa"},
+    {U"それでは", "so re de wa"},
+}};
+
+struct JapaneseSyllable {
+    Consonant consonant;
+    int first_vowel = 0;
+    int end_vowel = 0;
+    bool nasal_final = false;
+};
+
+JapaneseSyllable parse_japanese(std::string_view romaji) {
+    JapaneseSyllable syllable;
+    // The moraic nasal ん is a whole mora on its own, not a coda.
+    if (romaji == "n") {
+        syllable.consonant = {ConsonantKind::nasal, 0.58, false, false};
+        syllable.first_vowel = syllable.end_vowel = 4;  // a dark, closed colour
+        syllable.nasal_final = true;
+        return syllable;
+    }
+
+    std::string_view initial;
+    for (const auto candidate : {"sh", "ch", "ts", "ky", "gy", "ny", "hy", "by", "py",
+            "my", "ry"}) {
+        if (begins_with(romaji, candidate)) {
+            initial = candidate;
+            romaji.remove_prefix(2);
+            break;
+        }
+    }
+    if (initial.empty() && !romaji.empty() &&
+            std::string_view("kgsztdnhfbpmyrwvj").find(romaji.front()) != std::string_view::npos) {
+        initial = romaji.substr(0, 1);
+        romaji.remove_prefix(1);
+    }
+
+    // Japanese r is a flap, much closer to l than to the Mandarin retroflex.
+    if (initial == "k") syllable.consonant = {ConsonantKind::stop, 0.88, true, false};
+    else if (initial == "g") syllable.consonant = {ConsonantKind::stop, 0.88, false, false};
+    else if (initial == "t") syllable.consonant = {ConsonantKind::stop, 0.52, true, false};
+    else if (initial == "d") syllable.consonant = {ConsonantKind::stop, 0.52, false, false};
+    else if (initial == "p") syllable.consonant = {ConsonantKind::stop, 0.16, true, false};
+    else if (initial == "b") syllable.consonant = {ConsonantKind::stop, 0.16, false, false};
+    else if (initial == "s") syllable.consonant = {ConsonantKind::sibilant, 0.68, false, false};
+    else if (initial == "z") syllable.consonant = {ConsonantKind::sibilant, 0.66, false, false};
+    else if (initial == "sh") syllable.consonant = {ConsonantKind::sibilant, 0.84, false, false};
+    else if (initial == "j") syllable.consonant = {ConsonantKind::affricate, 0.84, false, false};
+    else if (initial == "ch") syllable.consonant = {ConsonantKind::affricate, 0.84, true, false};
+    else if (initial == "ts") syllable.consonant = {ConsonantKind::affricate, 0.66, true, false};
+    else if (initial == "h") syllable.consonant = {ConsonantKind::aspirate, 0.30, true, false};
+    else if (initial == "f") syllable.consonant = {ConsonantKind::fricative, 0.20, false, false};
+    else if (initial == "v") syllable.consonant = {ConsonantKind::fricative, 0.20, false, false};
+    else if (initial == "n") syllable.consonant = {ConsonantKind::nasal, 0.54, false, false};
+    else if (initial == "m") syllable.consonant = {ConsonantKind::nasal, 0.18, false, false};
+    else if (initial == "y") syllable.consonant = {ConsonantKind::liquid, 0.68, false, false};
+    else if (initial == "w") syllable.consonant = {ConsonantKind::liquid, 0.68, false, false};
+    else if (initial == "r") syllable.consonant = {ConsonantKind::liquid, 0.50, false, false};
+    else if (initial.size() == 2 && initial.back() == 'y') {
+        // The palatalised series keeps the place of its plain counterpart.
+        const char plain = initial.front();
+        if (plain == 'k') syllable.consonant = {ConsonantKind::stop, 0.88, true, false};
+        else if (plain == 'g') syllable.consonant = {ConsonantKind::stop, 0.88, false, false};
+        else if (plain == 'n') syllable.consonant = {ConsonantKind::nasal, 0.54, false, false};
+        else if (plain == 'h') syllable.consonant = {ConsonantKind::aspirate, 0.30, true, false};
+        else if (plain == 'b') syllable.consonant = {ConsonantKind::stop, 0.16, false, false};
+        else if (plain == 'p') syllable.consonant = {ConsonantKind::stop, 0.16, true, false};
+        else if (plain == 'm') syllable.consonant = {ConsonantKind::nasal, 0.18, false, false};
+        else if (plain == 'r') syllable.consonant = {ConsonantKind::liquid, 0.50, false, false};
+    }
+
+    const char vowel = romaji.empty() ? 'a' : romaji.back();
+    const int target = vowel_index(vowel);
+    // Palatalised syllables glide out of an i, which is exactly what makes
+    // きゃ sound like kya rather than ka.
+    const bool palatal = initial == "sh" || initial == "ch" || initial == "j" ||
+        (initial.size() == 2 && initial.back() == 'y');
+    syllable.first_vowel = palatal ? vowel_index('i') : target;
+    syllable.end_vowel = target;
+    return syllable;
+}
+
 double consonant_seconds(const Consonant& consonant) {
     switch (consonant.kind) {
         case ConsonantKind::stop: return consonant.aspirated ? 0.062 : 0.036;
@@ -515,6 +733,13 @@ struct SpeechUnit {
     bool question = false;
     bool emphatic = false;
     std::uint8_t lexical_tone = 5;
+    // Kana. A Japanese mora is timed like a Mandarin syllable rather than like
+    // a latin letter, and it is parsed by parse_japanese() instead of
+    // parse_mandarin(), but everything else about it is the same.
+    bool japanese = false;
+    // Characters this unit speaks beyond its own codepoint: the small kana in
+    // きゃ, or every character covered by an inline override.
+    std::vector<std::uint32_t> extra_codepoints;
 };
 
 struct PhrasePronunciation {
@@ -749,8 +974,43 @@ std::vector<SpeechUnit> build_speech_units(const std::string& text) {
                     if (codepoints[cursor] > 0x7FU) { ascii = false; break; }
                     override_text.push_back(static_cast<char>(codepoints[cursor]));
                 }
-                const auto readings = split_readings(override_text);
                 const auto character_count = bar - index - 1;
+                // Kana in the override: [今日|きょう]. Kanji has no reading the
+                // engine can look up, so this is how Japanese gets written
+                // without spelling the whole sentence in kana. The morae come
+                // from the kana, and every covered character is attached to the
+                // first of them so markers still label what is on screen.
+                bool kana_override = character_count > 0;
+                for (std::size_t cursor = bar + 1; cursor < close && kana_override; ++cursor) {
+                    if (!is_kana(codepoints[cursor])) { kana_override = false; }
+                }
+                if (kana_override) {
+                    std::string kana;
+                    for (std::size_t cursor = bar + 1; cursor < close; ++cursor) {
+                        append_utf8(kana, codepoints[cursor]);
+                    }
+                    auto morae = build_speech_units(kana);
+                    if (!morae.empty()) {
+                        std::size_t first_spoken = morae.size();
+                        for (std::size_t at = 0; at < morae.size(); ++at) {
+                            if (morae[at].pause_seconds <= 0.0) { first_spoken = at; break; }
+                        }
+                        if (first_spoken < morae.size()) {
+                            // The characters on screen replace the kana that
+                            // spelled them, rather than being added to them: a
+                            // marker should read 今日, not 今日ょ.
+                            auto& carrier = morae[first_spoken];
+                            carrier.codepoint = codepoints[index + 1];
+                            carrier.extra_codepoints.assign(
+                                codepoints.begin() + static_cast<std::ptrdiff_t>(index + 2),
+                                codepoints.begin() + static_cast<std::ptrdiff_t>(bar));
+                            units.insert(units.end(), morae.begin(), morae.end());
+                            index = close + 1;
+                            continue;
+                        }
+                    }
+                }
+                const auto readings = split_readings(override_text);
                 if (ascii && character_count > 0 && readings.size() == character_count) {
                     for (std::size_t cursor = 0; cursor < character_count; ++cursor) {
                         units.push_back({codepoints[index + 1 + cursor], readings[cursor], 0.0, true, false, false});
@@ -775,6 +1035,80 @@ std::vector<SpeechUnit> build_speech_units(const std::string& text) {
             break;
         }
         if (phrase_matched) continue;
+
+        // Kana. Unlike Chinese there is nothing to look up: the character is
+        // the pronunciation, so this needs no table beyond the romaji above.
+        if (is_kana(codepoint)) {
+            // The handful of fixed greetings where は is unambiguously wa.
+            // Matched on the hiragana each character folds to, so katakana
+            // spellings hit the same entry.
+            bool phrase_matched_kana = false;
+            for (const auto& entry : kKanaPhrases) {
+                const std::u32string_view phrase(entry.kana);
+                if (index + phrase.size() > codepoints.size()) { continue; }
+                bool same = true;
+                for (std::size_t at = 0; at < phrase.size() && same; ++at) {
+                    same = kana_base(codepoints[index + at]) ==
+                        kana_base(static_cast<std::uint32_t>(phrase[at]));
+                }
+                if (!same) { continue; }
+                const auto readings = split_readings(entry.romaji);
+                if (readings.size() != phrase.size()) { continue; }
+                for (std::size_t at = 0; at < phrase.size(); ++at) {
+                    SpeechUnit mora;
+                    mora.codepoint = codepoints[index + at];
+                    mora.reading = readings[at];
+                    mora.japanese = true;
+                    units.push_back(mora);
+                }
+                index += phrase.size();
+                phrase_matched_kana = true;
+                break;
+            }
+            if (phrase_matched_kana) { continue; }
+            // っ doubles the next consonant, which is heard as a stop rather
+            // than as a sound. One mora of silence is what that amounts to.
+            if (kana_base(codepoint) == kSmallTsuHiragana) {
+                SpeechUnit stop;
+                stop.codepoint = codepoint;
+                stop.pause_seconds = kSyllableStride * 0.5;
+                units.push_back(stop);
+                ++index;
+                continue;
+            }
+            // ー holds the vowel before it for another mora.
+            if (codepoint == kProlongedMark) {
+                if (!units.empty() && units.back().japanese && !units.back().reading.empty()) {
+                    SpeechUnit held;
+                    held.codepoint = codepoint;
+                    held.reading = std::string(1, units.back().reading.back());
+                    held.japanese = true;
+                    units.push_back(held);
+                    ++index;
+                    continue;
+                }
+                ++index;
+                continue;
+            }
+            SpeechUnit mora;
+            mora.codepoint = codepoint;
+            mora.reading = std::string(kana_romaji(codepoint));
+            mora.japanese = true;
+            // きゃ and ふぉ are one mora written with two characters.
+            if (index + 1 < codepoints.size() && is_small_kana(codepoints[index + 1])) {
+                const auto combined = combine_small_kana(mora.reading, codepoints[index + 1]);
+                if (!combined.empty()) {
+                    mora.reading = combined;
+                    mora.extra_codepoints.push_back(codepoints[index + 1]);
+                    ++index;
+                }
+            }
+            if (!mora.reading.empty()) {
+                units.push_back(mora);
+            }
+            ++index;
+            continue;
+        }
 
         // Space- or tone-mark-delimited Zhuyin: ㄋㄧˇ ㄏㄠˇ.
         if (is_bopomofo(codepoint) || bopomofo_tone(codepoint) == 5) {
@@ -939,12 +1273,20 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         // labels its markers from this, so it has to grow whenever a branch
         // below consumes more than the current character.
         std::vector<std::uint32_t> consumed{codepoint};
+        consumed.insert(consumed.end(), unit.extra_codepoints.begin(), unit.extra_codepoints.end());
         Consonant consonant{};
         const bool latin = ascii_lower(codepoint) != '\0';
         MandarinSyllable mandarin;
         const std::string_view reading(unit.reading);
         const bool has_mandarin_reading = unit.mandarin && !reading.empty();
-        if (has_mandarin_reading) {
+        const bool has_japanese_reading = unit.japanese && !reading.empty();
+        JapaneseSyllable japanese;
+        if (has_japanese_reading) {
+            japanese = parse_japanese(reading);
+            consonant = japanese.consonant;
+            vowel_index = japanese.first_vowel;
+            end_vowel_index = japanese.end_vowel;
+        } else if (has_mandarin_reading) {
             mandarin = parse_mandarin(reading);
             consonant = mandarin.consonant;
             vowel_index = mandarin.first_vowel;
@@ -970,7 +1312,9 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         // seeds below are unchanged and the voice keeps its character.
         const double duration_variation =
             settings.tempo_lock ? 0.0 : 0.025 + (1.0 - clarity) * 0.12;
-        const double duration = (has_mandarin_reading ? 0.188 : 0.148) / speed *
+        // A Japanese mora is timed like a Mandarin syllable, not like a latin
+        // letter, which is what makes tempo lock land on the beat in Japanese.
+        const double duration = (has_mandarin_reading || has_japanese_reading ? 0.188 : 0.148) / speed *
             (1.0 - duration_variation * 0.5 + random.next() * duration_variation);
         event.length = std::max<std::size_t>(64, static_cast<std::size_t>(std::llround(duration * sample_rate)));
         const int note_span = 2 + static_cast<int>(std::llround(
@@ -985,8 +1329,10 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         event.lexical_tone = has_mandarin_reading ? unit.lexical_tone : 5;
         event.source_codepoint = codepoint;
         event.source_units = std::move(consumed);
-        event.reading = has_mandarin_reading ? std::string(reading) : std::string{};
-        event.nasal_final = has_mandarin_reading && mandarin.nasal_final;
+        event.reading = has_mandarin_reading || has_japanese_reading
+            ? std::string(reading) : std::string{};
+        event.nasal_final = (has_mandarin_reading && mandarin.nasal_final) ||
+            (has_japanese_reading && japanese.nasal_final);
         event.velar_nasal = has_mandarin_reading && mandarin.velar_nasal;
         event.onset = std::min(
             event.length - 24U,

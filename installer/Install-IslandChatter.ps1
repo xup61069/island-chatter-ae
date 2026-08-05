@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 # Part of the release synchronisation list in CLAUDE.md; tests/validate-script.js
 # checks this against package.json.
-$IslandChatterVersion = "1.1.0"
+$IslandChatterVersion = "1.2.0"
 # After Effects releases this plug-in is built and verified against.
 $MinimumSupportedYear = 2025
 $requiredFiles = @(
