@@ -7,14 +7,13 @@ param(
 $ErrorActionPreference = "Stop"
 # Part of the release synchronisation list in CLAUDE.md; tests/validate-script.js
 # checks this against package.json.
-$IslandChatterVersion = "1.0.10"
+$IslandChatterVersion = "1.0.11"
 # After Effects releases this plug-in is built and verified against.
 $MinimumSupportedYear = 2025
 $requiredFiles = @(
     "IslandChatterNative.aex",
     "island_chatter_bake.exe",
-    "IslandChatterNativePanel.jsx",
-    "IslandChatterMandarinReadings.jsxinc"
+    "IslandChatterNativePanel.jsx"
 )
 
 # The release package hides everything except the two launchers, so this script
@@ -101,8 +100,6 @@ foreach ($target in $targets) {
                 -Destination (Join-Path $pluginDirectory "island_chatter_bake.exe") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterNativePanel.jsx") `
                 -Destination (Join-Path $panelDirectory "IslandChatterNativePanel.jsx") -Force
-            Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterMandarinReadings.jsxinc") `
-                -Destination (Join-Path $panelDirectory "IslandChatterMandarinReadings.jsxinc") -Force
         } catch [System.UnauthorizedAccessException] {
             throw ("Cannot write to '$target'. Run this installer from a PowerShell window " +
                 "opened with 'Run as administrator'.`n" +

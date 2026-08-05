@@ -1,6 +1,5 @@
 #target aftereffects
 #targetengine "islandChatterNativePanel"
-#include "IslandChatterMandarinReadings.jsxinc"
 
 /*
  * Island Chatter Native helper panel
@@ -19,9 +18,11 @@
     var OLD_CONTROL_NAME = "Island Chatter Control";
     var OLD_SOURCE_CONTROL_NAME = "Island Chatter Source";
     var MAX_TEXT_UNITS = 64;
+    // What the panel asks island_chatter_bake to work at, for both the timing
+    // plan and Bake. Independent of the rate After Effects renders the effect
+    // at: the plan is in seconds and the engine's timings scale with the rate.
+    var ENGINE_SAMPLE_RATE = 48000;
     // Mirrors kMinimumSpeed / kMaximumSpeed in native/src/dsp.cpp.
-    var MIN_SPEED = 0.10;
-    var MAX_SPEED = 12.0;
     var PARAM_VOICE = 1;
     var PARAM_PITCH = 2;
     var PARAM_SPEED = 3;
@@ -160,13 +161,8 @@
         return value;
     }
 
-    /*
-     * Everything from here to estimateSpeech() mirrors native/src/dsp.cpp.
-     * Markers, the animation rig, Type-On and Fit Duration all read the plan
-     * these functions produce, so any divergence from the engine shows up as
-     * mouth shapes and layer lengths that do not match what you hear.
-     * tests/validate-script.js cross-checks the shared tables.
-     */
+    // Helpers the engine's plan is decoded with. These derive from a reading
+    // string the engine hands back; they do not decide what the readings are.
 
     function codePointAt(text, index) {
         var high = text.charCodeAt(index);
@@ -177,38 +173,6 @@
             }
         }
         return high;
-    }
-
-    function isSpaceCode(code) {
-        return code === 0x20 || code === 0x09 || code === 0x0A || code === 0x0D || code === 0x3000;
-    }
-
-    function isPunctuationCode(code) {
-        // U+3007 〇 sits inside the CJK punctuation block but is spoken.
-        if (code === 0x3007) { return false; }
-        if (code >= 0x3000 && code <= 0x303F) { return true; }
-        switch (code) {
-        case 0x2E: case 0x2C: case 0x21: case 0x3F: case 0x3B: case 0x3A: case 0x2D:
-        case 0x2026: case 0x2014:
-        case 0xFF01: case 0xFF0C: case 0xFF0E: case 0xFF1A: case 0xFF1B: case 0xFF1F:
-            return true;
-        default:
-            return false;
-        }
-    }
-
-    function punctuationSeconds(code) {
-        switch (code) {
-        case 0x2C: case 0xFF0C: case 0x3001: return 0.105;
-        case 0x3B: case 0xFF1B: return 0.190;
-        case 0x3A: case 0xFF1A: return 0.155;
-        case 0x3F: case 0xFF1F: return 0.215;
-        case 0x21: case 0xFF01: return 0.195;
-        case 0x2E: case 0xFF0E: case 0x3002: return 0.235;
-        case 0x2026: return 0.300;
-        case 0x2D: case 0x2014: return 0.125;
-        default: return 0.165;
-        }
     }
 
     function mouthForReading(reading) {
@@ -226,217 +190,12 @@
         return last >= "1" && last <= "5" ? parseInt(last, 10) : 5;
     }
 
-    function replaceReadingTone(reading, tone) {
-        var last = reading.charAt(reading.length - 1);
-        if (last >= "1" && last <= "5") {
-            return reading.substring(0, reading.length - 1) + tone;
-        }
-        return reading + tone;
-    }
-
-    // Mirrors kPhrasePronunciations in native/src/dsp.cpp.
-    var IC_PHRASE_READINGS = [
-        ["音樂", "yin1 yue4"], ["音乐", "yin1 yue4"],
-        ["樂隊", "yue4 dui4"], ["乐队", "yue4 dui4"],
-        ["快樂", "kuai4 le4"], ["快乐", "kuai4 le4"],
-        ["銀行", "yin2 hang2"], ["银行", "yin2 hang2"],
-        ["行走", "xing2 zou3"], ["行為", "xing2 wei2"], ["行为", "xing2 wei2"],
-        ["重新", "chong2 xin1"], ["重複", "chong2 fu4"], ["重复", "chong2 fu4"],
-        ["重要", "zhong4 yao4"], ["重量", "zhong4 liang4"],
-        ["長大", "zhang3 da4"], ["长大", "zhang3 da4"],
-        ["長度", "chang2 du4"], ["长度", "chang2 du4"],
-        ["還書", "huan2 shu1"], ["还书", "huan2 shu1"],
-        ["還是", "hai2 shi4"], ["还是", "hai2 shi4"],
-        ["過去", "guo4 qu4"], ["过去", "guo4 qu4"],
-        ["經過", "jing1 guo4"], ["经过", "jing1 guo4"],
-        ["超過", "chao1 guo4"], ["超过", "chao1 guo4"],
-        ["難過", "nan2 guo4"], ["难过", "nan2 guo4"],
-        ["過來", "guo4 lai2"], ["过来", "guo4 lai2"],
-        ["過年", "guo4 nian2"], ["过年", "guo4 nian2"],
-        ["著名", "zhu4 ming2"],
-        ["著急", "zhao2 ji2"], ["着急", "zhao2 ji2"],
-        ["顯著", "xian3 zhu4"], ["显著", "xian3 zhu4"],
-        ["了解", "liao3 jie3"], ["瞭解", "liao3 jie3"],
-        ["明了", "ming2 liao3"]
-    ];
-
-    // Mirrors is_neutral_particle() in native/src/dsp.cpp.
-    var IC_NEUTRAL_PARTICLES = "的了嗎吗吧呢著着過过們们啊呀嘛喔哦";
-
-    function isNeutralParticle(code) {
-        return code <= 0xFFFF && IC_NEUTRAL_PARTICLES.indexOf(String.fromCharCode(code)) >= 0;
-    }
-
-    function isNumberCode(code) {
-        if (code >= 0x30 && code <= 0x39) { return true; }
-        return code <= 0xFFFF && "〇零一二兩两三四五六七八九十百千萬万"
-            .indexOf(String.fromCharCode(code)) >= 0;
-    }
-
-    // Mirrors yi_keeps_citation_tone() in native/src/dsp.cpp.
-    function yiKeepsCitationTone(previous, next) {
-        if (previous <= 0xFFFF && "第星期週周初".indexOf(String.fromCharCode(previous)) >= 0) {
-            return true;
-        }
-        if (next <= 0xFFFF && "月日號号".indexOf(String.fromCharCode(next)) >= 0) { return true; }
-        return isNumberCode(previous);
-    }
-
-    function readingForCodePoint(code) {
-        // 〇 is absent from Unicode's kMandarin; the engine supplies it too.
-        if (code === 0x3007) { return "ling2"; }
-        var reading = typeof islandChatterMandarinReading === "function"
-            ? islandChatterMandarinReading(code) : "";
-        return reading ? String(reading) : "";
-    }
-
-    function isLatinLetter(code) {
-        if (code > 0x7F) { return false; }
-        var lower = String.fromCharCode(code).toLowerCase();
-        return lower >= "a" && lower <= "z";
-    }
-
-    function isLatinVowel(code) {
-        if (code > 0x7F) { return false; }
-        return "aeiouy".indexOf(String.fromCharCode(code).toLowerCase()) >= 0;
-    }
-
     function characterFromCode(code) {
         if (code > 0xFFFF) {
             var offset = code - 0x10000;
             return String.fromCharCode(0xD800 + (offset >> 10), 0xDC00 + (offset & 0x3FF));
         }
         return String.fromCharCode(code);
-    }
-
-    function matchesPhrase(codes, offset, phrase) {
-        if (offset + phrase.length > codes.length) { return false; }
-        var index;
-        for (index = 0; index < phrase.length; index += 1) {
-            if (codes[offset + index] !== phrase.charCodeAt(index)) { return false; }
-        }
-        return true;
-    }
-
-    function applySandhi(units) {
-        var index;
-        for (index = 0; index < units.length; index += 1) {
-            if (!units[index].reading) { continue; }
-            var next = index + 1;
-            while (next < units.length && !units[next].reading &&
-                    (units[next].pause <= 0 || isSpaceCode(units[next].code))) {
-                next += 1;
-            }
-            if (next >= units.length || !units[next].reading) { continue; }
-            var previous = 0;
-            var back;
-            for (back = index; back > 0; back -= 1) {
-                if (units[back - 1].reading) { previous = units[back - 1].code; break; }
-                if (units[back - 1].pause > 0 && !isSpaceCode(units[back - 1].code)) { break; }
-            }
-            var nextTone = readingTone(units[next].reading);
-            var tone = readingTone(units[index].reading);
-            if (tone === 3 && nextTone === 3) {
-                units[index].reading = replaceReadingTone(units[index].reading, 2);
-            } else if (units[index].code === 0x4E00) {
-                if (!yiKeepsCitationTone(previous, units[next].code)) {
-                    units[index].reading = replaceReadingTone(
-                        units[index].reading, nextTone === 4 ? 2 : 4);
-                }
-            } else if (units[index].code === 0x4E0D && nextTone === 4) {
-                units[index].reading = replaceReadingTone(units[index].reading, 2);
-            }
-        }
-    }
-
-    // Mirrors build_speech_units() in native/src/dsp.cpp. Inline overrides,
-    // Zhuyin and tone-number pinyin belong to the Pronunciation field, which
-    // never reaches this planner, so they are deliberately not duplicated.
-    function buildSpeechUnits(text) {
-        var codes = [];
-        var index = 0;
-        while (index < text.length) {
-            var code = codePointAt(text, index);
-            codes.push(code);
-            index += code > 0xFFFF ? 2 : 1;
-        }
-        var units = [];
-        var cursor = 0;
-        while (cursor < codes.length) {
-            var current = codes[cursor];
-            if (isSpaceCode(current)) {
-                units.push({ code: current, reading: "", pause: 0.055 });
-                cursor += 1;
-                continue;
-            }
-            if (isPunctuationCode(current)) {
-                units.push({ code: current, reading: "", pause: punctuationSeconds(current) });
-                cursor += 1;
-                continue;
-            }
-            var matched = false;
-            var phrase;
-            for (phrase = 0; phrase < IC_PHRASE_READINGS.length; phrase += 1) {
-                if (!matchesPhrase(codes, cursor, IC_PHRASE_READINGS[phrase][0])) { continue; }
-                var readings = IC_PHRASE_READINGS[phrase][1].split(" ");
-                var offset;
-                for (offset = 0; offset < readings.length; offset += 1) {
-                    units.push({ code: codes[cursor + offset], reading: readings[offset], pause: 0 });
-                }
-                cursor += readings.length;
-                matched = true;
-                break;
-            }
-            if (matched) { continue; }
-            var reading = readingForCodePoint(current);
-            if (reading && isNeutralParticle(current)) { reading = replaceReadingTone(reading, 5); }
-            units.push({ code: current, reading: reading, pause: 0 });
-            cursor += 1;
-        }
-        applySandhi(units);
-        return units;
-    }
-
-    function estimateSpeech(text, speed, tempoLock) {
-        var units = buildSpeechUnits(text);
-        var cursor = 0;
-        var events = [];
-        var index;
-        // Must match kMinimumSpeed / kMaximumSpeed in native/src/dsp.cpp.
-        speed = clamp(speed, MIN_SPEED, MAX_SPEED);
-        for (index = 0; index < units.length; index += 1) {
-            var unit = units[index];
-            if (unit.pause > 0) {
-                // Mirrors the tempo-lock rest quantisation in build_events().
-                var pause = tempoLock
-                    ? Math.round(unit.pause / SYLLABLE_STRIDE) * SYLLABLE_STRIDE
-                    : unit.pause;
-                cursor += pause / speed;
-                continue;
-            }
-            var mandarin = unit.reading !== "";
-            var reading = mandarin ? unit.reading : "a5";
-            var character = characterFromCode(unit.code);
-            // The engine folds a latin consonant and the vowel after it into one
-            // syllable; keep the marker and mouth counts in step with that.
-            if (!mandarin && isLatinLetter(unit.code) && !isLatinVowel(unit.code) &&
-                    index + 1 < units.length && !units[index + 1].reading &&
-                    isLatinVowel(units[index + 1].code)) {
-                character += characterFromCode(units[index + 1].code);
-                index += 1;
-            }
-            var duration = (mandarin ? 0.188 : 0.148) / speed;
-            events.push({
-                character: character,
-                reading: reading,
-                mouth: mouthForReading(reading),
-                tone: readingTone(reading),
-                time: cursor,
-                duration: duration
-            });
-            cursor += duration + 0.012 / speed;
-        }
-        return { events: events, duration: cursor + 0.10 };
     }
 
     // Mirrors apply_character_style() in native/src/dsp.cpp. The engine scales
@@ -481,6 +240,98 @@
     function tempoForSpeed(speed, syllablesPerBeat, emotion, characterSize) {
         return speed * styleSpeedMultiplier(emotion, characterSize) * 60.0 /
             (SYLLABLE_STRIDE * syllablesPerBeat);
+    }
+
+    /*
+     * The plan comes from the engine, not from a second implementation of it.
+     *
+     * Markers, the rig, Type-On and Fit Duration all need to know where each
+     * syllable falls. The panel used to work that out itself, which meant a
+     * duplicate of the readings table, the phrase table, tone sandhi, the
+     * punctuation rests and the timing constants, written in ExtendScript. The
+     * two copies could not agree even in principle: the engine varies each
+     * syllable's length by a seeded random amount, so ordinary Chinese drifted
+     * by up to 10 ms, and the copy knew nothing about inline overrides, Zhuyin,
+     * tone-number pinyin or the 64-unit limit. "[重|chong2]新開始" planned twelve
+     * syllables against the four that are spoken and sized the layer 1.28 s too
+     * long; "ni3 hao3 ma5" planned seven against three.
+     *
+     * island_chatter_bake --plan reports the plan the engine will actually use.
+     * The arguments are read off the effect rather than off the panel, so the
+     * plan describes what will be rendered even if the two ever disagree.
+     */
+    function engineVoiceArguments(effect) {
+        return " --text " + hexUtf8(textFromEffect(effect)) +
+            " --voice " + (Math.round(effect.property(PARAM_VOICE).value) - 1) +
+            " --emotion " + (Math.round(effect.property(PARAM_EMOTION).value) - 1) +
+            " --size " + (Math.round(effect.property(PARAM_CHARACTER_SIZE).value) - 1) +
+            " --seed " + Math.round(effect.property(PARAM_SEED).value) +
+            " --rate " + ENGINE_SAMPLE_RATE +
+            " --pitch " + effect.property(PARAM_PITCH).value +
+            " --speed " + effect.property(PARAM_SPEED).value +
+            " --volume " + (effect.property(PARAM_VOLUME).value / 100) +
+            " --consonant " + effect.property(PARAM_CONSONANT).value +
+            " --clarity " + (effect.property(PARAM_CLARITY).value / 100) +
+            " --cuteness " + (effect.property(PARAM_CUTENESS).value / 100) +
+            " --tempo-lock " + (Math.round(effect.property(PARAM_TEMPO_LOCK).value) ? 1 : 0);
+    }
+
+    function requireEngineTool() {
+        var tool = bakeToolFile();
+        if (!tool) {
+            throw new Error("island_chatter_bake.exe is missing. Reinstall Island Chatter." +
+                "\n找不到 island_chatter_bake.exe，請重新安裝 Island Chatter。");
+        }
+        return tool;
+    }
+
+    // Characters arrive as decimal codepoints because callSystem() hands stdout
+    // back through the console code page, which would turn Chinese into "?".
+    function parseEnginePlan(reply) {
+        var lines = String(reply).split(/[\r\n]+/);
+        var rate = 0;
+        var samples = -1;
+        var declared = -1;
+        var events = [];
+        var index;
+        for (index = 0; index < lines.length; index += 1) {
+            var fields = lines[index].split(" ");
+            if (fields[0] === "RATE") { rate = parseInt(fields[1], 10); }
+            else if (fields[0] === "SAMPLES") { samples = parseInt(fields[1], 10); }
+            else if (fields[0] === "END") { declared = parseInt(fields[1], 10); }
+            else if (fields[0] === "E") {
+                // Anything the engine has no Mandarin syllable for reports "-".
+                // "a5" keeps the marker text and mouth shape as they have always
+                // been for latin and invented syllables.
+                var reading = fields[3] === "-" ? "a5" : fields[3];
+                var character = "";
+                var unit;
+                for (unit = 4; unit < fields.length; unit += 1) {
+                    character += characterFromCode(parseInt(fields[unit], 10));
+                }
+                events.push({
+                    character: character,
+                    reading: reading,
+                    mouth: mouthForReading(reading),
+                    tone: readingTone(reading),
+                    time: parseInt(fields[1], 10) / ENGINE_SAMPLE_RATE,
+                    duration: parseInt(fields[2], 10) / ENGINE_SAMPLE_RATE
+                });
+            }
+        }
+        // callSystem() reports no exit status, so a tool that died halfway would
+        // otherwise read as a short utterance and silently shorten the layer.
+        if (!rate || samples < 0 || declared !== events.length) {
+            throw new Error("Island Chatter could not read the timing plan." +
+                "\n無法取得語音時間表。\n\n" + reply);
+        }
+        return { events: events, duration: samples / rate };
+    }
+
+    function planFromEngine(effect) {
+        var tool = requireEngineTool();
+        return parseEnginePlan(
+            system.callSystem(quoted(tool.fsName) + " --plan" + engineVoiceArguments(effect)));
     }
 
     function updateTimingMarkers(layer, plan) {
@@ -945,7 +796,11 @@
         }
         setEffectParameters(effect, spokenText, settings, comp.time);
 
-        var plan = estimateSpeech(text, effectiveSpeed(settings), settings.tempoLock);
+        // Read back off the effect that was just written, so the plan describes
+        // the audio that will actually play — including the pronunciation
+        // override and the truncation at MAX_TEXT_UNITS, neither of which the
+        // panel's own planner used to account for.
+        var plan = planFromEngine(effect);
         if (options.fitDuration) {
             textLayer.outPoint = Math.min(comp.duration,
                 Math.max(textLayer.inPoint + comp.frameDuration, textLayer.inPoint + plan.duration));
@@ -1014,13 +869,29 @@
      */
     var BAKE_FOLDER_NAME = "Island Chatter Audio";
 
+    // Ships beside the .aex, in Support Files/Plug-ins/Island Chatter/.
+    //
+    // Deriving that from the panel's own location only works while the panel is
+    // where the installer put it. Folder.startup is After Effects' Support Files
+    // directory whatever is running, which covers a panel opened from somewhere
+    // else through File > Scripts > Run Script File, and the host test suites,
+    // which load the panel body out of the repository.
+    var TOOL_RELATIVE_PATH = "/Plug-ins/Island Chatter/island_chatter_bake.exe";
+
     function bakeToolFile() {
-        // Ships beside the .aex: Support Files/Plug-ins/Island Chatter/.
-        var panelFile = new File($.fileName);
-        var supportFiles = panelFile.parent.parent.parent;
-        var tool = new File(supportFiles.fsName +
-            "/Plug-ins/Island Chatter/island_chatter_bake.exe");
-        return tool.exists ? tool : null;
+        var candidates = [];
+        try {
+            candidates.push(new File($.fileName).parent.parent.parent.fsName + TOOL_RELATIVE_PATH);
+        } catch (locationError) { /* $.fileName is not always a real path */ }
+        try {
+            candidates.push(Folder.startup.fsName + TOOL_RELATIVE_PATH);
+        } catch (startupError) { /* not running inside After Effects */ }
+        var index;
+        for (index = 0; index < candidates.length; index += 1) {
+            var tool = new File(candidates[index]);
+            if (tool.exists) { return tool; }
+        }
+        return null;
     }
 
     // UTF-8 bytes as hex, so the text survives the command line whatever the
@@ -1083,18 +954,16 @@
 
     // Reads the values actually written to the layer, so a bake always matches
     // what the effect is playing rather than whatever the panel happens to show.
-    function bakeLayer(layer, folder) {
-        var tool = bakeToolFile();
-        if (!tool) {
-            throw new Error("island_chatter_bake.exe is missing. Reinstall Island Chatter." +
-                "\n找不到 island_chatter_bake.exe，請重新安裝 Island Chatter。");
-        }
+    // release is called if the first attempt cannot write the file, which happens
+    // when a previous bake of the same layer is still imported. Nothing about the
+    // project is touched until a render has actually succeeded.
+    function bakeLayer(layer, folder, release) {
+        var tool = requireEngineTool();
         var effect = findNativeEffect(layer);
         if (!effect) {
             throw new Error("Apply Island Chatter to this layer first. / 請先對此圖層按 Apply。");
         }
         var target = new File(folder.fsName + "/" + bakeFileName(layer) + ".wav");
-        if (target.exists) { target.remove(); }
 
         // The path goes over as hex UTF-8 for the same reason the text does:
         // system.callSystem() hands the command line to the console code page,
@@ -1102,30 +971,61 @@
         // sees it. A Chinese layer name or project folder would fail outright.
         var command = quoted(tool.fsName) +
             " --out-hex " + hexUtf8(target.fsName) +
-            " --text " + hexUtf8(textFromEffect(effect)) +
-            " --voice " + (Math.round(effect.property(PARAM_VOICE).value) - 1) +
-            " --emotion " + (Math.round(effect.property(PARAM_EMOTION).value) - 1) +
-            " --size " + (Math.round(effect.property(PARAM_CHARACTER_SIZE).value) - 1) +
-            " --seed " + Math.round(effect.property(PARAM_SEED).value) +
-            " --rate 48000" +
-            " --pitch " + effect.property(PARAM_PITCH).value +
-            " --speed " + effect.property(PARAM_SPEED).value +
-            " --volume " + (effect.property(PARAM_VOLUME).value / 100) +
-            " --consonant " + effect.property(PARAM_CONSONANT).value +
-            " --clarity " + (effect.property(PARAM_CLARITY).value / 100) +
-            " --cuteness " + (effect.property(PARAM_CUTENESS).value / 100) +
-            " --tempo-lock " + (Math.round(effect.property(PARAM_TEMPO_LOCK).value) ? 1 : 0);
+            engineVoiceArguments(effect);
 
-        var reply = system.callSystem(command);
-        if (String(reply).indexOf("OK ") !== 0 || !target.exists) {
+        function attempt() {
+            if (target.exists) { target.remove(); }
+            var reply = String(system.callSystem(command));
+            return reply.indexOf("OK ") === 0 && target.exists ? "" : reply;
+        }
+
+        var failure = attempt();
+        if (failure && release) {
+            release();
+            failure = attempt();
+        }
+        if (failure) {
             throw new Error("Bake failed for " + layer.name + "\n轉檔失敗：" + layer.name +
-                "\n\n" + target.fsName + "\n" + reply);
+                "\n\n" + target.fsName + "\n" + failure);
         }
         return target;
     }
 
+    /*
+     * Baking the same layer twice used to fail outright: After Effects keeps the
+     * imported WAV open, so the file could be neither deleted nor rewritten and
+     * the tool reported "cannot open the output file for writing".
+     *
+     * native/tests/ae-rebake-probe.jsx established what actually releases the
+     * handle on After Effects 26. Removing the layer does not. Removing the
+     * footage item does not either. Only a purge does, and of the four targets
+     * SNAPSHOT_CACHES is the one that does not work. UNDO_CACHES is used here
+     * because it is the cheapest that does: the undo history goes, but the RAM
+     * preview survives, which matters more while working.
+     *
+     * This is only reached on a re-bake, and only after the first write has
+     * already failed, so an ordinary first bake costs nothing.
+     */
+    function releasePreviousBake(comp, layer) {
+        var bakedName = layer.name + " (baked)";
+        var index;
+        for (index = comp.numLayers; index >= 1; index -= 1) {
+            if (comp.layer(index).name === bakedName) { comp.layer(index).remove(); }
+        }
+        for (index = app.project.numItems; index >= 1; index -= 1) {
+            var item = app.project.item(index);
+            if (item instanceof FootageItem && item.name === bakedName) { item.remove(); }
+        }
+        app.purge(PurgeTarget.UNDO_CACHES);
+    }
+
     function bakeToLayer(comp, layer, folder) {
-        var file = bakeLayer(layer, folder);
+        var file = bakeLayer(layer, folder, function () {
+            releasePreviousBake(comp, layer);
+        });
+        // A re-bake that never had to release anything still must not stack a
+        // second copy of the voice on the timeline.
+        releasePreviousBake(comp, layer);
         var imported = app.project.importFile(new ImportOptions(file));
         imported.name = layer.name + " (baked)";
         var audioLayer = comp.layers.add(imported);

@@ -74,6 +74,11 @@ struct Diagnostics {
     std::vector<ConsonantKind> consonant_kinds;
     std::vector<std::string> readings;
     std::vector<std::uint32_t> source_codepoints;
+    // Every input character the event consumed, in order. Usually one, but a
+    // latin consonant swallows the vowel after it, and the phrase table can map
+    // several characters onto several syllables. The panel labels markers and
+    // Type-On steps from this, so one codepoint per event is not enough.
+    std::vector<std::vector<std::uint32_t>> source_units;
     std::vector<std::size_t> start_samples;
     std::vector<std::size_t> length_samples;
     std::vector<std::uint8_t> lexical_tones;

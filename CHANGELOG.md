@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.11 - 2026-08-05
+
+- The panel no longer works out its own syllable timings. It asks the engine, through a new
+  `island_chatter_bake --plan`, and uses the answer for markers, the rig, Type-On and Fit
+  Duration. Reading the arguments off the effect means the plan describes the audio that
+  will actually render.
+- This fixes timings that were wrong, not just untidy. The two implementations could not
+  agree even in principle, because the engine varies each syllable's length by a seeded
+  random amount, so ordinary Chinese drifted by up to 10 ms. Worse, the panel's copy knew
+  nothing about inline overrides, Zhuyin, tone-number pinyin or the 64-unit truncation:
+  `[重|chong2]新開始` planned twelve syllables against the four that are spoken and sized the
+  layer 1.28 s too long, and `ni3 hao3 ma5` planned seven against three.
+- 243 lines of duplicated planning leave the panel, along with its 473 KB copy of the
+  Mandarin reading table, which is no longer installed. `npm test` fails if any of it
+  comes back.
+- Marker labels now come from the engine too, so a syllable that speaks more than one
+  character is labelled with all of them.
+- Fix Bake failing on any layer that had already been baked, which it has done since the
+  feature shipped in 1.0.3. After Effects keeps the imported WAV open, so the file could
+  be neither deleted nor rewritten. A probe against After Effects 26 established that
+  removing the layer does not release it and neither does removing the footage item; only
+  a purge does. The panel now renders first and only releases the old bake if the write
+  actually failed, so a first bake is unaffected and a re-bake costs the undo history but
+  keeps the RAM preview.
+- Re-baking replaces the previous baked layer instead of stacking another copy of the
+  voice on the timeline.
+
 ## 1.0.10 - 2026-08-05
 
 - Cut the extracted package from nine items to four. `Install.bat`, `Uninstall.bat`,

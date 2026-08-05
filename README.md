@@ -68,7 +68,7 @@ Island-Chatter-AE-1.0.10-Windows-x64/
 四個檔案都在 `resources\` 裡：
 
 - 把 `IslandChatterNative.aex` 與 `island_chatter_bake.exe` 放到 `Support Files\Plug-ins\Island Chatter\`
-- 把 `IslandChatterNativePanel.jsx` 與 `IslandChatterMandarinReadings.jsxinc` 放到 `Support Files\Scripts\ScriptUI Panels\`
+- 把 `IslandChatterNativePanel.jsx` 放到 `Support Files\Scripts\ScriptUI Panels\`
 - 重新啟動 After Effects
 
 ## 使用方式

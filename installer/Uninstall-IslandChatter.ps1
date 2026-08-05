@@ -41,6 +41,7 @@ foreach ($target in $targets) {
             (Join-Path $target "Plug-ins\Island Chatter\IslandChatterNative.aex"),
             (Join-Path $target "Plug-ins\Island Chatter\island_chatter_bake.exe"),
             (Join-Path $target "Scripts\ScriptUI Panels\IslandChatterNativePanel.jsx"),
+            # Shipped up to 1.0.10, when the panel stopped needing its own copy.
             (Join-Path $target "Scripts\ScriptUI Panels\IslandChatterMandarinReadings.jsxinc")
         )
         foreach ($path in $paths) {

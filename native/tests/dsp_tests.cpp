@@ -506,6 +506,30 @@ int main() {
             "a tempo-locked syllable is not exactly one slot long");
     }
 
+    // The panel builds its marker text and Type-On labels from source_units, so
+    // an event has to report every input character it speaks, not just the first.
+    // A latin consonant swallows the vowel after it, which is the case a single
+    // codepoint per event got wrong.
+    {
+        island_chatter::Settings labelled;
+        labelled.text = "你好ba";
+        labelled.sample_rate = 48000;
+        const auto plan = island_chatter::synthesize(labelled).diagnostics;
+        require(plan.source_units.size() == plan.event_count,
+            "source_units is not reported for every event");
+        require(plan.source_units[0] == std::vector<std::uint32_t>{U'你'} &&
+                plan.source_units[1] == std::vector<std::uint32_t>{U'好'},
+            "a Mandarin syllable should speak exactly its own character");
+        require(plan.event_count == 3, "\"ba\" should fold into one syllable");
+        require(plan.source_units[2] == (std::vector<std::uint32_t>{U'b', U'a'}),
+            "a latin consonant that swallows the next vowel must report both characters");
+        for (std::size_t index = 0; index < plan.event_count; ++index) {
+            require(!plan.source_units[index].empty(), "an event speaks no character at all");
+            require(plan.source_units[index][0] == plan.source_codepoints[index],
+                "source_codepoints and source_units disagree about the first character");
+        }
+    }
+
     std::cout << "Native DSP tests passed: " << first.samples.size() << " samples, peak "
               << first.diagnostics.peak << '\n';
     return 0;

@@ -15,13 +15,23 @@ const core = sandbox.module.exports;
 const nativePanelPath = path.join(root, "native", "panel", "IslandChatterNativePanel.jsx");
 const nativePanelSource = fs.readFileSync(nativePanelPath, "utf8").replace(/^#.*$/gm, "");
 new vm.Script(nativePanelSource, { filename: "IslandChatterNativePanel.jsx" });
-const aeReadingsSource = fs.readFileSync(
-  path.join(root, "native", "panel", "IslandChatterMandarinReadings.jsxinc"), "utf8");
-const aeReadingsContext = {};
-new vm.Script(aeReadingsSource, { filename: "IslandChatterMandarinReadings.jsxinc" })
-  .runInNewContext(aeReadingsContext);
-if (aeReadingsContext.islandChatterMandarinReading("你".charCodeAt(0)) !== "ni3") {
-  throw new Error("AE Mandarin reading table is not synchronized with Unihan data");
+// The panel gets its timing plan from island_chatter_bake --plan, so it must not
+// grow a second implementation of the engine's text planning again. Two copies
+// could not agree even in principle — the engine varies syllable lengths by a
+// seeded random amount — and the copy knew nothing about inline overrides,
+// Zhuyin, tone-number pinyin or the 64-unit limit.
+for (const [symbol, what] of [
+  ["islandChatterMandarinReading", "a copy of the Mandarin reading table"],
+  ["IC_PHRASE_READINGS", "a copy of the phrase table"],
+  ["function buildSpeechUnits", "a copy of build_speech_units()"],
+  ["function estimateSpeech", "a second planner"],
+  ["function applySandhi", "a copy of tone sandhi"],
+  ["function punctuationSeconds", "a copy of punctuation_pause()"],
+]) {
+  if (nativePanelSource.includes(symbol)) {
+    throw new Error(
+      `The panel carries ${what} (${symbol}). Ask the engine with --plan instead.`);
+  }
 }
 
 const nativePluginSource = fs.readFileSync(
@@ -222,45 +232,7 @@ if (!/var MAX_TEXT_UNITS = 64;/.test(nativePanelSource) ||
   throw new Error("The 64 UTF-16 unit transport contract is not synchronized");
 }
 
-// The panel reproduces the engine's text planning so markers, the rig, Type-On
-// and Fit Duration line up with the audio. These tables must not drift apart.
 const dspSource = fs.readFileSync(path.join(root, "native", "src", "dsp.cpp"), "utf8");
-
-const nativePhrases = [...dspSource
-  .match(/kPhrasePronunciations\{\{([\s\S]*?)\}\};/)[1]
-  .matchAll(/\{U"([^"]+)",\s*"([^"]+)"\}/g)].map((m) => `${m[1]}=${m[2]}`);
-const panelPhrases = [...nativePanelSource
-  .match(/IC_PHRASE_READINGS = \[([\s\S]*?)\];/)[1]
-  .matchAll(/\["([^"]+)",\s*"([^"]+)"\]/g)].map((m) => `${m[1]}=${m[2]}`);
-if (nativePhrases.join("|") !== panelPhrases.join("|")) {
-  throw new Error(
-    "Phrase readings differ between native/src/dsp.cpp and the panel:\n" +
-    `  native only: ${nativePhrases.filter((x) => !panelPhrases.includes(x)).join(", ") || "-"}\n` +
-    `  panel only:  ${panelPhrases.filter((x) => !nativePhrases.includes(x)).join(", ") || "-"}`);
-}
-if (nativePhrases.length < 40) {
-  throw new Error("Phrase reading table lost entries");
-}
-
-const nativeParticles = [...dspSource
-  .match(/bool is_neutral_particle[\s\S]*?\n\}/)[0]
-  .matchAll(/U'(.)'/g)].map((m) => m[1]).sort().join("");
-const panelParticles = nativePanelSource
-  .match(/IC_NEUTRAL_PARTICLES = "([^"]+)"/)[1].split("").sort().join("");
-if (nativeParticles !== panelParticles) {
-  throw new Error(
-    `Neutral-tone particle lists differ: native "${nativeParticles}" vs panel "${panelParticles}"`);
-}
-
-const nativeYi = [...dspSource
-  .match(/bool yi_keeps_citation_tone[\s\S]*?\n\}/)[0]
-  .matchAll(/U'(.)'/g)].map((m) => m[1]).sort().join("");
-const panelYi = ((nativePanelSource.match(/"(第星期週周初)"/) || [])[1] +
-  (nativePanelSource.match(/"(月日號号)"/) || [])[1]).split("").sort().join("");
-if (nativeYi !== panelYi) {
-  throw new Error(
-    `一 citation-tone exceptions differ: native "${nativeYi}" vs panel "${panelYi}"`);
-}
 
 // apply_character_style() scales Speed again; the panel must use the same
 // numbers or Fit Duration and every marker drift away from the audio.
@@ -287,12 +259,13 @@ if (!/emotion\.onChange = refreshTempo;/.test(nativePanelSource) ||
     !/characterSize\.onChange = refreshTempo;/.test(nativePanelSource)) {
   throw new Error("Changing emotion or character size must recompute the tempo-derived Speed");
 }
-for (const seconds of ["0.188", "0.148", "0.012", "0.055", "0.105", "0.190", "0.155",
-  "0.215", "0.195", "0.235", "0.300", "0.125", "0.165"]) {
-  const pattern = new RegExp(seconds.replace(".", "\\."));
-  if (!pattern.test(dspSource) || !pattern.test(nativePanelSource)) {
-    throw new Error(`Timing constant ${seconds} is not present in both the engine and the panel`);
-  }
+// Syllable lengths and punctuation rests live only in the engine now. Tempo mode
+// is the one timing calculation the panel still does for itself, because it
+// converts BPM to a Speed before anything has been written to the effect, so
+// there is nothing to ask the engine about yet.
+if ((dspSource.match(/kSyllableStride = ([\d.]+);/) || [])[1] !==
+    (nativePanelSource.match(/var SYLLABLE_STRIDE = ([\d.]+);/) || [])[1]) {
+  throw new Error("SYLLABLE_STRIDE differs between the engine and the panel; BPM would drift");
 }
 
 // The panel's ScriptUI sliders must span the same range as the effect
@@ -315,26 +288,9 @@ for (const [label, pluginPattern, panelPattern] of [
     throw new Error(`${label} slider range in the panel does not match the plug-in parameter`);
   }
 }
-const engineSpeedBounds = [
-  (dspSource.match(/kMinimumSpeed = ([\d.]+);/) || [])[1],
-  (dspSource.match(/kMaximumSpeed = ([\d.]+);/) || [])[1],
-];
-const panelSpeedBounds = [
-  (nativePanelSource.match(/var MIN_SPEED = ([\d.]+);/) || [])[1],
-  (nativePanelSource.match(/var MAX_SPEED = ([\d.]+);/) || [])[1],
-];
-if (engineSpeedBounds.some((value) => value === undefined) ||
-    Number(engineSpeedBounds[0]) !== Number(panelSpeedBounds[0]) ||
-    Number(engineSpeedBounds[1]) !== Number(panelSpeedBounds[1])) {
-  throw new Error(
-    `Speed clamp differs: engine [${engineSpeedBounds}] vs panel [${panelSpeedBounds}]`);
-}
-
-// Run the panel's planner and pin its output. The matching engine-side values
-// are asserted in native/tests/dsp_tests.cpp; both were cross-checked against
-// each other sample by sample.
-const planner = { Math, String, parseInt, parseFloat, isNaN };
-planner.islandChatterMandarinReading = aeReadingsContext.islandChatterMandarinReading;
+// Pull individual functions out of the panel so they can be exercised here. The
+// panel is one big closure meant for ScriptUI, so there is nothing to require.
+const planner = { Math, String, parseInt, parseFloat, isNaN, Error };
 vm.createContext(planner);
 const takeFunction = (name) => {
   const start = nativePanelSource.indexOf(`function ${name}(`);
@@ -355,18 +311,10 @@ const takeVariable = (name) => {
   return nativePanelSource.slice(start, nativePanelSource.indexOf(";\n", start) + 1);
 };
 vm.runInContext([
-  takeVariable("MIN_SPEED"),
-  takeVariable("MAX_SPEED"),
-  takeVariable("IC_PHRASE_READINGS"),
-  takeVariable("IC_NEUTRAL_PARTICLES"),
   takeVariable("SYLLABLE_STRIDE"),
-  takeVariable("MIN_SPEED"),
-  takeVariable("MAX_SPEED"),
-  ...["clamp", "codePointAt", "isSpaceCode", "isPunctuationCode", "punctuationSeconds",
-    "mouthForReading", "readingTone", "replaceReadingTone", "isNeutralParticle", "isNumberCode",
-    "yiKeepsCitationTone", "readingForCodePoint", "isLatinLetter", "isLatinVowel",
-    "characterFromCode", "matchesPhrase", "applySandhi", "buildSpeechUnits", "estimateSpeech",
-    "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo"].map(takeFunction),
+  takeVariable("ENGINE_SAMPLE_RATE"),
+  ...["clamp", "mouthForReading", "readingTone", "characterFromCode", "trim",
+    "parseEnginePlan", "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo"].map(takeFunction),
 ].join("\n"), planner);
 
 // Tempo mode across every emotion and character size. The original version only
@@ -396,32 +344,64 @@ for (const bpm of [60, 90, 120, 174]) {
   }
 }
 
-for (const [text, emotion, size, events, duration, readings] of [
-  ["你好，今天一起去散步。", 0, 2, 9, 2.240, "ni2,hao3,jin1,tian1,yi4,qi3,qu4,san4,bu4"],
-  ["你好，今天一起去散步。", 5, 2, 9, 2.844, "ni2,hao3,jin1,tian1,yi4,qi3,qu4,san4,bu4"],
-  ["你好，今天一起去散步。", 3, 0, 9, 1.838, "ni2,hao3,jin1,tian1,yi4,qi3,qu4,san4,bu4"],
-  ["他說「好」", 0, 2, 3, 1.030, "ta1,shuo1,hao3"],
-  ["二〇一九年一月一日", 0, 2, 9, 1.900, "er4,ling2,yi1,jiu3,nian2,yi1,yue4,yi1,ri4"],
-  ["第一名過去了解著名", 0, 2, 9, 1.900, "di4,yi1,ming2,guo4,qu4,liao2,jie3,zhu4,ming2"],
-  ["你-好…再見", 0, 2, 4, 1.325, "ni3,hao3,zai4,jian4"],
-  ["我很好嗎？不對！", 1, 1, 6, 1.533, "wo2,hen2,hao3,ma5,bu2,dui4"],
-  ["ba de si mo lu", 0, 2, 5, 1.120, "a5,a5,a5,a5,a5"],
+// Decoding the engine's plan. The plan itself is covered against the real tool
+// in tests/bake-cli.test.js and against the engine in native/tests/dsp_tests.cpp;
+// what is checked here is that the panel reads it correctly, including the cases
+// where reading it wrongly would silently mis-size a layer.
+const samplePlan = [
+  "PLAN 1",
+  "RATE 48000",
+  "SAMPLES 96000",
+  "E 0 9600 ni2 20320",
+  "E 10176 9600 hao3 22909",
+  // No Mandarin syllable, and a latin consonant that swallowed the vowel after
+  // it, so the event speaks two input characters.
+  "E 20352 7104 - 98 97",
+  // Outside the BMP: the panel has to rebuild the surrogate pair.
+  "E 28032 7104 - 131083",
+  "END 4",
+].join("\r\n");
+const parsed = vm.runInContext(`parseEnginePlan(${JSON.stringify(samplePlan)})`, planner);
+if (parsed.events.length !== 4) {
+  throw new Error(`parseEnginePlan read ${parsed.events.length} events, expected 4`);
+}
+if (Math.abs(parsed.duration - 2.0) > 1e-9) {
+  throw new Error(`parseEnginePlan read ${parsed.duration}s, expected 2.0s`);
+}
+if (Math.abs(parsed.events[1].time - 10176 / 48000) > 1e-9 ||
+    Math.abs(parsed.events[1].duration - 0.2) > 1e-9) {
+  throw new Error("parseEnginePlan did not convert samples to seconds");
+}
+if (parsed.events[2].character !== "ba") {
+  throw new Error(
+    `parseEnginePlan built "${parsed.events[2].character}" from two codepoints, expected "ba"`);
+}
+if (parsed.events[3].character !== "\u{2000B}") {
+  throw new Error("parseEnginePlan did not rebuild a surrogate pair");
+}
+// "-" has always been spoken as an invented syllable; the marker text and the
+// mouth shape must not change because the transport now spells it differently.
+if (parsed.events[2].reading !== "a5" || parsed.events[2].mouth !== 1 ||
+    parsed.events[2].tone !== 5) {
+  throw new Error("parseEnginePlan mishandled a syllable with no Mandarin reading");
+}
+if (parsed.events[0].mouth !== 2 || parsed.events[0].tone !== 2) {
+  throw new Error("parseEnginePlan derived the wrong mouth or tone from a reading");
+}
+// callSystem() reports no exit status. A tool that died halfway would otherwise
+// read as a short utterance and quietly shorten the layer.
+for (const [label, broken] of [
+  ["truncated output", samplePlan.split("\r\n").slice(0, 5).join("\r\n")],
+  ["missing header", samplePlan.split("\r\n").slice(2).join("\r\n")],
+  ["tool wrote nothing", ""],
 ]) {
-  const speed = vm.runInContext(
-    `effectiveSpeed({ speed: 1, emotion: ${emotion}, characterSize: ${size} })`, planner);
-  const plan = vm.runInContext(
-    `estimateSpeech(${JSON.stringify(text)}, ${speed})`, planner);
-  const label = `"${text}" emotion=${emotion} size=${size}`;
-  if (plan.events.length !== events) {
-    throw new Error(`${label}: planned ${plan.events.length} events, expected ${events}`);
+  let threw = false;
+  try {
+    vm.runInContext(`parseEnginePlan(${JSON.stringify(broken)})`, planner);
+  } catch (error) {
+    threw = true;
   }
-  if (Math.abs(plan.duration - duration) > 0.002) {
-    throw new Error(`${label}: planned ${plan.duration.toFixed(3)}s, expected ${duration}s`);
-  }
-  const planned = plan.events.map((event) => event.reading).join(",");
-  if (planned !== readings) {
-    throw new Error(`${label}: planned readings ${planned}, expected ${readings}`);
-  }
+  if (!threw) throw new Error(`parseEnginePlan accepted ${label}`);
 }
 // Builds are sold, so the licence and the README have to point at the same
 // storefront. A link that rots in one place and not the other sends buyers
@@ -511,7 +491,6 @@ for (const [file, staged] of [
   ["IslandChatterNative.aex", "$resources"],
   ["island_chatter_bake.exe", "$resources"],
   ["IslandChatterNativePanel.jsx", "$resources"],
-  ["IslandChatterMandarinReadings.jsxinc", "$resources"],
   ["Install-IslandChatter.ps1", "$resources"],
   ["Uninstall-IslandChatter.ps1", "$resources"],
   ["THIRD_PARTY_NOTICES.md", "$resources"],
@@ -566,7 +545,6 @@ for (const releaseFile of [
   "IslandChatterNative.aex",
   "island_chatter_bake.exe",
   "IslandChatterNativePanel.jsx",
-  "IslandChatterMandarinReadings.jsxinc",
 ]) {
   if (!installerSource.includes(releaseFile)) {
     throw new Error(`Installer is missing release payload: ${releaseFile}`);
