@@ -34,9 +34,11 @@ if "%errorlevel%"=="0" (
     goto :finish
 )
 
-rem Ships at the top of the extracted folder, but also has to work from the
-rem repository where it sits next to the script.
-set "SCRIPT=%~dp0installer\Install-IslandChatter.ps1"
+rem Ships at the top of the extracted folder with everything else tucked into
+rem resources\. Older packages used installer\, and in the repository this file
+rem sits next to the script, so all three are tried.
+set "SCRIPT=%~dp0resources\Install-IslandChatter.ps1"
+if not exist "%SCRIPT%" set "SCRIPT=%~dp0installer\Install-IslandChatter.ps1"
 if not exist "%SCRIPT%" set "SCRIPT=%~dp0Install-IslandChatter.ps1"
 if not exist "%SCRIPT%" (
     echo   Cannot find Install-IslandChatter.ps1 next to this file.

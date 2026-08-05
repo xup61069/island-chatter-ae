@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.9",
+    [string]$Version = "1.0.10",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = ""
 )
@@ -71,28 +71,33 @@ $zipPath = "$stageRoot.zip"
 
 if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-New-Item -ItemType Directory -Path (Join-Path $stageRoot "installer") -Force | Out-Null
+$resources = Join-Path $stageRoot "resources"
+New-Item -ItemType Directory -Path $resources -Force | Out-Null
 
-Copy-Item -LiteralPath $resolvedAex -Destination (Join-Path $stageRoot "IslandChatterNative.aex")
-Copy-Item -LiteralPath $resolvedBake -Destination (Join-Path $stageRoot "island_chatter_bake.exe")
-Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterNativePanel.jsx") `
-    -Destination (Join-Path $stageRoot "IslandChatterNativePanel.jsx")
-Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterMandarinReadings.jsxinc") `
-    -Destination (Join-Path $stageRoot "IslandChatterMandarinReadings.jsxinc")
-Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install-IslandChatter.ps1") `
-    -Destination (Join-Path $stageRoot "installer/Install-IslandChatter.ps1")
-# The double-click launchers go at the top of the extracted folder so the first
-# thing anyone sees is the thing to run.
+# Only four things at the top of the extracted folder, one of which is the thing
+# to double-click. Nine items with three plausible-looking .jsx/.aex files in the
+# middle left first-time buyers guessing, so everything that is not a decision
+# goes into resources\ and the installer looks for it there.
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install.bat") `
     -Destination (Join-Path $stageRoot "Install.bat")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Uninstall.bat") `
     -Destination (Join-Path $stageRoot "Uninstall.bat")
-Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Uninstall-IslandChatter.ps1") `
-    -Destination (Join-Path $stageRoot "installer/Uninstall-IslandChatter.ps1")
-Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination (Join-Path $stageRoot "README.md")
+Copy-Item -LiteralPath (Join-Path $repoRoot "installer/README.txt") `
+    -Destination (Join-Path $stageRoot "README.txt")
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $stageRoot "LICENSE")
+
+Copy-Item -LiteralPath $resolvedAex -Destination (Join-Path $resources "IslandChatterNative.aex")
+Copy-Item -LiteralPath $resolvedBake -Destination (Join-Path $resources "island_chatter_bake.exe")
+Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterNativePanel.jsx") `
+    -Destination (Join-Path $resources "IslandChatterNativePanel.jsx")
+Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterMandarinReadings.jsxinc") `
+    -Destination (Join-Path $resources "IslandChatterMandarinReadings.jsxinc")
+Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install-IslandChatter.ps1") `
+    -Destination (Join-Path $resources "Install-IslandChatter.ps1")
+Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Uninstall-IslandChatter.ps1") `
+    -Destination (Join-Path $resources "Uninstall-IslandChatter.ps1")
 Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD_PARTY_NOTICES.md") `
-    -Destination (Join-Path $stageRoot "THIRD_PARTY_NOTICES.md")
+    -Destination (Join-Path $resources "THIRD_PARTY_NOTICES.md")
 
 Compress-Archive -LiteralPath $stageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 $hash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256

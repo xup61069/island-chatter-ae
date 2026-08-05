@@ -5,3 +5,7 @@
 # launchers rely on goto for their error paths.
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# The package README is opened in Notepad on Windows; keep CRLF and do not let
+# git normalise it to LF.
+installer/README.txt text eol=crlf

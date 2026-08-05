@@ -66,6 +66,19 @@ if (stage !== 3) {
   throw new Error(
     "A published build must use PF_Stage_RELEASE (3); After Effects compares the encoded stage");
 }
+// PF_VERSION packs the version into one 32-bit word with very small fields, and
+// it masks rather than complains. 1.0.16 would encode identically to 1.0.0 and
+// After Effects would treat an upgrade as a downgrade, so refuse to ship a
+// number that does not fit. Bug is the field that will run out first.
+for (const [label, value, bits] of [
+  ["major", major, 3], ["minor", minor, 4], ["bug", bug, 4], ["build", build, 9],
+]) {
+  if (value > (1 << bits) - 1) {
+    throw new Error(
+      `PF_VERSION has only ${bits} bits for ${label}; ${value} would wrap and ` +
+      `make this build look older than it is. Roll the next field instead.`);
+  }
+}
 // Mirrors PF_VERSION() in the After Effects SDK.
 const encodedVersion =
   (((major & 0x7) << 19) | ((minor & 0xf) << 15) | ((bug & 0xf) << 11) |
@@ -462,6 +475,13 @@ for (const launcher of ["Install.bat", "Uninstall.bat"]) {
   if (!new RegExp(`Join-Path \\$stageRoot "${launcher}"`).test(packager)) {
     throw new Error(`${launcher} is not staged at the root of the release package`);
   }
+  // The payload moved into resources\, so a launcher that only knows the old
+  // installer\ layout would find nothing and report a missing script.
+  const launcherScript = `${launcher.replace(/\.bat$/, "")}-IslandChatter.ps1`;
+  if (!new RegExp(`%~dp0resources\\\\${launcherScript.replace(/\./g, "\\.")}`).test(
+    fs.readFileSync(path.join(root, "installer", launcher), "ascii"))) {
+    throw new Error(`installer/${launcher} does not look in resources\\ for its script`);
+  }
   // A .bat is read in the console code page, so non-ASCII would arrive mangled.
   const bytes = fs.readFileSync(path.join(root, "installer", launcher));
   if (!bytes.every((byte) => byte < 0x80)) {
@@ -480,6 +500,55 @@ for (const launcher of ["Install.bat", "Uninstall.bat"]) {
   if (!/pause/.test(text)) {
     throw new Error(`installer/${launcher} must pause, or errors vanish with the window`);
   }
+}
+
+// What a buyer sees on extracting the ZIP. Anything that is not a decision
+// belongs in resources\; a stray .aex or .jsx at the top is what made the old
+// package unreadable to a first-time installer.
+for (const [file, staged] of [
+  ["README.txt", "$stageRoot"],
+  ["LICENSE", "$stageRoot"],
+  ["IslandChatterNative.aex", "$resources"],
+  ["island_chatter_bake.exe", "$resources"],
+  ["IslandChatterNativePanel.jsx", "$resources"],
+  ["IslandChatterMandarinReadings.jsxinc", "$resources"],
+  ["Install-IslandChatter.ps1", "$resources"],
+  ["Uninstall-IslandChatter.ps1", "$resources"],
+  ["THIRD_PARTY_NOTICES.md", "$resources"],
+]) {
+  const wanted = new RegExp(`Join-Path \\${staged} "${file.replace(/\./g, "\\.")}"`);
+  if (!wanted.test(packager)) {
+    throw new Error(`${file} is not staged into ${staged} by tools/package-release.ps1`);
+  }
+  const wrong = staged === "$resources" ? "$stageRoot" : "$resources";
+  if (new RegExp(`Join-Path \\${wrong} "${file.replace(/\./g, "\\.")}"`).test(packager)) {
+    throw new Error(`${file} is staged into ${wrong} as well; the package root must stay minimal`);
+  }
+}
+// Notepad is what opens this file, and it is the only instruction a buyer gets.
+{
+  const readme = fs.readFileSync(path.join(root, "installer", "README.txt"));
+  if (!(readme[0] === 0xef && readme[1] === 0xbb && readme[2] === 0xbf)) {
+    throw new Error("installer/README.txt needs a UTF-8 BOM or Notepad shows mojibake");
+  }
+  const readmeText = readme.toString("utf8");
+  if (readmeText.indexOf("\r\n") < 0) {
+    throw new Error("installer/README.txt has LF endings; .gitattributes should pin it to CRLF");
+  }
+  for (const mention of ["Install.bat", "Uninstall.bat", "resources", "LICENSE"]) {
+    if (!readmeText.includes(mention)) {
+      throw new Error(`installer/README.txt does not mention ${mention}`);
+    }
+  }
+}
+// The installer used to hardcode "payload is one level up". It now ships beside
+// its payload, so it has to search instead of assume.
+if (/\$payloadRoot\s*=\s*Split-Path/.test(installerSource)) {
+  throw new Error(
+    "Install-IslandChatter.ps1 assumes a fixed payload location; it must search for the files");
+}
+if (!installerSource.includes("$payloadCandidates")) {
+  throw new Error("Install-IslandChatter.ps1 must try every known payload layout");
 }
 
 for (const scriptName of ["installer/Install-IslandChatter.ps1",
