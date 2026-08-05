@@ -201,10 +201,10 @@ for (const filePath of extendScriptFiles) {
   }
 }
 
-// The 76-slot parameter ABI is split across three files. Keep them in lockstep.
+// The parameter ABI is split across three files. Keep them in lockstep.
 const paramsHeader = fs.readFileSync(
   path.join(root, "native", "plugin", "params.hpp"), "utf8");
-if (!/static_assert\(kParamCount == 77/.test(paramsHeader)) {
+if (!/static_assert\(kParamCount == 81/.test(paramsHeader)) {
   throw new Error("params.hpp no longer asserts the published parameter count");
 }
 if (!/static_assert\(kParamSeed == 75/.test(paramsHeader)) {
@@ -215,6 +215,8 @@ for (const [constant, index] of [
   ["PARAM_CONSONANT", 5], ["PARAM_TEXT_LENGTH", 6], ["PARAM_TEXT_FIRST", 7],
   ["PARAM_EMOTION", 71], ["PARAM_CHARACTER_SIZE", 72], ["PARAM_CLARITY", 73],
   ["PARAM_CUTENESS", 74], ["PARAM_SEED", 75], ["PARAM_TEMPO_LOCK", 76],
+  ["PARAM_FORMANT", 77], ["PARAM_SOURCE", 78], ["PARAM_VIBRATO", 79],
+  ["PARAM_VIBRATO_RATE", 80],
 ]) {
   if (!new RegExp(`var ${constant} = ${index};`).test(nativePanelSource)) {
     throw new Error(`Panel ${constant} must stay at published index ${index}`);
@@ -554,7 +556,7 @@ for (const smokeFragment of [
   'comp.layers.addText("你好，中文聲音測試！")',
   'effects.addProperty(TONE_MATCH_NAME)',
   'effects.addProperty(EFFECT_NAME)',
-  "EXPECTED_PARAMETERS = 77",
+  "EXPECTED_PARAMETERS = 81",
   '"External audio files: 0"',
 ]) {
   if (!aeSmokeSource.includes(smokeFragment)) {

@@ -34,6 +34,12 @@ std::string settings_key(const Settings& settings) {
     append_binary(key, settings.seed);
     append_binary(key, settings.sample_rate);
     append_binary(key, settings.tempo_lock);
+    // Timbre changes the rendered samples, so it belongs in the key. Volume is
+    // still deliberately absent: it is applied as a gain when copying out.
+    append_binary(key, settings.formant);
+    append_binary(key, settings.source);
+    append_binary(key, settings.vibrato_depth);
+    append_binary(key, settings.vibrato_rate);
     return key;
 }
 

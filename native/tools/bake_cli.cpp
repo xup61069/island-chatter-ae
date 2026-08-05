@@ -85,6 +85,7 @@ void print_plan(const island_chatter::Settings& settings) {
         "  [--voice N] [--emotion N] [--size N] [--seed N] [--rate N]\n"
         "  [--pitch F] [--speed F] [--volume F] [--consonant F]\n"
         "  [--clarity F] [--cuteness F] [--tempo-lock 0|1]\n"
+        "  [--formant F] [--source 0-5] [--vibrato F] [--vibrato-rate F]\n"
         "\n"
         "Prefer --out-hex from scripts: a path handed over as plain text is\n"
         "converted to the console code page first, so any character outside it\n"
@@ -127,6 +128,11 @@ int main(int argc, char** argv) {
             else if (flag == "--clarity") settings.clarity = std::atof(value.c_str());
             else if (flag == "--cuteness") settings.cuteness = std::atof(value.c_str());
             else if (flag == "--tempo-lock") settings.tempo_lock = std::atoi(value.c_str()) != 0;
+            else if (flag == "--formant") settings.formant = std::atof(value.c_str());
+            else if (flag == "--source")
+                settings.source = static_cast<island_chatter::SourceType>(std::atoi(value.c_str()));
+            else if (flag == "--vibrato") settings.vibrato_depth = std::atof(value.c_str());
+            else if (flag == "--vibrato-rate") settings.vibrato_rate = std::atof(value.c_str());
             else usage();
         }
         if (!have_text) usage();

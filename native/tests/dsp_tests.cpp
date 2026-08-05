@@ -530,6 +530,122 @@ int main() {
         }
     }
 
+    // Timbre, added in 1.1.0.
+    {
+        // The additive source has to reach the third formant, or that formant
+        // has nothing to resonate and the voice sounds muffled. This used to be
+        // a flat twelve harmonics, which at Cozy's 176 Hz fundamental stopped at
+        // 2117 Hz while its third formant sits at 2494 Hz, so the formant that
+        // gives the voice its character was simply absent. Elder was worse.
+        //
+        // Asserted on the plan rather than on the audio: a spectral measurement
+        // of the output moves with the text and turned out not to separate the
+        // two engines at all.
+        for (const std::size_t voice : {0U, 1U, 2U, 6U}) {  // Sunny, Tiny, Cozy, Elder
+            island_chatter::Settings deep;
+            deep.text = "你好，島民！今天天氣真好。";
+            deep.sample_rate = 48000;
+            deep.voice_index = voice;
+            const auto plan = island_chatter::synthesize(deep).diagnostics;
+            require(plan.event_count > 0, "no events to inspect");
+            for (std::size_t index = 0; index < plan.event_count; ++index) {
+                const double reach = plan.harmonic_counts[index] * plan.frequencies[index];
+                require(reach >= plan.top_formants[index],
+                    "the harmonics stop below the third formant, so it cannot resonate");
+            }
+        }
+        {
+            // ...and the bound has to be real: at the lowest pitch this engine
+            // allows, kMaxHarmonics is what stops the count, not the formant.
+            island_chatter::Settings floor_case;
+            floor_case.text = "你好";
+            floor_case.sample_rate = 48000;
+            floor_case.voice_index = 6;
+            floor_case.pitch = 0.10;
+            const auto plan = island_chatter::synthesize(floor_case).diagnostics;
+            for (const auto count : plan.harmonic_counts) {
+                require(count > 0 && count <= 32, "the harmonic count escaped its bounds");
+            }
+        }
+
+        island_chatter::Settings timbre;
+        timbre.text = "你好，我是動態島的居民！";
+        timbre.sample_rate = 48000;
+        timbre.seed = 4242;
+        const auto plain = island_chatter::synthesize(timbre).samples;
+
+        // Every source has to be audibly its own thing, and none may clip: the
+        // limiter only catches Volume, not a source that is simply too hot.
+        std::vector<std::vector<float>> rendered;
+        for (const auto source : {island_chatter::SourceType::voice,
+                island_chatter::SourceType::reed, island_chatter::SourceType::chip,
+                island_chatter::SourceType::metallic, island_chatter::SourceType::granular,
+                island_chatter::SourceType::growl}) {
+            auto shaped = timbre;
+            shaped.source = source;
+            const auto result = island_chatter::synthesize(shaped);
+            require(result.diagnostics.peak < 1.0F, "a timbre clips at the default Volume");
+            require(result.diagnostics.peak > 0.05F, "a timbre is nearly silent");
+            require(result.samples.size() == plain.size(), "a timbre changed the timing");
+            for (const auto& earlier : rendered) {
+                require(result.samples != earlier, "two timbres render identically");
+            }
+            rendered.push_back(result.samples);
+
+            // Invariant 8d: syllables stay independent, so the lazy block
+            // renderer must still match a single eager pass exactly. The
+            // modulated sources are the ones that could break this by carrying
+            // state across syllables.
+            const island_chatter::Utterance lazy(shaped);
+            std::vector<float> out(lazy.sample_count(), -7.0F);
+            const std::size_t block_sizes[] = {1, 4096, 173, 20011, 999};
+            std::size_t cursor = 0;
+            std::size_t which = 0;
+            while (cursor < out.size()) {
+                const auto count = std::min(block_sizes[which++ % 5], out.size() - cursor);
+                lazy.copy_region(static_cast<std::int64_t>(cursor), out.data() + cursor,
+                    count, 1, shaped.volume);
+                cursor += count;
+            }
+            require(out == result.samples, "a timbre renders differently block by block");
+        }
+        require(rendered[0] == plain, "SourceType::voice is not the untouched default");
+
+        // Formant and vibrato default to leaving the voice preset alone.
+        auto neutral = timbre;
+        neutral.formant = 1.0;
+        neutral.vibrato_depth = 1.0;
+        neutral.vibrato_rate = 9.2;
+        require(island_chatter::synthesize(neutral).samples == plain,
+            "the timbre defaults do not reproduce the untouched voice");
+
+        auto smaller = timbre;
+        smaller.formant = 0.6;
+        auto larger = timbre;
+        larger.formant = 1.6;
+        require(island_chatter::synthesize(smaller).samples != plain &&
+                island_chatter::synthesize(larger).samples != plain &&
+                island_chatter::synthesize(smaller).samples !=
+                    island_chatter::synthesize(larger).samples,
+            "Formant does not change the voice");
+        // A larger vocal tract puts the formants higher, and the plan is where
+        // that is unambiguous.
+        require(island_chatter::synthesize(larger).diagnostics.top_formants[0] >
+                island_chatter::synthesize(smaller).diagnostics.top_formants[0],
+            "Formant does not scale the vocal tract in the direction it says");
+
+        auto still = timbre;
+        still.vibrato_depth = 0.0;
+        auto shaky = timbre;
+        shaky.vibrato_depth = 3.0;
+        auto slow = timbre;
+        slow.vibrato_rate = 2.0;
+        require(island_chatter::synthesize(still).samples != plain &&
+                island_chatter::synthesize(shaky).samples != plain &&
+                island_chatter::synthesize(slow).samples != plain,
+            "Vibrato depth or rate does not reach the render");
+    }
+
     std::cout << "Native DSP tests passed: " << first.samples.size() << " samples, peak "
               << first.diagnostics.peak << '\n';
     return 0;

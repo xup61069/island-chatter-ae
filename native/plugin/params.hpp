@@ -23,12 +23,19 @@ enum ParamIndex : int {
     // Appended in 1.0.3. Projects saved by 1.0.2 and earlier simply get its
     // default of off, which reproduces their existing timing exactly.
     kParamTempoLock,
+    // Appended in 1.1.0. Their defaults reproduce the previous behaviour, so a
+    // project saved by 1.0.x opens with the voice it had.
+    kParamFormant,
+    kParamSource,
+    kParamVibratoDepth,
+    kParamVibratoRate,
 };
 
 inline constexpr std::size_t kMaxTextUnits = 64;
-inline constexpr int kParamCount = kParamTempoLock + 1;
+inline constexpr int kParamCount = kParamVibratoRate + 1;
 
 static_assert(kParamSeed == 75, "Published parameter indices must never move");
-static_assert(kParamCount == 77, "Changing the parameter count breaks saved AE projects");
+static_assert(kParamTempoLock == 76, "Published parameter indices must never move");
+static_assert(kParamCount == 81, "Changing the parameter count breaks saved AE projects");
 
 }  // namespace island_chatter::ae

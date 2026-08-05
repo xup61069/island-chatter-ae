@@ -37,6 +37,19 @@ enum class CharacterSize : std::uint8_t {
     giant,
 };
 
+// What the vocal folds are replaced with. The formant filtering is the same in
+// every case; only the spectrum being filtered, and any modulation applied
+// after it, differ. `voice` is the original and stays the default so existing
+// projects keep their character.
+enum class SourceType : std::uint8_t {
+    voice = 0,   // Gently falling harmonic series.
+    reed,        // Sawtooth slope: brighter and buzzier, like a double reed.
+    chip,        // Odd harmonics only: hollow and square, 8-bit.
+    metallic,    // Ring-modulated: inharmonic, robotic, insectile.
+    granular,    // Chopped by a fast gate: garbled, bad signal.
+    growl,       // A sub-octave partial underneath: monstrous.
+};
+
 struct Voice {
     const char* name;
     double pitch;
@@ -65,6 +78,15 @@ struct Settings {
     // whole syllable slots, so a Speed derived from a tempo lands on the beat.
     // Everything else about the voice is unchanged.
     bool tempo_lock = false;
+    // Scales the vocal tract, and so every formant, without touching the pitch.
+    // Below 1 is a smaller head, above 1 a larger one. 1.0 leaves each voice
+    // preset exactly as it was.
+    double formant = 1.0;
+    SourceType source = SourceType::voice;
+    // Multiplies the voice preset's own vibrato depth, so 1.0 changes nothing
+    // and 0 removes the wobble entirely.
+    double vibrato_depth = 1.0;
+    double vibrato_rate = 9.2;
 };
 
 struct Diagnostics {
@@ -83,6 +105,13 @@ struct Diagnostics {
     std::vector<std::size_t> length_samples;
     std::vector<std::uint8_t> lexical_tones;
     std::vector<std::uint8_t> tones;
+    // The additive source, per event: its fundamental, how many harmonics are
+    // summed, and the third formant they have to reach. count * frequency must
+    // stay above top_formant or that formant has nothing to resonate, which is
+    // what used to make the low voice presets sound muffled.
+    std::vector<double> frequencies;
+    std::vector<std::size_t> harmonic_counts;
+    std::vector<double> top_formants;
     float peak = 0.0F;
     double duration_seconds = 0.0;
 };

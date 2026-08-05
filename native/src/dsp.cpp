@@ -40,6 +40,10 @@ constexpr double kSyllableStride = 0.200;
 // Output level below which the Volume gain is applied untouched, and the
 // ceiling the limiter approaches above it. Stopping short of full scale leaves
 // headroom for the host's own resampling.
+// Upper bound on the additive source. A low voice needs far more than the
+// twelve this used to be to reach its third formant; see harmonic_count().
+constexpr std::size_t kMaxHarmonics = 32;
+
 constexpr double kSoftKnee = 0.80;
 constexpr double kOutputCeiling = 0.98;
 
@@ -89,8 +93,11 @@ struct Event {
     char vowel_name = 'a';
     std::array<double, 3> formants{};
     std::array<double, 3> end_formants{};
-    std::array<double, 12> harmonics{};
-    std::array<double, 12> end_harmonics{};
+    std::array<double, kMaxHarmonics> harmonics{};
+    std::array<double, kMaxHarmonics> end_harmonics{};
+    // How many entries of the two arrays above are in use. Both profiles are
+    // built at the same frequency, so one count covers them.
+    std::size_t harmonic_count = 1;
     std::uint8_t tone = 5;
     std::uint8_t lexical_tone = 5;
     std::uint32_t source_codepoint = 0;
@@ -405,27 +412,67 @@ double gaussian(double distance, double width) {
     return std::exp(-0.5 * normalized * normalized);
 }
 
+// The spectrum of the source before the formants shape it. Every type is
+// normalised afterwards, so these only decide the relative weights.
+double source_weight(SourceType source, double harmonic) {
+    switch (source) {
+        // A sawtooth slope: every harmonic, falling as 1/n. Brighter and
+        // buzzier than a voice, which is the point.
+        case SourceType::reed:
+            return 1.0 / harmonic;
+        // Odd harmonics only, which is what makes a square wave hollow.
+        case SourceType::chip:
+            return std::fmod(harmonic, 2.0) < 0.5 ? 0.0 : 1.0 / harmonic;
+        default:
+            return 1.0 / std::pow(harmonic, 0.72);
+    }
+}
+
+// How many harmonics are worth summing.
+//
+// This used to be a flat twelve, which was not enough to reach the third
+// formant on a low voice: Cozy sits at 176 Hz, so twelve harmonics stopped at
+// 2117 Hz while its third formant is at 2494 Hz. The formant that was supposed
+// to give the voice its character had nothing to resonate, which is why the
+// deep presets sounded muffled and hard to tell apart. Elder was worse.
+//
+// Enough harmonics to cover the top formant with room to spare, bounded by
+// Nyquist and by kMaxHarmonics so a very low pitch cannot make this unbounded.
+std::size_t harmonic_count(double frequency, double top_formant, double sample_rate) {
+    if (frequency <= 0.0) {
+        return 1;
+    }
+    const double wanted = top_formant * 1.4 / frequency;
+    const double affordable = sample_rate * 0.5 / frequency;
+    const double count = std::min({wanted, affordable, static_cast<double>(kMaxHarmonics)});
+    return static_cast<std::size_t>(clamp(count, 1.0, static_cast<double>(kMaxHarmonics)));
+}
+
 void build_vowel_profile(
     int vowel_index,
     const Voice& voice,
+    SourceType source,
     double frequency,
     double sample_rate,
     std::array<double, 3>& formants,
-    std::array<double, 12>& harmonics) {
+    std::array<double, kMaxHarmonics>& harmonics,
+    std::size_t& count) {
     const auto& vowel = kVowels[static_cast<std::size_t>(vowel_index)];
     std::array<double, 3> bandwidths{};
     for (std::size_t index = 0; index < 3; ++index) {
         formants[index] = vowel.formants[index] * voice.tract;
         bandwidths[index] = vowel.bandwidths[index] * voice.tract;
     }
+    harmonics.fill(0.0);
+    count = harmonic_count(frequency, formants[2], sample_rate);
     const double nyquist = sample_rate * 0.5;
     double total = 0.0;
-    for (std::size_t index = 0; index < harmonics.size(); ++index) {
+    for (std::size_t index = 0; index < count; ++index) {
         const double harmonic = static_cast<double>(index + 1);
         const double harmonic_frequency = frequency * harmonic;
         // Drop harmonics above Nyquist instead of letting them fold back as
-        // aliasing. At normal pitches nothing is dropped; it only matters once
-        // Pitch is pushed towards the top of its range.
+        // aliasing. harmonic_count() already bounds this; the check stays
+        // because it is the one that must not be got wrong.
         if (harmonic_frequency >= nyquist) {
             harmonics[index] = 0.0;
             continue;
@@ -434,7 +481,7 @@ void build_vowel_profile(
         for (std::size_t formant = 0; formant < 3; ++formant) {
             resonance += gaussian(harmonic_frequency - formants[formant], bandwidths[formant]);
         }
-        harmonics[index] = resonance / std::pow(harmonic, 0.72);
+        harmonics[index] = resonance * source_weight(source, harmonic);
         total += harmonics[index];
     }
     if (total <= std::numeric_limits<double>::epsilon()) {
@@ -445,12 +492,19 @@ void build_vowel_profile(
     }
 }
 
-void build_vowel(Event& event, int first_vowel, int end_vowel, const Voice& voice, double sample_rate) {
+void build_vowel(
+    Event& event, int first_vowel, int end_vowel, const Voice& voice, SourceType source,
+    double sample_rate) {
     event.vowel_name = kVowels[static_cast<std::size_t>(first_vowel)].name;
-    build_vowel_profile(
-        first_vowel, voice, event.frequency, sample_rate, event.formants, event.harmonics);
-    build_vowel_profile(
-        end_vowel, voice, event.frequency, sample_rate, event.end_formants, event.end_harmonics);
+    std::size_t first_count = 1;
+    std::size_t end_count = 1;
+    build_vowel_profile(first_vowel, voice, source, event.frequency, sample_rate,
+        event.formants, event.harmonics, first_count);
+    build_vowel_profile(end_vowel, voice, source, event.frequency, sample_rate,
+        event.end_formants, event.end_harmonics, end_count);
+    // The two vowels can want different counts when their third formants differ;
+    // the morph in render_vowel() reads both, so take the wider.
+    event.harmonic_count = std::max(first_count, end_count);
 }
 
 struct SpeechUnit {
@@ -816,6 +870,10 @@ void apply_character_style(Settings& settings, Voice& voice) {
     voice.pitch *= 0.90 + cuteness * 0.28;
     voice.tract *= 0.96 + cuteness * 0.09;
     voice.wobble *= 0.72 + cuteness * 0.72;
+    // Applied last so they scale whatever the preset, the character size and
+    // cuteness have already decided. Both default to 1.0 and change nothing.
+    voice.tract *= clamp(settings.formant, 0.25, 4.0);
+    voice.wobble *= clamp(settings.vibrato_depth, 0.0, 4.0);
 
     switch (settings.emotion) {
         case Emotion::happy:
@@ -935,7 +993,7 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             static_cast<std::size_t>(std::llround(consonant_seconds(consonant) / speed * sample_rate)));
         event.phase = random.next() * kTwoPi;
         event.seed = static_cast<std::uint32_t>(random.next() * 2147483000.0) + 1U;
-        build_vowel(event, vowel_index, end_vowel_index, voice, sample_rate);
+        build_vowel(event, vowel_index, end_vowel_index, voice, settings.source, sample_rate);
         events.push_back(event);
         cursor += event.length + static_cast<std::size_t>(std::llround(0.012 / speed * sample_rate));
     }
@@ -1051,7 +1109,8 @@ double tone_multiplier(std::uint8_t tone, double progress) {
     }
 }
 
-double render_vowel(Event& event, std::size_t local, double phase, const Voice& voice, Random& random, double sample_rate) {
+double render_vowel(Event& event, std::size_t local, double phase, const Voice& voice,
+        SourceType source, Random& random, double sample_rate) {
     const auto vowel_length = std::max<std::size_t>(1, event.length - event.onset);
     const auto vowel_index = local > event.onset ? local - event.onset : 0U;
     const double progress = clamp(static_cast<double>(vowel_index) / vowel_length, 0.0, 1.0);
@@ -1062,10 +1121,39 @@ double render_vowel(Event& event, std::size_t local, double phase, const Voice& 
     const double envelope = fade_in * fade_out * (1.0 - progress * 0.16);
     const double transition = progress * progress * (3.0 - 2.0 * progress);
     double voiced = 0.0;
-    for (std::size_t index = 0; index < event.harmonics.size(); ++index) {
+    for (std::size_t index = 0; index < event.harmonic_count; ++index) {
         const double amplitude = event.harmonics[index] * (1.0 - transition) +
             event.end_harmonics[index] * transition;
         voiced += std::sin(phase * static_cast<double>(index + 1)) * amplitude;
+    }
+    // Everything past this point is a pure function of the event and the sample
+    // offset within it, so syllables stay independent and the lazy renderer
+    // still matches a single eager pass exactly (invariant 8d).
+    switch (source) {
+        case SourceType::metallic: {
+            // Ring modulation against a fixed inharmonic carrier. Unrelated to
+            // the pitch on purpose: that is what makes it read as a machine
+            // rather than as a singer.
+            const double carrier = std::sin(kTwoPi * 173.0 * local / sample_rate);
+            voiced = voiced * carrier * 1.55;
+            break;
+        }
+        case SourceType::granular: {
+            // A fast gate chops the vowel into grains. Squaring the window
+            // keeps the openings narrow, which is what sounds broken up rather
+            // than merely tremolo'd.
+            const double window = 0.5 + 0.5 * std::cos(kTwoPi * 47.0 * local / sample_rate);
+            voiced *= 0.18 + window * window * 1.45;
+            break;
+        }
+        case SourceType::growl: {
+            // An octave below the fundamental. Real growls are a subharmonic
+            // the folds fall into, and it reads as size more than as pitch.
+            voiced = voiced * 0.82 + std::sin(phase * 0.5) * 0.42;
+            break;
+        }
+        default:
+            break;
     }
     std::array<double, 3> formant{};
     for (std::size_t index = 0; index < formant.size(); ++index) {
@@ -1102,7 +1190,8 @@ void render_event(Event& event, const Settings& settings, const Voice& voice, fl
         const double progress = static_cast<double>(local) / event.length;
         const double attack = std::min(1.0, local / (settings.sample_rate * 0.002));
         const double release = std::min(1.0, (event.length - local) / (settings.sample_rate * 0.010));
-        const double wobble = 1.0 + voice.wobble * std::sin(kTwoPi * 9.2 * time);
+        const double wobble = 1.0 + voice.wobble *
+            std::sin(kTwoPi * clamp(settings.vibrato_rate, 0.0, 30.0) * time);
         const double lexical_gesture = event.mandarin ? tone_multiplier(event.tone, progress) :
             (1.0 + 0.018 * (0.5 - progress));
         const double question = event.question_rise
@@ -1115,7 +1204,8 @@ void render_event(Event& event, const Settings& settings, const Voice& voice, fl
         }
         const double phase = kTwoPi * event.frequency * wobble * gesture * time + event.phase;
         const double consonant = render_consonant(event, local, phase, random, settings.sample_rate);
-        const double vowel = render_vowel(event, local, phase, voice, random, settings.sample_rate);
+        const double vowel = render_vowel(
+            event, local, phase, voice, settings.source, random, settings.sample_rate);
         const double clarity = clamp(settings.clarity, 0.0, 1.0);
         const double cute_softening = 1.0 - clamp(settings.cuteness, 0.0, 1.0) * 0.12;
         const double consonant_gain = (event.mandarin ? 0.68 + clarity * 0.28 : 1.0) * cute_softening;
@@ -1164,6 +1254,9 @@ Diagnostics describe(
         diagnostics.length_samples.push_back(event.length);
         diagnostics.lexical_tones.push_back(event.lexical_tone);
         diagnostics.tones.push_back(event.tone);
+        diagnostics.frequencies.push_back(event.frequency);
+        diagnostics.harmonic_counts.push_back(event.harmonic_count);
+        diagnostics.top_formants.push_back(std::max(event.formants[2], event.end_formants[2]));
         if (event.mandarin) {
             ++diagnostics.mandarin_event_count;
         }

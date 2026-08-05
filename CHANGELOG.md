@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.0 - 2026-08-05
+
+Timbre. Four new controls, all appended, all defaulting to what 1.0.x did:
+
+- **Formant / 共鳴** scales the vocal tract, and so every resonance, without touching the
+  pitch. This is the difference between a small creature and a large one, and it is the
+  control that was missing: Pitch alone just makes the same character sing higher.
+- **Timbre / 音源** replaces the vocal folds rather than the resonance. *Reed* is a
+  sawtooth slope, brighter and buzzier. *Chip* keeps only odd harmonics, hollow and 8-bit.
+  *Metallic* ring-modulates against a fixed inharmonic carrier. *Granular* chops the vowel
+  into grains. *Growl* adds a sub-octave partial underneath.
+- **Vibrato / 顫音** and **Vibrato Rate / 顫音速率** were fixed at the voice preset's own
+  depth and a hardcoded 9.2 Hz.
+
+Fixed alongside them:
+
+- The additive source now uses as many harmonics as it takes to reach the third formant,
+  instead of a flat twelve. Twelve harmonics of Cozy's 176 Hz fundamental stop at 2117 Hz
+  while its third formant sits at 2494 Hz, so the formant that gives the voice its
+  character had nothing to resonate. Elder was worse. **Low voices will sound brighter and
+  more distinct than they did in 1.0.x**; measured on the same phrase, Cozy gains 1.4 dB
+  around the third formant and 2.8 dB above it, Elder 2.0 dB and 2.3 dB. Voices at 245 Hz
+  and above are unchanged to within 0.1 dB, because twelve harmonics already reached them.
+
 ## 1.0.11 - 2026-08-05
 
 - The panel no longer works out its own syllable timings. It asks the engine, through a new

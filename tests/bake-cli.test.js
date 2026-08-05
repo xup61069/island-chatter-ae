@@ -151,6 +151,44 @@ const planOf = (text, extra = []) => {
     "under tempo lock every syllable starts exactly one slot after the last");
 }
 
+// Every timbre flag must actually reach the engine. A flag that is silently
+// ignored, or that expects a different unit from the one the panel sends, looks
+// exactly like a control that does nothing — which is how --formant was first
+// wired, taking a percentage where the engine wanted a multiplier.
+{
+  const timbreRoot = fs.mkdtempSync(path.join(os.tmpdir(), "island-chatter-timbre-"));
+  try {
+    const render = (name, extra) => {
+      const file = path.join(timbreRoot, `${name}.wav`);
+      execFileSync(tool, ["--out-hex", hex(file), "--text", hex("你好，島民！"),
+        "--rate", "48000", ...extra], { stdio: "pipe" });
+      return fs.readFileSync(file);
+    };
+    const baseline = render("baseline", []);
+    for (const [label, extra] of [
+      ["--source 1 (reed)", ["--source", "1"]],
+      ["--source 2 (chip)", ["--source", "2"]],
+      ["--source 3 (metallic)", ["--source", "3"]],
+      ["--source 4 (granular)", ["--source", "4"]],
+      ["--source 5 (growl)", ["--source", "5"]],
+      ["--formant 0.6", ["--formant", "0.6"]],
+      ["--formant 1.6", ["--formant", "1.6"]],
+      ["--vibrato 0", ["--vibrato", "0"]],
+      ["--vibrato-rate 2", ["--vibrato-rate", "2"]],
+    ]) {
+      check(!render(label.replace(/\W+/g, "-"), extra).equals(baseline),
+        `${label} changes the audio`);
+    }
+    // ...and the documented defaults must be exactly the untouched voice, or an
+    // older project would not sound the way it did.
+    check(render("defaults", ["--source", "0", "--formant", "1.0",
+      "--vibrato", "1.0", "--vibrato-rate", "9.2"]).equals(baseline),
+      "the timbre defaults reproduce the untouched voice");
+  } finally {
+    fs.rmSync(timbreRoot, { recursive: true, force: true });
+  }
+}
+
 if (failures > 0) {
   throw new Error(`${failures} bake CLI check(s) failed`);
 }
