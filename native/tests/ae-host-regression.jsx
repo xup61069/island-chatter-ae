@@ -52,13 +52,6 @@
         var source = panelFile.read();
         panelFile.close();
 
-        var readingsFile = new File(root + "/native/panel/IslandChatterMandarinReadings.jsxinc");
-        readingsFile.encoding = "UTF-8";
-        readingsFile.open("r");
-        var readingsSource = readingsFile.read();
-        readingsFile.close();
-        eval(readingsSource);
-
         var bodyStart = source.indexOf("{", source.indexOf("function islandChatterNativePanel("));
         var bodyEnd = source.indexOf("var panel = buildUI(thisObj);");
         if (bodyStart < 0 || bodyEnd < 0) { throw new Error("panel layout changed; cannot load body"); }
@@ -124,8 +117,11 @@
             check(Math.round(chatter.property(75).value) === settings.seed, "seed parameter written");
         }
 
-        // Fit Duration must match the plan built from the same effective speed.
-        var plan = estimateSpeech(TEXT, effectiveSpeed(settings));
+        // Fit Duration must match the engine's plan. Asking for it here also
+        // proves the panel can find and run island_chatter_bake from inside
+        // After Effects, which is how every timing now reaches the layer.
+        var plan = planFromEngine(chatter);
+        check(plan.events.length > 0, "the engine returned a timing plan");
         check(Math.abs((layer.outPoint - layer.inPoint) - plan.duration) < 0.05,
             "Fit Duration matches the planned length (" + plan.duration.toFixed(3) + "s, layer " +
             (layer.outPoint - layer.inPoint).toFixed(3) + "s)");

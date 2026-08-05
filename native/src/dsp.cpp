@@ -94,6 +94,7 @@ struct Event {
     std::uint8_t tone = 5;
     std::uint8_t lexical_tone = 5;
     std::uint32_t source_codepoint = 0;
+    std::vector<std::uint32_t> source_units;
     std::string reading;
     bool nasal_final = false;
     bool velar_nasal = false;
@@ -876,6 +877,10 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
 
         int vowel_index = latin_vowel(codepoint);
         int end_vowel_index = vowel_index;
+        // Which input characters this syllable ends up speaking. The panel
+        // labels its markers from this, so it has to grow whenever a branch
+        // below consumes more than the current character.
+        std::vector<std::uint32_t> consumed{codepoint};
         Consonant consonant{};
         const bool latin = ascii_lower(codepoint) != '\0';
         MandarinSyllable mandarin;
@@ -892,6 +897,7 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
                     !units[index + 1].mandarin) {
                 vowel_index = latin_vowel(units[index + 1].codepoint);
                 end_vowel_index = vowel_index;
+                consumed.push_back(units[index + 1].codepoint);
                 ++index;
             } else {
                 vowel_index = latin ? 5 : static_cast<int>(codepoint % 5U);
@@ -920,6 +926,7 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         event.tone = has_mandarin_reading ? mandarin.tone : 5;
         event.lexical_tone = has_mandarin_reading ? unit.lexical_tone : 5;
         event.source_codepoint = codepoint;
+        event.source_units = std::move(consumed);
         event.reading = has_mandarin_reading ? std::string(reading) : std::string{};
         event.nasal_final = has_mandarin_reading && mandarin.nasal_final;
         event.velar_nasal = has_mandarin_reading && mandarin.velar_nasal;
@@ -1152,6 +1159,7 @@ Diagnostics describe(
         diagnostics.consonant_kinds.push_back(event.consonant.kind);
         diagnostics.readings.push_back(event.reading);
         diagnostics.source_codepoints.push_back(event.source_codepoint);
+        diagnostics.source_units.push_back(event.source_units);
         diagnostics.start_samples.push_back(event.start);
         diagnostics.length_samples.push_back(event.length);
         diagnostics.lexical_tones.push_back(event.lexical_tone);

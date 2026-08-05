@@ -50,7 +50,7 @@ effect.
 | `native/src/dsp.cpp` | UTF-8 planning, Mandarin readings, sandhi, phoneme/event planning, synthesis, random-access copying |
 | `native/src/synthesis_cache.cpp` | Bounded thread-safe single-flight cache for AE block rendering |
 | `native/generated/mandarin_readings.hpp` | Generated Unihan lookup table; do not hand-edit |
-| `native/panel/IslandChatterMandarinReadings.jsxinc` | Generated AE-side reading table; do not hand-edit |
+| `native/tools/bake_cli.cpp` | `island_chatter_bake`: renders a WAV, and reports the timing plan with `--plan` |
 | `native/tests/dsp_tests.cpp` | DSP, Mandarin, random-access, bounds, and cache concurrency tests |
 | `native/tests/ae-smoke-test.jsx` | Destructive temporary-project host smoke test; writes a report, closes the project, and quits AE |
 | `native/tests/ae-panel-reapply-setup.jsx` | Manual host setup for applying the actual panel twice to a selected Chinese text layer |
@@ -88,12 +88,28 @@ effect.
    contract. Surrogate pairs consume two units and must decode correctly in the native adapter.
 8. **Synthesis is deterministic.** Text, all voice settings, seed, and sample rate belong in the
    cache key. The runtime remains dependency-free and ships no audio samples.
-8b. **The panel mirrors the engine's text planning.** `estimateSpeech()` and its helpers in
-   `IslandChatterNativePanel.jsx` reproduce `build_speech_units()`, `punctuation_pause()`,
-   `apply_character_style()`'s Speed multipliers, and the phrase/particle tables from
-   `dsp.cpp`. Markers, the rig, Type-On, and Fit Duration all read that plan, so any change
-   to one side must land on the other. `npm test` compares the shared tables, the timing
-   constants, and the planner's output against pinned values.
+8b. **The panel asks the engine for the plan; it must never compute one.** Markers, the
+   rig, Type-On and Fit Duration all need to know where each syllable falls.
+   `planFromEngine()` runs `island_chatter_bake --plan` and parses the result, reading the
+   arguments off the effect so the plan describes what will actually render.
+
+   Until 1.0.10 the panel reimplemented `build_speech_units()`, the readings table, the
+   phrase table, tone sandhi and the punctuation rests in ExtendScript. The two copies
+   could not agree even in principle, because the engine varies each syllable's length by
+   a seeded random amount: ordinary Chinese drifted by up to 10 ms, and the copy knew
+   nothing about inline overrides, Zhuyin, tone-number pinyin or the 64-unit truncation.
+   `[重|chong2]新開始` planned twelve syllables against the four that are spoken and sized
+   the layer 1.28 s too long. Adding a language would have meant writing that planner
+   twice. `npm test` fails if any of those symbols reappear in the panel.
+
+   The exception is tempo mode: `speedForTempo()` converts BPM to a Speed *before*
+   anything is written to the effect, so there is nothing to ask about yet. It needs
+   `styleSpeedMultiplier()` and `SYLLABLE_STRIDE`, both cross-checked against `dsp.cpp`.
+
+   The plan is line-oriented ASCII with characters as decimal codepoints, because
+   `system.callSystem()` returns stdout through the console code page and would turn
+   Chinese into `?`. `END <count>` is checked on the way in: `callSystem()` reports no
+   exit status, so a tool that died halfway would otherwise read as a short utterance.
 8c. **Animated voice parameters cost a fresh plan.** After Effects hands an audio effect one
    parameter snapshot per audio block, and the effect reads only the block-start half of
    `params[]`. Every distinct Pitch/Speed/Consonant value is a new cache key; animating Speed
@@ -122,6 +138,13 @@ effect.
    `resources\` for the payload rather than assuming a shape, so packages built before 1.0.10
    still install. `tests/validate-script.js` asserts the staging of every payload file, both
    that it goes into `resources\` and that it does not also appear at the top.
+8g. **An imported WAV is only released by a purge.** Verified against After Effects 26:
+   after `importFile()`, the file cannot be deleted or rewritten. Removing the layer does
+   not help, and neither does removing the `FootageItem`. `app.purge()` does, for every
+   target except `SNAPSHOT_CACHES`. `UNDO_CACHES` is what Bake uses, being the cheapest
+   that works — the undo history goes but the RAM preview survives. Bake renders before
+   it touches the project and only releases the previous bake if the write failed, so a
+   first bake never purges. `native/tests/ae-rebake-probe.jsx` is the diagnostic.
 9. **Generated reading tables stay synchronized.** Regenerate them with the scripts in
    `native/tools/`; do not patch individual generated entries.
 10. **Source Text remains authoritative.** The user explicitly presses Apply again after editing.
@@ -168,6 +191,7 @@ exit, since the launcher returns immediately:
 | `native/tests/ae-typeon-verify.jsx` | Type-On first/repeat apply, no duplicate animators, reveal actually animates, apply after the user keyframes Opacity and End |
 | `native/tests/ae-audio-render.jsx` | Renders the effect to audio through the render queue |
 | `native/tests/ae-text-animator-probe.jsx` | Diagnostic for the text-animator placeholder behaviour in invariant 3b |
+| `native/tests/ae-rebake-probe.jsx` | Diagnostic for what releases an imported WAV, behind invariant 8f |
 
 `ae-host-regression.jsx` and `ae-typeon-verify.jsx` load the real panel body with `eval`, so
 they exercise the shipped code rather than a copy. If the panel's outer function or its

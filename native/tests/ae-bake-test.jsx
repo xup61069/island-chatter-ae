@@ -40,12 +40,6 @@
         panelFile.open("r");
         var source = panelFile.read();
         panelFile.close();
-        var readingsFile = new File(root + "/native/panel/IslandChatterMandarinReadings.jsxinc");
-        readingsFile.encoding = "UTF-8";
-        readingsFile.open("r");
-        var readingsSource = readingsFile.read();
-        readingsFile.close();
-        eval(readingsSource);
         var bodyStart = source.indexOf("{", source.indexOf("function islandChatterNativePanel("));
         var bodyEnd = source.indexOf("var panel = buildUI(thisObj);");
         eval(source.substring(bodyStart + 1, bodyEnd));
@@ -85,8 +79,7 @@
         };
         applyToTextLayer(comp, layer, "", settings,
             { markers: false, fitDuration: true, controllers: false, typeOn: false });
-        var expected = estimateSpeech("你好，島民！今天天氣真好。",
-            effectiveSpeed(settings), false).duration;
+        var expected = planFromEngine(findNativeEffect(layer)).duration;
 
         var layersBefore = comp.numLayers;
         var folder = bakeFolder();

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "1.0.10",
+    [string]$Version = "1.0.11",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = ""
 )
@@ -36,7 +36,7 @@ if ($AexPath) {
 # A plug-in older than the sources it is compiled from is the one mistake this
 # script must never let through. Only what actually links into the .aex counts:
 # native/tests and native/tools build separate executables, and the panel .jsx
-# and readings .jsxinc ship as their own files and are copied fresh below.
+# ships as its own file and is copied fresh below.
 $aexTime = (Get-Item -LiteralPath $resolvedAex).LastWriteTime
 $compiledExtensions = @(".cpp", ".hpp", ".h", ".r", ".cmake", ".txt")
 $compiledRoots = @("src", "include", "generated", "plugin", "cmake") |
@@ -90,8 +90,6 @@ Copy-Item -LiteralPath $resolvedAex -Destination (Join-Path $resources "IslandCh
 Copy-Item -LiteralPath $resolvedBake -Destination (Join-Path $resources "island_chatter_bake.exe")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterNativePanel.jsx") `
     -Destination (Join-Path $resources "IslandChatterNativePanel.jsx")
-Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterMandarinReadings.jsxinc") `
-    -Destination (Join-Path $resources "IslandChatterMandarinReadings.jsxinc")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install-IslandChatter.ps1") `
     -Destination (Join-Path $resources "Install-IslandChatter.ps1")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Uninstall-IslandChatter.ps1") `

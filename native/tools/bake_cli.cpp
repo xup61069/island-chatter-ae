@@ -46,9 +46,41 @@ std::string decode_hex(const std::string& hex) {
     return out;
 }
 
+// The panel used to reimplement the engine's text planning in ExtendScript so it
+// could place markers, size layers and drive Type-On. Two copies of Mandarin
+// readings, sandhi, the phrase table and the timing constants drifted apart
+// every time either side changed. This prints the plan the engine actually
+// uses, so there is only one copy.
+//
+// Everything on these lines is ASCII, including the characters, which travel as
+// decimal codepoints. system.callSystem() hands stdout back through the console
+// code page, so a Chinese character printed as text would come back as "?" for
+// exactly the same reason the arguments go over as hex.
+void print_plan(const island_chatter::Settings& settings) {
+    const island_chatter::Utterance utterance(settings);
+    const auto& plan = utterance.diagnostics();
+    std::cout << "PLAN 1\n"
+              << "RATE " << settings.sample_rate << "\n"
+              << "SAMPLES " << utterance.sample_count() << "\n";
+    for (std::size_t index = 0; index < plan.event_count; ++index) {
+        // A reading is empty for anything the engine has no Mandarin syllable
+        // for; "-" keeps the field count fixed so the parser stays trivial.
+        const auto& reading = plan.readings[index];
+        std::cout << "E " << plan.start_samples[index] << " " << plan.length_samples[index]
+                  << " " << (reading.empty() ? "-" : reading);
+        for (const auto codepoint : plan.source_units[index]) {
+            std::cout << " " << codepoint;
+        }
+        std::cout << "\n";
+    }
+    // The caller checks this count: callSystem() gives no exit status, so a
+    // truncated read would otherwise look like a short utterance.
+    std::cout << "END " << plan.event_count << "\n";
+}
+
 [[noreturn]] void usage() {
     std::cerr <<
-        "island_chatter_bake --out <file.wav> | --out-hex <hex-utf8-path>\n"
+        "island_chatter_bake --out <file.wav> | --out-hex <hex-utf8-path> | --plan\n"
         "                    --text <hex-utf8>\n"
         "  [--voice N] [--emotion N] [--size N] [--seed N] [--rate N]\n"
         "  [--pitch F] [--speed F] [--volume F] [--consonant F]\n"
@@ -67,9 +99,13 @@ int main(int argc, char** argv) {
         island_chatter::Settings settings;
         std::string output;
         bool have_text = false;
+        bool plan_only = false;
 
         for (int index = 1; index < argc; ++index) {
             const std::string flag = argv[index];
+            // The only flag that takes no value, so it is handled before the
+            // loop reaches for one.
+            if (flag == "--plan") { plan_only = true; continue; }
             if (index + 1 >= argc) usage();
             const std::string value = argv[++index];
             if (flag == "--out") output = value;
@@ -93,7 +129,12 @@ int main(int argc, char** argv) {
             else if (flag == "--tempo-lock") settings.tempo_lock = std::atoi(value.c_str()) != 0;
             else usage();
         }
-        if (output.empty() || !have_text) usage();
+        if (!have_text) usage();
+        if (plan_only) {
+            print_plan(settings);
+            return 0;
+        }
+        if (output.empty()) usage();
 
         const auto rendered = island_chatter::synthesize(settings);
 
