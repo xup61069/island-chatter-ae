@@ -37,7 +37,7 @@
 
 ## 安裝
 
-安裝包在 Gumroad 販售：**[購買 Island Chatter AE](https://xupster.gumroad.com/l/IslandChatterAE)**
+安裝包在 Gumroad 販售：**[購買 Island Chatter AE](https://kadid.gumroad.com/l/IslandChatterAE)**
 
 原始碼是公開的，你也可以自行編譯（見下方「從原始碼測試與建置」）。
 
@@ -179,7 +179,7 @@ npm run package:windows
 本專案是 **source-available**，不是 OSI 定義的開源：原始碼公開，你可以閱讀、自行編譯、
 自己使用（包含商業接案），但**不能把編譯出來的檔案轉發給別人**。完整條款見 [LICENSE](LICENSE)。
 
-想直接安裝不想自己編譯的話，請到 [Gumroad](https://xupster.gumroad.com/l/IslandChatterAE) 購買官方安裝包。
+想直接安裝不想自己編譯的話，請到 [Gumroad](https://kadid.gumroad.com/l/IslandChatterAE) 購買官方安裝包。
 
 Unicode 讀音資料維持它自己的授權，請見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
@@ -187,4 +187,4 @@ After Effects 是 Adobe 的商標；Nintendo 與 Animal Crossing 是其各自權
 
 ## English
 
-Island Chatter AE is an original, procedural Mandarin character-voice effect for Adobe After Effects. It runs directly on text layers, needs no audio files to preview or render, and can bake to WAV on demand. It supports Traditional and Simplified Chinese readings, pronunciation overrides, character presets, timing markers, rig controllers, and Type-On animation. The Windows installer is sold at https://xupster.gumroad.com/l/IslandChatterAE; the source here can be built yourself.
+Island Chatter AE is an original, procedural Mandarin character-voice effect for Adobe After Effects. It runs directly on text layers, needs no audio files to preview or render, and can bake to WAV on demand. It supports Traditional and Simplified Chinese readings, pronunciation overrides, character presets, timing markers, rig controllers, and Type-On animation. The Windows installer is sold at https://kadid.gumroad.com/l/IslandChatterAE; the source here can be built yourself.
