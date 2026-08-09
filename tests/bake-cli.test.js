@@ -189,7 +189,117 @@ const planOf = (text, extra = []) => {
   }
 }
 
+// --- MIDI ------------------------------------------------------------------
+//
+// The panel does not open the file, so these three modes are the whole of the
+// boundary between a MIDI file and a singing layer. The path travels as hex for
+// the same reason the output path does.
+{
+  const vlq = (value) => {
+    const bytes = [value & 0x7f];
+    let rest = value >> 7;
+    while (rest > 0) { bytes.unshift((rest & 0x7f) | 0x80); rest >>= 7; }
+    return bytes;
+  };
+  const chunk = (type, bytes) => Buffer.concat([
+    Buffer.from(type, "ascii"),
+    Buffer.from([(bytes.length >> 24) & 0xff, (bytes.length >> 16) & 0xff,
+      (bytes.length >> 8) & 0xff, bytes.length & 0xff]),
+    Buffer.from(bytes),
+  ]);
+  const TICKS = 480;
+  const microseconds = Math.round(60000000 / 96);
+  const tempoTrack = chunk("MTrk", [
+    ...vlq(0), 0xff, 0x51, 0x03,
+    (microseconds >> 16) & 0xff, (microseconds >> 8) & 0xff, microseconds & 0xff,
+    ...vlq(0), 0xff, 0x2f, 0x00,
+  ]);
+  const events = [...vlq(0), 0xff, 0x03, 6, ...Buffer.from("Melody", "ascii")];
+  for (const [at, pitch] of [60, 60, 67, 67].entries()) {
+    events.push(...vlq(at === 0 ? 0 : 40), 0x90, pitch, 96);
+    events.push(...vlq(TICKS - 40), 0x80, pitch, 0);
+  }
+  events.push(...vlq(0), 0xff, 0x2f, 0x00);
+  const midi = Buffer.concat([
+    chunk("MThd", [0, 1, 0, 2, (TICKS >> 8) & 0xff, TICKS & 0xff]),
+    tempoTrack,
+    chunk("MTrk", events),
+  ]);
+
+  // A folder outside any single-byte code page, like the output path test.
+  const songRoot = fs.mkdtempSync(path.join(os.tmpdir(), "island chatter midi "));
+  const midiPath = path.join(songRoot, "小星星.mid");
+  fs.writeFileSync(midiPath, midi);
+  try {
+    const tracks = execFileSync(tool,
+      ["--list-tracks", "--midi-hex", hex(midiPath)], { encoding: "utf8" });
+    check(/^T 1 4 4d656c6f6479$/m.test(tracks),
+      "--list-tracks reports the melody track, its note count and its name as hex");
+    check(/^BPM 96$/m.test(tracks), "--list-tracks reports the file's tempo");
+
+    const song = execFileSync(tool,
+      ["--dump-song", "--midi-hex", hex(midiPath), "--track", "1",
+        "--lyrics", hex("一閃\n一閃")], { encoding: "utf8" });
+    const lines = song.split(/\r?\n/).filter(Boolean);
+    check(lines[lines.length - 1] === "END 2", "--dump-song ends with the line count");
+    check(lines.some((line) => line.startsWith("X 0 19968 38275")),
+      "--dump-song hands the lyric back as decimal codepoints");
+    const notes = (lines.find((line) => line.startsWith("N 0 ")) || "").split(" ").slice(2);
+    check(notes.length >= 2 && Number(notes[0]) >> 9 === 60,
+      `--dump-song encodes pitch and length in one slot (got ${notes.join(",")})`);
+    // The second line begins at its own first note: two beats at 96 BPM.
+    check(/^L 1 1\.25 /m.test(song),
+      "--dump-song places a line at the time of its first note");
+    check(/^EXTRA \d+ \d+ \d+ \d+$/m.test(song),
+      "--dump-song reports leftovers, dropped chord notes and splits");
+
+    // With no lyrics the melody sings its own note names, and they come back as
+    // the text for the layer — which is what makes the feature need no new
+    // effect parameters at all.
+    {
+        const named = execFileSync(tool,
+          ["--dump-song", "--midi-hex", hex(midiPath), "--track", "1", "--lyrics", ""],
+          { encoding: "utf8" });
+        const text = (named.split(/\r?\n/).find((line) => line.startsWith("X 0 ")) || "")
+          .split(" ").slice(2).map((code) => String.fromCodePoint(Number(code))).join("");
+        check(text === "do do sol sol", `the note names are sung (got ${JSON.stringify(text)})`);
+        const inG = execFileSync(tool,
+          ["--dump-song", "--midi-hex", hex(midiPath), "--track", "1", "--lyrics", "",
+            "--tonic", "7"], { encoding: "utf8" });
+        const moved = (inG.split(/\r?\n/).find((line) => line.startsWith("X 0 ")) || "")
+          .split(" ").slice(2).map((code) => String.fromCodePoint(Number(code))).join("");
+        check(moved === "fa fa do do", `--tonic moves the note names (got ${JSON.stringify(moved)})`);
+    }
+
+    // A melody has to change the audio, and the plan has to follow it.
+    const sung = execFileSync(tool,
+      ["--plan", "--text", hex("一閃"), "--rate", "48000",
+        "--melody", `${60 * 512 + 24},${67 * 512 + 48}`, "--melody-bpm", "120"],
+      { encoding: "utf8" });
+    check(/^E 0 24000 /m.test(sung), "a one-beat note at 120 BPM plans as half a second");
+    check(/^E 24000 48000 /m.test(sung), "a two-beat note plans as one second");
+    check(/^END 2$/m.test(sung), "a sung plan reports one event per syllable");
+
+    let refused = false;
+    try {
+      execFileSync(tool, ["--list-tracks", "--midi-hex", hex(path.join(songRoot, "nope.mid"))],
+        { stdio: "pipe" });
+    } catch (error) { refused = true; }
+    check(refused, "a missing MIDI file is refused rather than ignored");
+
+    refused = false;
+    try {
+      const broken = path.join(songRoot, "broken.mid");
+      fs.writeFileSync(broken, Buffer.from("not a midi file at all", "ascii"));
+      execFileSync(tool, ["--list-tracks", "--midi-hex", hex(broken)], { stdio: "pipe" });
+    } catch (error) { refused = true; }
+    check(refused, "a file that is not a MIDI file is refused rather than crashing");
+  } finally {
+    fs.rmSync(songRoot, { recursive: true, force: true });
+  }
+}
+
 if (failures > 0) {
   throw new Error(`${failures} bake CLI check(s) failed`);
 }
-console.log("bake CLI handles non-ASCII output paths and reports a correct timing plan.");
+console.log("bake CLI handles non-ASCII output paths, MIDI import and a correct timing plan.");

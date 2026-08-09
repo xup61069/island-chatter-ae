@@ -113,7 +113,53 @@ struct Event {
     double noise_low = 0.0;
     double noise_input = 0.0;
     double noise_high = 0.0;
+
+    // --- Singing -----------------------------------------------------------
+    //
+    // Every field below is inert unless the melody drove this event, and
+    // `sustained` is the switch: false takes exactly the code paths the
+    // speaking engine always took.
+    bool sustained = false;
+    // Where this segment sits inside its note, and how long the whole note is,
+    // both in samples. A note longer than kSegmentSeconds is split into several
+    // events so the lazy block renderer never has to produce seconds of audio
+    // to serve one block; everything that has to stay continuous across the
+    // seam — the phase, the vibrato, the vowel's own envelope — is computed
+    // from note-global time rather than from the offset within the segment.
+    std::size_t time_offset = 0;
+    std::size_t note_length = 0;
+    // describe() folds this event into the syllable before it. True for the
+    // later segments of one note, and for a note a melisma held over from the
+    // previous syllable: both are one thing the user sang, and a marker, a
+    // mouth shape and a Type-On step are owed one each.
+    bool continues_previous = false;
+    // A seam inside one note: no attack, no release, no consonant. A melisma
+    // sets neither, because a new pitch on a new note is articulated.
+    bool seamless_start = false;
+    bool seamless_end = false;
+    // Where the pitch glides in from, and over how long. Copied in at plan time
+    // from the previous note's frequency — a scalar, not a look at what the
+    // neighbour rendered — so syllables stay independent and the lazy renderer
+    // still matches a single eager pass (invariant 8d).
+    double glide_from = 0.0;
+    double glide_seconds = 0.0;
 };
+
+// How long one segment of a held note is allowed to be.
+//
+// The lazy renderer's unit of work is one event. A four-second note left whole
+// would be rendered in full the moment any block touched any part of it —
+// roughly 190,000 samples of up to thirty-two summed harmonics on the audio
+// thread, which is the 60-135 ms stall Utterance exists to remove. A quarter of
+// a second is the same order as the longest syllable the speaking engine has
+// ever produced, so the worst case per block goes back to a cost that is
+// already known to be survivable.
+constexpr double kSegmentSeconds = 0.25;
+
+// A trailing segment shorter than this is merged into the one before it rather
+// than left as a runt, because several places downstream assume an event is
+// long enough to hold an onset and a release.
+constexpr double kShortestSegmentSeconds = 0.05;
 
 class Random {
 public:
@@ -1034,6 +1080,10 @@ struct SpeechUnit {
     int english_first_vowel = 0;
     int english_end_vowel = 0;
     bool english_stressed = false;
+    // A melisma: the previous syllable is held on through the next note instead
+    // of a new one being sung. Only produced in melody mode, so a hyphen in
+    // ordinary text keeps resting the way it always has.
+    bool tie = false;
 };
 
 struct PhrasePronunciation {
@@ -1238,11 +1288,23 @@ std::string bopomofo_to_pinyin(
     return initial + final + static_cast<char>('0' + (tone == 0 ? 1 : tone));
 }
 
-std::vector<SpeechUnit> build_speech_units(const std::string& text) {
+std::vector<SpeechUnit> build_speech_units(const std::string& text, bool melody_mode) {
     const auto codepoints = decode_utf8(text);
     std::vector<SpeechUnit> units;
     for (std::size_t index = 0; index < codepoints.size();) {
         const auto codepoint = codepoints[index];
+        // A hyphen sings the previous syllable through the next note. It has to
+        // be caught before is_punctuation(), which has always scored it as a
+        // rest — and still does when there is no melody, so a hyphenated line
+        // of dialogue is unchanged.
+        if (melody_mode && (codepoint == '-' || codepoint == 0xFF0DU)) {
+            SpeechUnit unit;
+            unit.codepoint = codepoint;
+            unit.tie = true;
+            units.push_back(unit);
+            ++index;
+            continue;
+        }
         if (is_space(codepoint)) {
             units.push_back({codepoint, {}, 0.055, false, false, false});
             ++index;
@@ -1283,7 +1345,7 @@ std::vector<SpeechUnit> build_speech_units(const std::string& text) {
                     for (std::size_t cursor = bar + 1; cursor < close; ++cursor) {
                         append_utf8(kana, codepoints[cursor]);
                     }
-                    auto morae = build_speech_units(kana);
+                    auto morae = build_speech_units(kana, melody_mode);
                     if (!morae.empty()) {
                         std::size_t first_spoken = morae.size();
                         for (std::size_t at = 0; at < morae.size(); ++at) {
@@ -1560,8 +1622,64 @@ void apply_character_style(Settings& settings, Voice& voice) {
     }
 }
 
+// Defined with the rendering code below, but the sung path needs its value at
+// progress zero while it is planning: that is where a tone would have started,
+// and it becomes the pitch the note is approached from.
+double tone_multiplier(std::uint8_t tone, double progress);
+
+// Pushes one note, split into segments if it is held long enough to matter.
+//
+// Everything that has to survive the seam is already a function of note-global
+// time, so the pieces differ only in where they start. The breath noise does
+// restart with each piece, which is why each gets its own seed: the same
+// filtered noise repeating every quarter of a second would be a buzz.
+void push_segmented(std::vector<Event>& events, const Event& whole, double sample_rate) {
+    const auto limit = static_cast<std::size_t>(std::llround(kSegmentSeconds * sample_rate));
+    const auto shortest =
+        static_cast<std::size_t>(std::llround(kShortestSegmentSeconds * sample_rate));
+    if (!whole.sustained || limit == 0U || whole.length <= limit + shortest) {
+        events.push_back(whole);
+        return;
+    }
+    std::size_t offset = 0;
+    std::size_t piece_index = 0;
+    while (offset < whole.length) {
+        std::size_t take = std::min(limit, whole.length - offset);
+        // Never leave a runt behind: several places downstream assume an event
+        // has room for an onset and a release.
+        if (whole.length - offset - take < shortest) {
+            take = whole.length - offset;
+        }
+        Event piece = whole;
+        piece.start = whole.start + offset;
+        piece.length = take;
+        piece.time_offset = offset;
+        piece.note_length = whole.length;
+        piece.seamless_start = offset > 0U;
+        piece.seamless_end = offset + take < whole.length;
+        piece.seed = whole.seed + static_cast<std::uint32_t>(piece_index * 7919U);
+        if (offset > 0U) {
+            piece.continues_previous = true;
+            piece.onset = 0;
+            piece.consonant = Consonant{};
+            piece.source_units.clear();
+        }
+        events.push_back(piece);
+        offset += take;
+        ++piece_index;
+    }
+}
+
+// What a melisma holds on to: the vowel the previous syllable ended on.
+struct HeldSyllable {
+    bool valid = false;
+    int vowel = 0;
+    bool nasal_final = false;
+    bool velar_nasal = false;
+};
+
 std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings, const Voice& voice) {
-    const auto units = build_speech_units(settings.text);
+    const auto units = build_speech_units(settings.text, settings.melody_mode);
     std::uint32_t seed = settings.seed == 0U ? 91673U : settings.seed;
     if (settings.seed == 0U) {
         for (std::size_t index = 0; index < units.size(); ++index) {
@@ -1578,10 +1696,91 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
     const double speed = clamp(settings.speed, kMinimumSpeed, kMaximumSpeed);
     const auto sample_rate = static_cast<double>(settings.sample_rate);
 
+    // --- Singing -----------------------------------------------------------
+    //
+    // With a melody the timing comes entirely from the notes: Speed and Tempo
+    // Lock stop applying, punctuation stops resting, and the gaps in the tune
+    // are the rests in the slot list. Without one, not a line below runs.
+    const bool singing = settings.melody_mode && !settings.melody.empty();
+    const double tick_seconds =
+        60.0 / clamp(settings.melody_bpm, 20.0, 400.0) / kMelodyTicksPerBeat;
+    const double portamento = clamp(settings.portamento_seconds, 0.0, 0.5);
+    const double tone_blend = clamp(settings.tone_blend, 0.0, 1.0);
+    std::size_t slot = 0;
+    MelodyNote last_note{60, kMelodyTicksPerBeat};
+    double previous_frequency = 0.0;
+    HeldSyllable held;
+
+    // Rests move the cursor; the next pitched note is what a syllable gets.
+    // Once the melody runs out the last note repeats, so a lyric longer than
+    // its tune is sung to the end on one pitch rather than cut off mid-word.
+    const auto take_note = [&]() {
+        while (slot < settings.melody.size()) {
+            const auto note = settings.melody[slot++];
+            if (note.pitch <= 0) {
+                cursor += static_cast<std::size_t>(
+                    std::llround(note.ticks * tick_seconds * sample_rate));
+                // Nothing to glide from across a silence.
+                previous_frequency = 0.0;
+                continue;
+            }
+            last_note = note;
+            return note;
+        }
+        return last_note;
+    };
+    const auto note_frequency = [&](const MelodyNote& note) {
+        return 440.0 * std::pow(2.0, (clamp(note.pitch + settings.transpose, 1, 127) - 69) / 12.0);
+    };
+    const auto note_seconds = [&](const MelodyNote& note) {
+        return std::max(0.03, note.ticks * tick_seconds);
+    };
+
     for (std::size_t index = 0; index < units.size(); ++index) {
         const auto& unit = units[index];
         const auto codepoint = unit.codepoint;
+
+        // A melisma. The syllable before it is held on through this note, so
+        // there is no consonant and no new vowel — only a new pitch, glided
+        // into, and one more entry that describe() folds back into the syllable
+        // it belongs to.
+        if (settings.melody_mode && unit.tie) {
+            // With no melody to hold on to there is nothing to sing; the unit
+            // still exists so that syllable_count() can see it, because a
+            // melisma asks for a note of its own.
+            if (!singing || !held.valid) { continue; }
+            const auto note = take_note();
+            const double duration = note_seconds(note);
+            Event event;
+            event.start = cursor;
+            event.length = std::max<std::size_t>(
+                64, static_cast<std::size_t>(std::llround(duration * sample_rate)));
+            event.note_length = event.length;
+            event.frequency = note_frequency(note);
+            event.sustained = true;
+            event.continues_previous = true;
+            event.nasal_final = held.nasal_final;
+            event.velar_nasal = held.velar_nasal;
+            event.source_codepoint = codepoint;
+            event.glide_from = previous_frequency > 0.0 ? previous_frequency : event.frequency;
+            event.glide_seconds = std::min(portamento, duration * 0.5);
+            event.phase = random.next() * kTwoPi;
+            event.seed = static_cast<std::uint32_t>(random.next() * 2147483000.0) + 1U;
+            // The vowel the syllable ended on is the one that carries on, which
+            // is what "holding a note" means: 好 sung over three notes is one
+            // ao, not three hao.
+            build_vowel(event, held.vowel, held.vowel, voice, settings.source, sample_rate);
+            previous_frequency = event.frequency;
+            cursor = event.start + event.length;
+            push_segmented(events, event, sample_rate);
+            continue;
+        }
+
         if (unit.pause_seconds > 0.0) {
+            // The tune already says where the silences are. A comma in the
+            // lyrics is punctuation on screen, not an extra beat of rest, and
+            // adding one would push the rest of the line off its notes.
+            if (singing) { continue; }
             if (!events.empty()) {
                 events.back().question_rise = events.back().question_rise || unit.question;
                 events.back().emphatic = events.back().emphatic || unit.emphatic;
@@ -1639,13 +1838,18 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             }
         }
 
+        // Taken before the event starts, because any rests in front of the note
+        // are what move the cursor to where it begins.
+        MelodyNote note{};
+        if (singing) { note = take_note(); }
+
         Event event;
         event.start = cursor;
         const double clarity = clamp(settings.clarity, 0.0, 1.0);
         // random.next() is still consumed when locked, so the phase and per-event
         // seeds below are unchanged and the voice keeps its character.
         const double duration_variation =
-            settings.tempo_lock ? 0.0 : 0.025 + (1.0 - clarity) * 0.12;
+            (settings.tempo_lock || singing) ? 0.0 : 0.025 + (1.0 - clarity) * 0.12;
         // A Japanese mora is timed like a Mandarin syllable, not like a latin
         // letter, which is what makes tempo lock land on the beat in Japanese.
         //
@@ -1660,18 +1864,43 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         } else if (has_english_reading) {
             base = settings.tempo_lock ? 0.188 : (unit.english_stressed ? 0.181 : 0.104);
         }
-        const double duration = base / speed *
-            (1.0 - duration_variation * 0.5 + random.next() * duration_variation);
+        const double duration = singing
+            ? note_seconds(note)
+            : base / speed * (1.0 - duration_variation * 0.5 + random.next() * duration_variation);
         event.length = std::max<std::size_t>(64, static_cast<std::size_t>(std::llround(duration * sample_rate)));
-        const int note_span = 2 + static_cast<int>(std::llround(
-            clamp(settings.cuteness, 0.0, 1.0) * (6.0 - clarity * 2.0)));
-        const int note = static_cast<int>((codepoint * 5U + index * 3U) %
-            static_cast<std::uint32_t>(note_span * 2 + 1)) - note_span;
-        event.frequency = 245.0 * voice.pitch * clamp(settings.pitch, 0.10, 6.0) *
-            std::pow(2.0, note / 24.0);
-        // Length alone does not read as stress; the pitch has to move with it.
-        if (has_english_reading && !settings.tempo_lock) {
-            event.frequency *= unit.english_stressed ? 1.055 : 0.965;
+        if (singing) {
+            event.sustained = true;
+            event.note_length = event.length;
+            // Absolute pitch, deliberately not multiplied by voice.pitch. A
+            // preset's own register runs from 0.66 to 1.42, so applying it here
+            // would transpose the written melody by up to a fifth and put two
+            // characters singing the same tune in different keys. What makes a
+            // character sound like itself is the vocal tract and the timbre,
+            // which is also how it works in people.
+            event.frequency = note_frequency(note);
+            // The tone contour becomes the approach to the note rather than a
+            // shape drawn across it. A held syllable cannot both keep its tone
+            // and stay on pitch, and the melody is what was asked for — but
+            // starting the note from where the tone would have started keeps
+            // the diction recognisably Chinese, which is what singers do.
+            double origin = previous_frequency > 0.0 ? previous_frequency : event.frequency;
+            if (has_mandarin_reading && tone_blend > 0.0) {
+                origin *= 1.0 + (tone_multiplier(mandarin.tone, 0.0) - 1.0) * tone_blend;
+            }
+            event.glide_from = origin;
+            event.glide_seconds = std::min(portamento, duration * 0.5);
+            previous_frequency = event.frequency;
+        } else {
+            const int note_span = 2 + static_cast<int>(std::llround(
+                clamp(settings.cuteness, 0.0, 1.0) * (6.0 - clarity * 2.0)));
+            const int wander = static_cast<int>((codepoint * 5U + index * 3U) %
+                static_cast<std::uint32_t>(note_span * 2 + 1)) - note_span;
+            event.frequency = 245.0 * voice.pitch * clamp(settings.pitch, 0.10, 6.0) *
+                std::pow(2.0, wander / 24.0);
+            // Length alone does not read as stress; the pitch has to move with it.
+            if (has_english_reading && !settings.tempo_lock) {
+                event.frequency *= unit.english_stressed ? 1.055 : 0.965;
+            }
         }
         event.consonant = consonant;
         event.mandarin = has_mandarin_reading;
@@ -1684,14 +1913,31 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
         event.nasal_final = (has_mandarin_reading && mandarin.nasal_final) ||
             (has_japanese_reading && japanese.nasal_final);
         event.velar_nasal = has_mandarin_reading && mandarin.velar_nasal;
+        // Sung, the consonant is a fixed gesture at the front of the note
+        // rather than a fraction of it: a two-beat note does not get a two-beat
+        // "s". It is still capped against the note so a short one is not all
+        // consonant.
+        const double onset_seconds = singing
+            ? std::min(consonant_seconds(consonant), duration * 0.4)
+            : consonant_seconds(consonant) / speed;
         event.onset = std::min(
             event.length - 24U,
-            static_cast<std::size_t>(std::llround(consonant_seconds(consonant) / speed * sample_rate)));
+            static_cast<std::size_t>(std::llround(onset_seconds * sample_rate)));
         event.phase = random.next() * kTwoPi;
         event.seed = static_cast<std::uint32_t>(random.next() * 2147483000.0) + 1U;
         build_vowel(event, vowel_index, end_vowel_index, voice, settings.source, sample_rate);
-        events.push_back(event);
-        cursor += event.length + static_cast<std::size_t>(std::llround(0.012 / speed * sample_rate));
+        if (singing) {
+            held.valid = true;
+            held.vowel = end_vowel_index;
+            held.nasal_final = event.nasal_final;
+            held.velar_nasal = event.velar_nasal;
+            cursor = event.start + event.length;
+            push_segmented(events, event, sample_rate);
+        } else {
+            event.note_length = event.length;
+            events.push_back(event);
+            cursor += event.length + static_cast<std::size_t>(std::llround(0.012 / speed * sample_rate));
+        }
     }
     if (!events.empty()) {
         if (settings.emotion == Emotion::questioning) events.back().question_rise = true;
@@ -1791,6 +2037,68 @@ double render_consonant(Event& event, std::size_t local, double phase, Random& r
     return sample;
 }
 
+// How long the vibrato takes to reach full depth once it starts.
+constexpr double kVibratoRampSeconds = 0.35;
+
+// How long a sung vowel takes to finish gliding to its closing formants.
+constexpr double kSungGlideSeconds = 0.090;
+
+// The integral of min(u / ramp, 1) * sin(omega * u) from 0 to tau.
+//
+// Written out rather than approximated because the approximation is not small:
+// treating the ramp as constant over a cycle leaves a term proportional to how
+// fast the depth is growing, which at these rates is several percent of the
+// fundamental — more than a semitone of pitch error while the vibrato fades in.
+double vibrato_integral(double tau, double omega, double ramp) {
+    if (tau <= 0.0 || omega <= 0.0) {
+        return 0.0;
+    }
+    const double span = std::max(ramp, 1e-6);
+    const auto at = [&](double value) {
+        return (std::sin(omega * value) / (omega * omega) -
+            value * std::cos(omega * value) / omega) / span;
+    };
+    if (tau <= span) {
+        return at(tau);
+    }
+    return at(span) + (std::cos(omega * span) - std::cos(omega * tau)) / omega;
+}
+
+// Radians accumulated by a sung note up to `seconds` after the note began.
+//
+// The speaking engine writes the phase as frequency times elapsed time, with
+// the vibrato and the tone contour folded in as multipliers. That is a
+// shorthand, not an integral, and it holds up only because a spoken syllable
+// lasts a fifth of a second: multiply the whole elapsed time by a vibrato
+// factor and the pitch swing grows in proportion to how long the note is held,
+// so a two-second note would wander a long way out of tune.
+//
+// Both terms here are real integrals of the instantaneous frequency, which
+// makes this a pure function of note-global time — and that is what lets a held
+// note be cut into segments with nothing audible at the joins.
+double sung_phase(const Event& event, double seconds, double depth, double rate, double delay) {
+    double integral = 0.0;
+    if (event.glide_seconds > 0.0 && event.glide_from > 0.0 &&
+            std::abs(event.glide_from - event.frequency) > 1e-9) {
+        // Exponential in frequency, which is linear in pitch — the shape a
+        // portamento actually has, and the only one whose integral is
+        // elementary.
+        const double k = std::log(event.frequency / event.glide_from) / event.glide_seconds;
+        const double span = std::min(seconds, event.glide_seconds);
+        integral = event.glide_from * (std::exp(k * span) - 1.0) / k;
+        if (seconds > event.glide_seconds) {
+            integral += event.frequency * (seconds - event.glide_seconds);
+        }
+    } else {
+        integral = event.frequency * seconds;
+    }
+    if (depth > 0.0 && rate > 0.0) {
+        integral += event.frequency * depth *
+            vibrato_integral(seconds - delay, kTwoPi * rate, kVibratoRampSeconds);
+    }
+    return kTwoPi * integral + event.phase;
+}
+
 double tone_multiplier(std::uint8_t tone, double progress) {
     progress = clamp(progress, 0.0, 1.0);
     switch (tone) {
@@ -1807,15 +2115,45 @@ double tone_multiplier(std::uint8_t tone, double progress) {
 
 double render_vowel(Event& event, std::size_t local, double phase, const Voice& voice,
         SourceType source, Random& random, double sample_rate) {
-    const auto vowel_length = std::max<std::size_t>(1, event.length - event.onset);
-    const auto vowel_index = local > event.onset ? local - event.onset : 0U;
+    // Segments of one held note carry their offset inside it, so everything
+    // below can be written against the note rather than against the piece. For
+    // anything the speaking engine produces the offset is zero and these are
+    // the same number.
+    const std::size_t note_local = event.time_offset + local;
+    const std::size_t note_length = std::max<std::size_t>(1, event.note_length);
+    const auto vowel_length = std::max<std::size_t>(1, note_length - std::min(note_length, event.onset));
+    const auto vowel_index = note_local > event.onset ? note_local - event.onset : 0U;
     const double progress = clamp(static_cast<double>(vowel_index) / vowel_length, 0.0, 1.0);
-    const double fade_in = clamp(
-        (static_cast<double>(local) - event.onset + sample_rate * 0.009) / (sample_rate * 0.018), 0.0, 1.0);
-    const double fade_out = clamp(
-        static_cast<double>(event.length - local) / (sample_rate * 0.022), 0.0, 1.0);
-    const double envelope = fade_in * fade_out * (1.0 - progress * 0.16);
-    const double transition = progress * progress * (3.0 - 2.0 * progress);
+    double fade_in;
+    double fade_out;
+    double transition;
+    double decay;
+    if (event.sustained) {
+        // A held vowel is held, not stretched. Spreading the closing formants
+        // over the whole note turns a two-second "ai" into a two-second swoop;
+        // real singing finishes the glide early and then sits on the vowel.
+        const double glide = clamp(
+            static_cast<double>(vowel_index) / (sample_rate * kSungGlideSeconds), 0.0, 1.0);
+        transition = glide * glide * (3.0 - 2.0 * glide);
+        fade_in = event.seamless_start ? 1.0 : clamp(
+            (static_cast<double>(note_local) - event.onset + sample_rate * 0.009) /
+                (sample_rate * 0.018), 0.0, 1.0);
+        fade_out = event.seamless_end ? 1.0 : clamp(
+            static_cast<double>(note_length - std::min(note_length, note_local)) /
+                (sample_rate * 0.030), 0.0, 1.0);
+        // Settles a little and then stays there, instead of fading away across
+        // the note the way a spoken syllable does.
+        decay = 1.0 - 0.08 * clamp(
+            static_cast<double>(vowel_index) / (sample_rate * 0.5), 0.0, 1.0);
+    } else {
+        fade_in = clamp(
+            (static_cast<double>(local) - event.onset + sample_rate * 0.009) / (sample_rate * 0.018), 0.0, 1.0);
+        fade_out = clamp(
+            static_cast<double>(event.length - local) / (sample_rate * 0.022), 0.0, 1.0);
+        transition = progress * progress * (3.0 - 2.0 * progress);
+        decay = 1.0 - progress * 0.16;
+    }
+    const double envelope = fade_in * fade_out * decay;
     double voiced = 0.0;
     for (std::size_t index = 0; index < event.harmonic_count; ++index) {
         const double amplitude = event.harmonics[index] * (1.0 - transition) +
@@ -1824,13 +2162,15 @@ double render_vowel(Event& event, std::size_t local, double phase, const Voice& 
     }
     // Everything past this point is a pure function of the event and the sample
     // offset within it, so syllables stay independent and the lazy renderer
-    // still matches a single eager pass exactly (invariant 8d).
+    // still matches a single eager pass exactly (invariant 8d). The offset used
+    // is the one inside the note, so the fixed oscillators below do not restart
+    // — and therefore do not click — where a held note is cut into segments.
     switch (source) {
         case SourceType::metallic: {
             // Ring modulation against a fixed inharmonic carrier. Unrelated to
             // the pitch on purpose: that is what makes it read as a machine
             // rather than as a singer.
-            const double carrier = std::sin(kTwoPi * 173.0 * local / sample_rate);
+            const double carrier = std::sin(kTwoPi * 173.0 * note_local / sample_rate);
             voiced = voiced * carrier * 1.55;
             break;
         }
@@ -1838,7 +2178,7 @@ double render_vowel(Event& event, std::size_t local, double phase, const Voice& 
             // A fast gate chops the vowel into grains. Squaring the window
             // keeps the openings narrow, which is what sounds broken up rather
             // than merely tremolo'd.
-            const double window = 0.5 + 0.5 * std::cos(kTwoPi * 47.0 * local / sample_rate);
+            const double window = 0.5 + 0.5 * std::cos(kTwoPi * 47.0 * note_local / sample_rate);
             voiced *= 0.18 + window * window * 1.45;
             break;
         }
@@ -1857,9 +2197,9 @@ double render_vowel(Event& event, std::size_t local, double phase, const Voice& 
             event.end_formants[index] * transition;
     }
     const double formants =
-        std::sin(kTwoPi * formant[0] * local / sample_rate + 0.3) * 0.065 +
-        std::sin(kTwoPi * formant[1] * local / sample_rate + 1.1) * 0.042 +
-        std::sin(kTwoPi * formant[2] * local / sample_rate + 2.0) * 0.022;
+        std::sin(kTwoPi * formant[0] * note_local / sample_rate + 0.3) * 0.065 +
+        std::sin(kTwoPi * formant[1] * note_local / sample_rate + 1.1) * 0.042 +
+        std::sin(kTwoPi * formant[2] * note_local / sample_rate + 2.0) * 0.022;
     const double breath = shaped_noise(event, random.next() * 2.0 - 1.0, 0.35) * voice.breath;
     const double buzz = voice.buzz > 0.0 ? std::sin(phase * 2.01) * voice.buzz : 0.0;
     double nasal = 0.0;
@@ -1867,8 +2207,8 @@ double render_vowel(Event& event, std::size_t local, double phase, const Voice& 
     if (event.nasal_final) {
         const double nasal_mix = clamp((progress - 0.66) / 0.30, 0.0, 1.0);
         const double nasal_frequency = event.velar_nasal ? 245.0 : 285.0;
-        nasal = (std::sin(kTwoPi * nasal_frequency * local / sample_rate) * 0.16 +
-            std::sin(kTwoPi * nasal_frequency * 2.0 * local / sample_rate) * 0.055) * nasal_mix;
+        nasal = (std::sin(kTwoPi * nasal_frequency * note_local / sample_rate) * 0.16 +
+            std::sin(kTwoPi * nasal_frequency * 2.0 * note_local / sample_rate) * 0.055) * nasal_mix;
         oral_gain -= nasal_mix * 0.34;
     }
     return ((voiced * 1.85 + formants + breath + buzz) * oral_gain + nasal) * envelope;
@@ -1881,24 +2221,42 @@ double render_vowel(Event& event, std::size_t local, double phase, const Voice& 
 // output identical to a single eager synthesize() call.
 void render_event(Event& event, const Settings& settings, const Voice& voice, float* destination) {
     Random random(event.seed);
+    const double vibrato_rate = clamp(settings.vibrato_rate, 0.0, 30.0);
+    const double vibrato_delay = clamp(settings.vibrato_delay, 0.0, 4.0);
     for (std::size_t local = 0; local < event.length; ++local) {
         const double time = static_cast<double>(local) / settings.sample_rate;
-        const double progress = static_cast<double>(local) / event.length;
-        const double attack = std::min(1.0, local / (settings.sample_rate * 0.002));
-        const double release = std::min(1.0, (event.length - local) / (settings.sample_rate * 0.010));
-        const double wobble = 1.0 + voice.wobble *
-            std::sin(kTwoPi * clamp(settings.vibrato_rate, 0.0, 30.0) * time);
-        const double lexical_gesture = event.mandarin ? tone_multiplier(event.tone, progress) :
-            (1.0 + 0.018 * (0.5 - progress));
-        const double question = event.question_rise
-            ? 1.0 + 0.20 * std::pow(clamp((progress - 0.52) / 0.48, 0.0, 1.0), 1.35)
-            : 1.0;
-        const double emphasis_pitch = event.emphatic ? 1.0 + 0.045 * std::sin(kPi * progress) : 1.0;
-        double gesture = lexical_gesture * question * emphasis_pitch;
-        if (settings.emotion == Emotion::robot) {
-            gesture = std::pow(2.0, std::round(std::log2(std::max(gesture, 0.01)) * 12.0) / 12.0);
+        double phase;
+        double attack;
+        double release;
+        if (event.sustained) {
+            // Written against the note rather than the segment, so a seam falls
+            // in the middle of a continuous phase and a continuous envelope.
+            const std::size_t note_local = event.time_offset + local;
+            const double note_time = static_cast<double>(note_local) / settings.sample_rate;
+            phase = sung_phase(event, note_time, voice.wobble, vibrato_rate, vibrato_delay);
+            attack = event.seamless_start
+                ? 1.0
+                : std::min(1.0, note_local / (settings.sample_rate * 0.002));
+            release = event.seamless_end
+                ? 1.0
+                : std::min(1.0, (event.note_length - note_local) / (settings.sample_rate * 0.010));
+        } else {
+            const double progress = static_cast<double>(local) / event.length;
+            attack = std::min(1.0, local / (settings.sample_rate * 0.002));
+            release = std::min(1.0, (event.length - local) / (settings.sample_rate * 0.010));
+            const double wobble = 1.0 + voice.wobble * std::sin(kTwoPi * vibrato_rate * time);
+            const double lexical_gesture = event.mandarin ? tone_multiplier(event.tone, progress) :
+                (1.0 + 0.018 * (0.5 - progress));
+            const double question = event.question_rise
+                ? 1.0 + 0.20 * std::pow(clamp((progress - 0.52) / 0.48, 0.0, 1.0), 1.35)
+                : 1.0;
+            const double emphasis_pitch = event.emphatic ? 1.0 + 0.045 * std::sin(kPi * progress) : 1.0;
+            double gesture = lexical_gesture * question * emphasis_pitch;
+            if (settings.emotion == Emotion::robot) {
+                gesture = std::pow(2.0, std::round(std::log2(std::max(gesture, 0.01)) * 12.0) / 12.0);
+            }
+            phase = kTwoPi * event.frequency * wobble * gesture * time + event.phase;
         }
-        const double phase = kTwoPi * event.frequency * wobble * gesture * time + event.phase;
         const double consonant = render_consonant(event, local, phase, random, settings.sample_rate);
         const double vowel = render_vowel(
             event, local, phase, voice, settings.source, random, settings.sample_rate);
@@ -1938,9 +2296,18 @@ float limited(float sample, double gain) {
 Diagnostics describe(
     const std::vector<Event>& events, std::size_t sample_count, std::uint32_t sample_rate) {
     Diagnostics diagnostics;
-    diagnostics.event_count = events.size();
     diagnostics.duration_seconds = static_cast<double>(sample_count) / sample_rate;
     for (const auto& event : events) {
+        // A held note is several events and a melisma is one more, but the user
+        // sang one syllable. Diagnostics is the only window the panel has, and
+        // what it hands back becomes one marker, one mouth shape and one
+        // Type-On step each — so a two-second note reported honestly as eight
+        // segments would arrive as eight of all three.
+        if (event.continues_previous && !diagnostics.start_samples.empty()) {
+            diagnostics.length_samples.back() =
+                event.start + event.length - diagnostics.start_samples.back();
+            continue;
+        }
         diagnostics.vowel_names.push_back(event.vowel_name);
         diagnostics.consonant_kinds.push_back(event.consonant.kind);
         diagnostics.readings.push_back(event.reading);
@@ -1957,6 +2324,7 @@ Diagnostics describe(
             ++diagnostics.mandarin_event_count;
         }
     }
+    diagnostics.event_count = diagnostics.start_samples.size();
     return diagnostics;
 }
 
@@ -1973,6 +2341,34 @@ void apply_output_gain(float* samples, std::size_t count, double gain) {
 
 const std::vector<Voice>& voices() {
     return kVoices;
+}
+
+std::size_t syllable_count(const std::string& text, bool melody_mode) {
+    Settings settings;
+    settings.text = text;
+    settings.melody_mode = melody_mode;
+    Voice voice = kVoices[0];
+    apply_character_style(settings, voice);
+    // Planning is the cheap half — a few hundred microseconds — and nothing
+    // here renders. The melody is deliberately left empty: the question is how
+    // many notes this line wants, which is what the caller is about to decide.
+    const auto planned = build_events(settings, voice);
+    std::size_t syllables = 0;
+    for (const auto& event : planned.first) {
+        if (!event.continues_previous) {
+            ++syllables;
+        }
+    }
+    if (melody_mode) {
+        // A melisma produces no event without a melody to hold on to, but it
+        // does want a note, so it is counted here instead.
+        for (const auto& unit : build_speech_units(text, true)) {
+            if (unit.tie) {
+                ++syllables;
+            }
+        }
+    }
+    return syllables;
 }
 
 Result synthesize(const Settings& requested) {

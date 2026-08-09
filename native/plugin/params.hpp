@@ -34,17 +34,33 @@ enum ParamIndex : int {
     // It has to sit here rather than beside the first block, because the
     // indices in between are a saved-project contract.
     kParamTextSecondFirst,
+    // Appended in 1.7.0, after the second text block, which is why the melody
+    // begins at 145. A project saved before 1.7.0 reads every one of these as
+    // its default, and a melody length of zero is what keeps it speaking.
+    kParamMelodyLength = kParamTextSecondFirst + 64,
+    kParamMelodyBpm,
+    kParamMelodyTranspose,
+    kParamToneBlend,
+    kParamPortamento,
+    kParamVibratoDelay,
+    kParamMelodyFirst,
 };
 
 // Units 0-63 live at kParamTextFirst, 64-127 at kParamTextSecondFirst.
 inline constexpr std::size_t kTextUnitsPerBlock = 64;
 inline constexpr std::size_t kMaxTextUnits = kTextUnitsPerBlock * 2;
+// One slot per note, carrying pitch * 512 + ticks in the same 0-65535 range a
+// text unit uses. Mirrors kMelodySlots in island_chatter/dsp.hpp; the plug-in
+// static_asserts that the two agree.
+inline constexpr std::size_t kMelodySlots = 64;
 inline constexpr int kParamCount =
-    kParamTextSecondFirst + static_cast<int>(kTextUnitsPerBlock);
+    kParamMelodyFirst + static_cast<int>(kMelodySlots);
 
 static_assert(kParamSeed == 75, "Published parameter indices must never move");
 static_assert(kParamTempoLock == 76, "Published parameter indices must never move");
 static_assert(kParamTextSecondFirst == 81, "Published parameter indices must never move");
-static_assert(kParamCount == 145, "Changing the parameter count breaks saved AE projects");
+static_assert(kParamMelodyLength == 145, "Published parameter indices must never move");
+static_assert(kParamMelodyFirst == 151, "Published parameter indices must never move");
+static_assert(kParamCount == 215, "Changing the parameter count breaks saved AE projects");
 
 }  // namespace island_chatter::ae

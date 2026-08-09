@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -78,6 +79,27 @@ std::string text_from_params(PF_ParamDef* params[]) {
     return output;
 }
 
+static_assert(island_chatter::ae::kMelodySlots == island_chatter::kMelodySlots,
+    "The melody transport and the engine must agree on how many notes a layer carries");
+
+// The melody a layer is set to sing, or nothing at all.
+//
+// Length zero is the whole backwards-compatibility story: every slot in a
+// project saved before 1.7.0 reads as its default, the length reads as zero,
+// and the engine takes the speaking path it always took.
+std::vector<island_chatter::MelodyNote> melody_from_params(PF_ParamDef* params[]) {
+    const auto requested = params[island_chatter::ae::kParamMelodyLength]->u.sd.value;
+    const auto length = std::clamp<A_long>(
+        requested, 0, static_cast<A_long>(island_chatter::ae::kMelodySlots));
+    std::vector<island_chatter::MelodyNote> melody;
+    melody.reserve(static_cast<std::size_t>(length));
+    for (A_long index = 0; index < length; ++index) {
+        melody.push_back(island_chatter::decode_melody_slot(std::clamp<A_long>(
+            params[island_chatter::ae::kParamMelodyFirst + index]->u.sd.value, 0, 65535)));
+    }
+    return melody;
+}
+
 // After Effects hands an audio effect one parameter snapshot per audio block.
 // Every distinct value is a distinct cache key and therefore a full re-synthesis
 // of the utterance, so snap the continuous values onto the same grid the slider
@@ -112,6 +134,17 @@ island_chatter::Settings settings_from_params(PF_ParamDef* params[], std::uint32
         quantize(params[island_chatter::ae::kParamVibratoDepth]->u.fs_d.value, 0.1) / 100.0;
     settings.vibrato_rate =
         quantize(params[island_chatter::ae::kParamVibratoRate]->u.fs_d.value, 0.01);
+    settings.melody = melody_from_params(params);
+    settings.melody_mode = !settings.melody.empty();
+    settings.melody_bpm = quantize(params[island_chatter::ae::kParamMelodyBpm]->u.fs_d.value, 0.01);
+    settings.transpose = static_cast<int>(std::clamp<A_long>(
+        params[island_chatter::ae::kParamMelodyTranspose]->u.sd.value, -48, 48));
+    settings.tone_blend =
+        quantize(params[island_chatter::ae::kParamToneBlend]->u.fs_d.value, 0.1) / 100.0;
+    settings.portamento_seconds =
+        quantize(params[island_chatter::ae::kParamPortamento]->u.fs_d.value, 0.1) / 1000.0;
+    settings.vibrato_delay =
+        quantize(params[island_chatter::ae::kParamVibratoDelay]->u.fs_d.value, 0.01);
     settings.sample_rate = sample_rate;
     return settings;
 }
@@ -212,6 +245,40 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
         def.ui_flags = PF_PUI_INVISIBLE;
         PF_ADD_SLIDER("Text code unit", 0, 65535, 0, 65535, 0,
             static_cast<A_long>(island_chatter::ae::kParamTextSecondFirst + index));
+    }
+    // The melody transport, appended in 1.7.0. Every default here reproduces
+    // 1.6.x exactly: no notes, so nothing sings.
+    AEFX_CLR_STRUCT(def);
+    def.ui_flags = PF_PUI_INVISIBLE;
+    PF_ADD_SLIDER("Melody length", 0, static_cast<A_long>(island_chatter::ae::kMelodySlots),
+        0, static_cast<A_long>(island_chatter::ae::kMelodySlots), 0,
+        island_chatter::ae::kParamMelodyLength);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Melody BPM / 旋律速度", 20.00, 400.00, 40.00, 200.00, 120.00,
+        PF_Precision_HUNDREDTHS, 0, PF_ParamFlag_NONE, island_chatter::ae::kParamMelodyBpm);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_SLIDER("Transpose / 移調", -48, 48, -24, 24, 0,
+        island_chatter::ae::kParamMelodyTranspose);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Tone Blend / 聲調比例", 0.0, 100.0, 0.0, 100.0, 15.0,
+        PF_Precision_TENTHS, PF_ValueDisplayFlag_PERCENT, PF_ParamFlag_NONE,
+        island_chatter::ae::kParamToneBlend);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Portamento / 滑音", 0.0, 200.0, 0.0, 120.0, 40.0,
+        PF_Precision_TENTHS, 0, PF_ParamFlag_NONE, island_chatter::ae::kParamPortamento);
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX("Vibrato Delay / 顫音延遲", 0.00, 2.00, 0.00, 1.00, 0.30,
+        PF_Precision_HUNDREDTHS, 0, PF_ParamFlag_NONE,
+        island_chatter::ae::kParamVibratoDelay);
+    // kMelodySlots, never anything larger: this loop owns ids 151-214, and a
+    // wrong bound walks its ids past num_params. After Effects then refuses the
+    // effect with "parameter count mismatch", which reads as the plug-in not
+    // being installed rather than as the mistake it is.
+    for (std::size_t index = 0; index < island_chatter::ae::kMelodySlots; ++index) {
+        AEFX_CLR_STRUCT(def);
+        def.ui_flags = PF_PUI_INVISIBLE;
+        PF_ADD_SLIDER("Melody note", 0, 65535, 0, 65535, 0,
+            static_cast<A_long>(island_chatter::ae::kParamMelodyFirst + index));
     }
     out_data->num_params = island_chatter::ae::kParamCount;
     return PF_Err_NONE;

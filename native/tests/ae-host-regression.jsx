@@ -61,7 +61,10 @@
 
         var settings = {
             voice: 1, pitch: 1.0, speed: 1.0, volume: 0.78, consonant: 1.25,
-            emotion: 5, characterSize: 0, clarity: 0.78, cuteness: 0.55, seed: 4242
+            emotion: 5, characterSize: 0, clarity: 0.78, cuteness: 0.55, seed: 4242,
+            // Complete, because a shared rig stores the whole voice on its layer
+            // and a missing field would be written to the project as NaN.
+            tempoLock: false, formant: 1.0, source: 0, vibrato: 1.0, vibratoRate: 9.2
         };
         var options = { markers: true, fitDuration: true, controllers: true, typeOn: true,
             typeOnCenter: true };
@@ -103,7 +106,7 @@
             check(tone.propertyIndex < chatter.propertyIndex, "Tone sits before the native effect");
             check(tone.propertyIndex === chatter.propertyIndex - 1, "Tone is immediately before it");
             check(tone.property(6).value === 0, "Tone level is zero");
-            check(chatter.numProperties === 145, "native effect exposes 145 parameters, got " + chatter.numProperties);
+            check(chatter.numProperties === 215, "native effect exposes 215 parameters, got " + chatter.numProperties);
             check(Math.round(chatter.property(6).value) === TEXT.length,
                 "text length parameter is " + TEXT.length + ", got " + Math.round(chatter.property(6).value));
             var textOk = true;
@@ -232,7 +235,7 @@
         });
         var beforeRemove = cleanup.property("ADBE Effect Parade").numProperties;
         check(beforeRemove >= 7, "the layer carries the full rig before removal (" + beforeRemove + ")");
-        attempt("remove from layer", function () { removeFromLayer(cleanup); });
+        attempt("remove from layer", function () { removeFromLayer(comp, cleanup); });
         check(cleanup.property("ADBE Effect Parade").numProperties === 0,
             "every effect was removed, " + cleanup.property("ADBE Effect Parade").numProperties + " left");
         check(cleanup.property("ADBE Marker").numKeys === 0, "IC: markers were removed");
@@ -241,7 +244,7 @@
         check(cleanup.property("ADBE Text Properties")
             .property("ADBE Text Document").value.text === "清除測試",
             "Source Text survived the removal");
-        attempt("remove again on an already clean layer", function () { removeFromLayer(cleanup); });
+        attempt("remove again on an already clean layer", function () { removeFromLayer(comp, cleanup); });
 
         // Removal must leave effects the user owns alone.
         var mixed = comp.layers.addText("混合測試");
@@ -250,7 +253,7 @@
         attempt("apply to a layer that has a user effect", function () {
             applyToTextLayer(comp, mixed, "", settings, options);
         });
-        attempt("remove from that layer", function () { removeFromLayer(mixed); });
+        attempt("remove from that layer", function () { removeFromLayer(comp, mixed); });
         var survivors = mixed.property("ADBE Effect Parade");
         check(survivors.numProperties === 1 && survivors.property(1).name === "My Blur",
             "the user's own effect survived removal");
@@ -336,6 +339,718 @@
             check(Math.abs(reDerived - readBack.speed) < 1e-9,
                 "Speed -> BPM -> Speed round-trips (" + impliedBpm.toFixed(2) + " BPM)");
         }
+
+        /*
+         * --- 11. one rig shared by several lines ------------------------------
+         *
+         * The point of the whole thing: a character's mouth is driven by
+         * whichever line is speaking, whatever layer that line happens to be.
+         * What cannot be checked without a host is that the pointer really is a
+         * Layer Control that survives, that the merged keys really land on the
+         * null, that the lines really lose their own sliders, and that the
+         * generated mouth expression is one After Effects will actually
+         * evaluate rather than a string that only looks right.
+         */
+        var sharedOptions = { markers: true, fitDuration: true, controllers: true,
+            typeOn: false, typeOnCenter: false, rigShared: true, rigCharacter: "Mimi" };
+        var spoken = ["第一句話", "第二句話", "第三句話"];
+        var members = [];
+        var s;
+        for (s = 0; s < spoken.length; s += 1) {
+            var made = comp.layers.addText(spoken[s]);
+            made.name = "Line " + (s + 1);
+            made.startTime = s * 3;
+            members.push(made);
+        }
+        for (s = 1; s <= comp.numLayers; s += 1) { comp.layer(s).selected = false; }
+        for (s = 0; s < members.length; s += 1) { members[s].selected = true; }
+        attempt("apply three lines to one shared rig", function () {
+            var shared = createOrUpdate("", "", settings, sharedOptions);
+            if (shared.count !== 3) { throw new Error("applied to " + shared.count + " layers"); }
+            if (shared.rigs !== 1) { throw new Error("rebuilt " + shared.rigs + " rigs, expected 1"); }
+            if (shared.overlaps.length) { throw new Error("lines three seconds apart overlapped"); }
+        });
+
+        var rigLayer = findRigLayer(comp, "Mimi");
+        check(rigLayer !== null, "a rig layer was created for the character");
+        if (rigLayer) {
+            check(isRigLayer(rigLayer), "the rig layer is recognised as one");
+            check(rigLayer.name === "IC Rig Mimi", "the rig is named after the character, got " + rigLayer.name);
+            var sharedNames = ["IC Mouth", "IC Volume", "IC Pitch", "IC Head Bounce",
+                "IC Blink", "IC Speaking", "IC Line"];
+            var sharedOk = true;
+            var totalKeys = 0;
+            for (s = 0; s < sharedNames.length; s += 1) {
+                var track = findNamedEffect(rigLayer, sharedNames[s]);
+                if (!track || track.property(1).numKeys === 0) { sharedOk = false; }
+                else { totalKeys += track.property(1).numKeys; }
+            }
+            check(sharedOk, "all seven shared tracks exist on the rig and are keyframed");
+            log("  rig carries " + totalKeys + " keys across seven tracks");
+
+            // The lines keep the pointer and lose the sliders. Both halves
+            // matter: twenty sets of sliders is the problem being solved.
+            var boundOk = true;
+            var strippedOk = true;
+            for (s = 0; s < members.length; s += 1) {
+                var bound = rigTargetLayer(comp, members[s]);
+                if (!bound || bound.index !== rigLayer.index) { boundOk = false; }
+                if (findNamedEffect(members[s], "IC Mouth")) { strippedOk = false; }
+            }
+            check(boundOk, "every line points at the rig through its Layer Control");
+            check(strippedOk, "no line kept a rig slider of its own");
+            check(rigMembers(comp, rigLayer).length === 3,
+                "the rig finds its three members, got " + rigMembers(comp, rigLayer).length);
+
+            // Appending the pointer must not have separated the pair the audio
+            // path depends on.
+            var memberEffects = members[0].property("ADBE Effect Parade");
+            var memberTone = null, memberChatter = null;
+            for (s = 1; s <= memberEffects.numProperties; s += 1) {
+                if (memberEffects.property(s).matchName === "ADBE Aud Tone") { memberTone = memberEffects.property(s); }
+                if (memberEffects.property(s).matchName === "Island Chatter Native") { memberChatter = memberEffects.property(s); }
+            }
+            check(memberTone && memberChatter &&
+                memberTone.propertyIndex === memberChatter.propertyIndex - 1,
+                "Tone is still immediately before the native effect on a bound line");
+
+            // The character's voice travels with the project, not with the
+            // machine's preferences.
+            var storedVoice = rigSettings(rigLayer);
+            check(storedVoice !== null && storedVoice.seed === settings.seed &&
+                storedVoice.voice === settings.voice,
+                "the character's voice is stored on the rig and reads back");
+
+            var lineSlider = findNamedEffect(rigLayer, "IC Line").property(1);
+            var highest = 0;
+            for (s = 1; s <= lineSlider.numKeys; s += 1) {
+                if (lineSlider.keyValue(s) > highest) { highest = lineSlider.keyValue(s); }
+            }
+            check(highest === 3, "IC Line counts all three lines, reached " + highest);
+
+            // Repeat apply: the case that broke the per-layer rig in 1.0.1.
+            attempt("apply the same three lines again", function () {
+                createOrUpdate("", "", settings, sharedOptions);
+            });
+            check(rigLayers(comp).length === 1,
+                "repeat apply did not create a second rig (" + rigLayers(comp).length + ")");
+            var controlCount = 0;
+            var memberParade = members[0].property("ADBE Effect Parade");
+            for (s = 1; s <= memberParade.numProperties; s += 1) {
+                if (memberParade.property(s).name === "IC Rig Target") { controlCount += 1; }
+            }
+            check(controlCount === 1, "repeat apply did not stack a second pointer (" + controlCount + ")");
+
+            // Moving a line is the case keyframes cannot follow on their own,
+            // and Rebuild is the whole answer to it. If the rebuild did not
+            // re-read the layer, this key would not move.
+            var speaking = findNamedEffect(rigLayer, "IC Speaking").property(1);
+            var lastBefore = speaking.keyTime(speaking.numKeys);
+            members[2].startTime = members[2].startTime + 2;
+            attempt("rebuild after moving the last line two seconds later", function () {
+                rebuildSharedRig(comp, rigLayer, null);
+            });
+            speaking = findNamedEffect(rigLayer, "IC Speaking").property(1);
+            var lastAfter = speaking.keyTime(speaking.numKeys);
+            check(Math.abs((lastAfter - lastBefore) - 2) < 0.02,
+                "the rig followed the moved line (" + lastBefore.toFixed(3) + "s -> " +
+                lastAfter.toFixed(3) + "s)");
+
+            // Two lines of one character at once: built anyway, reported anyway.
+            members[1].startTime = members[0].startTime + 0.25;
+            var clash = null;
+            attempt("rebuild with two lines overlapping", function () {
+                clash = rebuildSharedRig(comp, rigLayer, null);
+            });
+            check(clash && clash.overlaps.length >= 2,
+                "the overlap was reported back to the panel");
+            var mouthSlider = findNamedEffect(rigLayer, "IC Mouth").property(1);
+            var strayKey = false;
+            for (s = 1; s <= mouthSlider.numKeys; s += 1) {
+                // The first line is cut where the second starts; nothing of it
+                // may survive past that moment except keys the second line owns.
+                if (mouthSlider.keyTime(s) > members[0].startTime + 0.25 + 0.0001 &&
+                    mouthSlider.keyTime(s) < members[1].startTime) { strayKey = true; }
+            }
+            check(!strayKey, "the masked line left no keys inside the line that took over");
+
+            // A face, driven by the rig. The expression is generated as text, so
+            // the only proof it is correct is After Effects evaluating it.
+            var shapeLayers = [];
+            for (s = 0; s < 6; s += 1) {
+                var shapeLayer = comp.layers.addSolid([0, 1, 0], "Mouth " + s, 40, 40, 1);
+                shapeLayers.push(shapeLayer);
+            }
+            // Topmost is the closed mouth, so the newest solid must be last.
+            shapeLayers.sort(function (first, second) { return first.index - second.index; });
+            attempt("wire six mouth layers to the rig", function () {
+                var built = buildMouthSwitch(comp, rigLayer, shapeLayers);
+                if (built.count !== 6) { throw new Error("wired " + built.count + " layers"); }
+            });
+            var wiredOk = true;
+            for (s = 0; s < shapeLayers.length; s += 1) {
+                var wiredOpacity = opacityProperty(shapeLayers[s]);
+                if (!findNamedEffect(shapeLayers[s], "IC Rig Target")) { wiredOk = false; }
+                if (!wiredOpacity || !wiredOpacity.expressionEnabled) { wiredOk = false; }
+            }
+            check(wiredOk, "every mouth layer got a pointer and a live expression");
+
+            // Evaluate it. Pick a moment the rig is actually speaking and read
+            // the shape it asks for; exactly that layer must be visible.
+            var probeTime = -1;
+            mouthSlider = findNamedEffect(rigLayer, "IC Mouth").property(1);
+            for (s = 1; s <= mouthSlider.numKeys; s += 1) {
+                if (mouthSlider.keyValue(s) > 0 && probeTime < 0) {
+                    probeTime = mouthSlider.keyTime(s) + 0.001;
+                }
+            }
+            check(probeTime >= 0, "the rig opens the mouth somewhere");
+            if (probeTime >= 0) {
+                var wanted = Math.round(mouthSlider.valueAtTime(probeTime, false));
+                var visible = [];
+                for (s = 0; s < shapeLayers.length; s += 1) {
+                    var lit = opacityProperty(shapeLayers[s]);
+                    if (lit && lit.valueAtTime(probeTime, false) > 50) { visible.push(s); }
+                }
+                check(visible.length === 1 && visible[0] === wanted,
+                    "at " + probeTime.toFixed(3) + "s the rig asks for shape " + wanted +
+                    " and layers [" + visible.join(",") + "] are visible");
+            }
+
+            // Removing a line must leave the rig describing what is left.
+            attempt("remove one line from the rig", function () {
+                removeFromLayer(comp, members[2]);
+                rebuildSharedRig(comp, rigLayer, null);
+            });
+            check(!findNamedEffect(members[2], "IC Rig Target"),
+                "the removed line no longer points at the rig");
+            check(rigMembers(comp, rigLayer).length === 2,
+                "the rig is down to two members, has " + rigMembers(comp, rigLayer).length);
+
+            // And removing the rig must reach everything that pointed at it,
+            // rather than leaving six expressions hunting for a mouth shape.
+            attempt("remove the rig itself", function () { removeRigLayer(comp, rigLayer); });
+            check(rigLayers(comp).length === 0, "the rig layer is gone");
+            var orphaned = false;
+            for (s = 0; s < shapeLayers.length; s += 1) {
+                var leftOver = opacityProperty(shapeLayers[s]);
+                if (findNamedEffect(shapeLayers[s], "IC Rig Target")) { orphaned = true; }
+                if (leftOver && leftOver.expressionEnabled) { orphaned = true; }
+            }
+            check(!orphaned, "no mouth layer was left pointing at a rig that no longer exists");
+            var boundLeft = false;
+            for (s = 0; s < 2; s += 1) {
+                if (findNamedEffect(members[s], "IC Rig Target")) { boundLeft = true; }
+            }
+            check(!boundLeft, "no line was left pointing at a rig that no longer exists");
+        }
+
+        /*
+         * --- 12. importing a script ------------------------------------------
+         *
+         * One line per layer, laid end to end. What needs a host is the
+         * sequencing itself: the gap between two lines is only correct if the
+         * engine's plan reached the layer's out point, and a composition too
+         * short to hold the script silently squashes every line past its end.
+         */
+        // Three seconds, which three lines and two gaps do not fit into. The
+        // blank line in the script must be skipped rather than become a layer.
+        var importComp = app.project.items.addComp("IC Import", 320, 180, 1, 3, 30);
+        importComp.openInViewer();
+        var importOptions = { markers: true, fitDuration: false, controllers: true,
+            typeOn: false, typeOnCenter: false, rigShared: false, rigCharacter: "",
+            speakers: false };
+        var importGap = 1;
+        var importBpm = 120;
+        var importBeat = 60.0 / importBpm;
+        var script = "第一句話。\n\n第二句話。\n第三句話。";
+        var report = null;
+        attempt("import a four-line script into a three-second composition", function () {
+            report = importScript(script, settings, importOptions, importGap, importBpm);
+            if (report.count !== 3) { throw new Error("made " + report.count + " layers, expected 3"); }
+            if (report.split !== 0) { throw new Error("split a line that fits"); }
+        });
+        var placed = [];
+        for (s = 1; s <= importComp.numLayers; s += 1) {
+            if (isTextLayer(importComp.layer(s)) && findNativeEffect(importComp.layer(s))) {
+                placed.push(importComp.layer(s));
+            }
+        }
+        placed.sort(function (first, second) { return first.inPoint - second.inPoint; });
+        check(placed.length === 3, "three layers were created and all three speak");
+        if (placed.length === 3) {
+            // The gap is a minimum, not a distance: the next line waits at
+            // least one beat and then starts on the next beat after that, so
+            // the real gap is somewhere in [1, 2) beats.
+            var spacingOk = true;
+            var gridOk = true;
+            for (s = 0; s < placed.length; s += 1) {
+                var beats = placed[s].inPoint / importBeat;
+                if (Math.abs(beats - Math.round(beats)) > 0.01) {
+                    gridOk = false;
+                    log("    line " + (s + 1) + " starts at " + beats.toFixed(3) + " beats");
+                }
+                if (s === 0) { continue; }
+                var actualGap = placed[s].inPoint - placed[s - 1].outPoint;
+                if (actualGap < importGap * importBeat - 0.02 ||
+                    actualGap >= (importGap + 1) * importBeat + 0.02) {
+                    spacingOk = false;
+                    log("    gap " + s + ": " + actualGap.toFixed(3) + "s, expected between " +
+                        (importGap * importBeat) + " and " + ((importGap + 1) * importBeat));
+                }
+            }
+            check(gridOk, "every line starts on a beat at " + importBpm + " BPM");
+            check(spacingOk, "each line waits at least the gap and then starts on a beat");
+            // Fit Duration was unticked; sequencing has to override that or
+            // every line would keep the default two seconds and drift apart.
+            var lengthOk = true;
+            for (s = 0; s < placed.length; s += 1) {
+                var linePlan = planFromEngine(findNativeEffect(placed[s]));
+                if (Math.abs((placed[s].outPoint - placed[s].inPoint) - linePlan.duration) > 0.05) {
+                    lengthOk = false;
+                }
+            }
+            check(lengthOk, "every line is exactly as long as the engine says it is");
+            // The script is longer than the three seconds the comp was built with.
+            check(importComp.duration > 3,
+                "the composition grew to hold the script (" + importComp.duration.toFixed(2) + "s)");
+            check(Math.abs(importComp.duration - placed[2].outPoint) < 0.05,
+                "and grew to exactly what the script needs, not to the working headroom");
+        }
+
+        // A line too long for the transport becomes as many layers as it needs,
+        // rather than being cut off at the limit the way a typed layer is.
+        var longScript = "";
+        for (s = 0; s < 90; s += 1) { longScript += "島民"; }
+        var longReport = null;
+        attempt("import one line of 180 characters", function () {
+            longReport = importScript(longScript, settings, importOptions, importGap, importBpm);
+        });
+        check(longReport && longReport.count > 1,
+            "the over-long line became " + (longReport ? longReport.count : 0) + " layers");
+        check(longReport && longReport.split > 0, "the split was reported back to the panel");
+        var nothingLost = "";
+        var longLayers = [];
+        for (s = 1; s <= importComp.numLayers; s += 1) {
+            var candidate = importComp.layer(s);
+            if (isTextLayer(candidate) && findNativeEffect(candidate) &&
+                String(textFromLayer(candidate)).indexOf("島民") === 0) {
+                longLayers.push(candidate);
+            }
+        }
+        longLayers.sort(function (first, second) { return first.inPoint - second.inPoint; });
+        var withinLimit = true;
+        for (s = 0; s < longLayers.length; s += 1) {
+            var carried = textFromLayer(longLayers[s]);
+            nothingLost += carried;
+            if (carried.length > MAX_TEXT_UNITS) { withinLimit = false; }
+            // The effect must be speaking the whole layer, not a truncated part
+            // of it: that is the difference between splitting and truncating.
+            if (Math.round(findNativeEffect(longLayers[s]).property(PARAM_TEXT_LENGTH).value) !==
+                carried.length) { withinLimit = false; }
+        }
+        check(withinLimit, "every piece fits the transport and is spoken in full");
+        check(nothingLost === longScript,
+            "the whole line survived the split (" + nothingLost.length + " of " +
+            longScript.length + " characters)");
+
+        // Import into a shared rig: one rig, every line a member, one rebuild.
+        var importRigOptions = { markers: true, fitDuration: false, controllers: true,
+            typeOn: false, typeOnCenter: false, rigShared: true, rigCharacter: "Captain",
+            speakers: false };
+        attempt("import three lines straight into a shared rig", function () {
+            importScript("早安。\n午安。\n晚安。", settings, importRigOptions, importGap, importBpm);
+        });
+        var importedRig = findRigLayer(importComp, "Captain");
+        check(importedRig !== null, "the character's rig was created by the import");
+        if (importedRig && findNamedEffect(importedRig, "IC Line")) {
+            check(rigMembers(importComp, importedRig).length === 3,
+                "all three imported lines joined the rig, got " +
+                rigMembers(importComp, importedRig).length);
+            // Counting keys would be the wrong question: the first line starts
+            // at the rig's own in point, so its opening key lands on top of the
+            // resting one and the total is a key short of the arithmetic. What
+            // proves the merge saw all three lines is that it numbered them.
+            var importedLine = findNamedEffect(importedRig, "IC Line").property(1);
+            var importedHighest = 0;
+            for (s = 1; s <= importedLine.numKeys; s += 1) {
+                if (importedLine.keyValue(s) > importedHighest) {
+                    importedHighest = importedLine.keyValue(s);
+                }
+            }
+            check(importedHighest === 3,
+                "the rig was merged from all three lines in one pass, numbered to " + importedHighest);
+        }
+        /*
+         * --- 13. the edit cycle ----------------------------------------------
+         *
+         * Import lays a scene out once. Everything after that is editing: a line
+         * gets longer, a line is deleted, and every line after it has to move.
+         * Re-sync makes a layer match its own text without touching its voice;
+         * Re-flow puts the scene back in order. What needs a host is that the
+         * two together really do land every line on the beat grid, and that a
+         * layer's voice really is left alone.
+         */
+        var editComp = app.project.items.addComp("IC Edit", 320, 180, 1, 4, 30);
+        editComp.openInViewer();
+        var editOptions = { markers: true, fitDuration: false, controllers: true,
+            typeOn: false, typeOnCenter: false, rigShared: false, rigCharacter: "",
+            speakers: true, typeOnLeave: 0.1, typeOnSmoothness: 40 };
+        var editBpm = 137;
+        var editGap = 2;
+        attempt("import a two-character script with speaker names", function () {
+            var cast = importScript("咪咪：早安。\n隊長：你也早。\n咪咪：今天天氣真好。",
+                settings, editOptions, editGap, editBpm);
+            if (cast.count !== 3) { throw new Error("made " + cast.count + " layers"); }
+            if (cast.cast.length !== 2) { throw new Error("found " + cast.cast.length + " characters"); }
+        });
+        check(findRigLayer(editComp, "咪咪") !== null, "the first speaker got a rig");
+        check(findRigLayer(editComp, "隊長") !== null, "the second speaker got a rig");
+        var mimi = findRigLayer(editComp, "咪咪");
+        if (mimi) {
+            check(rigMembers(editComp, mimi).length === 2,
+                "two of the three lines belong to the first speaker, got " +
+                rigMembers(editComp, mimi).length);
+        }
+        var dialogue = [];
+        for (s = 1; s <= editComp.numLayers; s += 1) {
+            if (isTextLayer(editComp.layer(s)) && findNativeEffect(editComp.layer(s))) {
+                dialogue.push(editComp.layer(s));
+            }
+        }
+        dialogue.sort(function (first, second) { return first.inPoint - second.inPoint; });
+        check(dialogue.length === 3, "three lines were created");
+        // The name must not be spoken. If the prefix were left in, the effect
+        // would be carrying three more characters than the line has.
+        if (dialogue.length === 3) {
+            check(String(textFromLayer(dialogue[0])) === "早安。",
+                "the speaker's name was taken out of the line, got \"" +
+                textFromLayer(dialogue[0]) + "\"");
+        }
+        var editBeat = 60.0 / editBpm;
+        var onGrid = true;
+        for (s = 0; s < dialogue.length; s += 1) {
+            var beats = dialogue[s].inPoint / editBeat;
+            if (Math.abs(beats - Math.round(beats)) > 0.01) {
+                onGrid = false;
+                log("    line " + (s + 1) + " starts at " + beats.toFixed(3) + " beats");
+            }
+        }
+        check(onGrid, "every line starts on a beat at " + editBpm + " BPM");
+
+        // Re-sync must not touch the voice. Give one line a voice nothing else
+        // has, then edit its text and check the voice survived.
+        if (dialogue.length === 3) {
+            var odd = dialogue[1];
+            var oddSettings = { voice: 6, pitch: 1.73, speed: 0.61, volume: 1.31,
+                consonant: 3.02, emotion: 2, characterSize: 3, clarity: 0.29,
+                cuteness: 0.91, seed: 24601, tempoLock: false, formant: 1.84,
+                source: 4, vibrato: 2.7, vibratoRate: 14.5 };
+            attempt("give one line a distinctive voice", function () {
+                applyToTextLayer(editComp, odd, "", oddSettings, editOptions, null);
+            });
+            odd.property("ADBE Text Properties").property("ADBE Text Document")
+                .setValue(new TextDocument("你也早，今天真的很不錯喔。"));
+            var beforeSync = settingsFromEffect(findNativeEffect(odd));
+            var syncReport = null;
+            attempt("re-sync after editing that line's text", function () {
+                syncReport = resyncSelection(editComp, [odd], editOptions);
+            });
+            check(syncReport && syncReport.count === 1, "the line was re-synced");
+            var afterSync = settingsFromEffect(findNativeEffect(odd));
+            var voiceHeld = true;
+            var field;
+            for (field in beforeSync) {
+                if (!beforeSync.hasOwnProperty(field)) { continue; }
+                if (String(beforeSync[field]) !== String(afterSync[field])) {
+                    voiceHeld = false;
+                    log("    " + field + ": " + beforeSync[field] + " -> " + afterSync[field]);
+                }
+            }
+            // The panel is holding completely different settings, and this is
+            // what Apply would have written over the line instead.
+            check(voiceHeld, "re-sync left every voice setting exactly as it was");
+            check(Math.round(findNativeEffect(odd).property(PARAM_TEXT_LENGTH).value) ===
+                String(textFromLayer(odd)).length,
+                "re-sync wrote the new text into the effect");
+            var syncedPlan = planFromEngine(findNativeEffect(odd));
+            check(Math.abs((odd.outPoint - odd.inPoint) - syncedPlan.duration) < 0.05,
+                "re-sync refitted the layer to the longer line");
+            // The line is now longer, so it runs into the one after it until the
+            // scene is laid out again.
+            var reflowReport = null;
+            attempt("re-flow the scene", function () {
+                reflowReport = reflowLayers(editComp, dialogue, editGap, editBpm);
+            });
+            check(reflowReport && reflowReport.count === 3, "all three lines were laid out again");
+            var stillOnGrid = true;
+            var noOverlap = true;
+            dialogue.sort(function (first, second) { return first.inPoint - second.inPoint; });
+            for (s = 0; s < dialogue.length; s += 1) {
+                var at = dialogue[s].inPoint / editBeat;
+                if (Math.abs(at - Math.round(at)) > 0.01) { stillOnGrid = false; }
+                if (s > 0 && dialogue[s].inPoint < dialogue[s - 1].outPoint - 0.001) {
+                    noOverlap = false;
+                }
+            }
+            check(stillOnGrid, "every line is still on a beat after the re-flow");
+            check(noOverlap, "no line runs into the next one any more");
+            // Twice must be the same as once, or every press walks the scene
+            // one beat further along.
+            var wherePut = [];
+            for (s = 0; s < dialogue.length; s += 1) { wherePut.push(dialogue[s].inPoint); }
+            attempt("re-flow again", function () {
+                reflowLayers(editComp, dialogue, editGap, editBpm);
+            });
+            var stable = true;
+            for (s = 0; s < dialogue.length; s += 1) {
+                if (Math.abs(dialogue[s].inPoint - wherePut[s]) > 0.001) {
+                    stable = false;
+                    log("    line " + (s + 1) + ": " + wherePut[s].toFixed(4) + " -> " +
+                        dialogue[s].inPoint.toFixed(4));
+                }
+            }
+            check(stable, "re-flowing an already tidy scene moves nothing");
+
+            // A fractional gap has to reach a finer grid than a whole beat, or
+            // the number may as well be an integer. Half a beat at 137 BPM is
+            // 0.2190s, and at least one line has to land somewhere a whole-beat
+            // grid could never put it.
+            attempt("re-flow at half a beat", function () {
+                reflowLayers(editComp, dialogue, 0.5, editBpm);
+            });
+            dialogue.sort(function (first, second) { return first.inPoint - second.inPoint; });
+            var halfBeat = editBeat / 2;
+            var offTheBeat = 0;
+            var onHalves = true;
+            for (s = 0; s < dialogue.length; s += 1) {
+                var halves = dialogue[s].inPoint / halfBeat;
+                if (Math.abs(halves - Math.round(halves)) > 0.01) { onHalves = false; }
+                var whole = dialogue[s].inPoint / editBeat;
+                if (Math.abs(whole - Math.round(whole)) > 0.01) { offTheBeat += 1; }
+            }
+            check(onHalves, "every line sits on a half-beat after a half-beat re-flow");
+            check(offTheBeat > 0,
+                "at least one line landed between two beats, which a whole-beat grid cannot do");
+        }
+        try { editComp.remove(); } catch (editCleanup) { log("edit cleanup: " + editCleanup.toString()); }
+
+        // --- 12. singing --------------------------------------------------------
+        //
+        // The melody crosses into the effect as sixty-four appended parameters,
+        // so this is the ABI round trip no unit test can see. It also covers the
+        // two things a sung line must not do: report its segments as syllables,
+        // and lose its tune to an ordinary Apply.
+        log("");
+        var singComp = app.project.items.addComp("IC Sing", 640, 360, 1, 30, 30);
+        singComp.openInViewer();
+        var singLayer = singComp.layers.addText("一閃一閃");
+        // Four notes at 120 BPM: three of one beat and one of two, so the last
+        // one is long enough that the engine has to split it into segments.
+        var SING_BPM = 120;
+        var singMelody = [60 * 512 + 24, 62 * 512 + 24, 64 * 512 + 24, 65 * 512 + 48];
+        var singSettings = {
+            voice: 0, pitch: 1.0, speed: 1.0, volume: 0.78, consonant: 1.25,
+            emotion: 0, characterSize: 2, clarity: 0.78, cuteness: 0.55, seed: 909,
+            tempoLock: false, formant: 1.0, source: 0, vibrato: 1.0, vibratoRate: 9.2,
+            transpose: 0, toneBlend: 0.15, portamento: 0.040, vibratoDelay: 0.30,
+            melody: singMelody, melodyBpm: SING_BPM
+        };
+        var sungPlan = null;
+        attempt("apply a melody to a text layer", function () {
+            sungPlan = applyToTextLayer(singComp, singLayer, "", singSettings,
+                { markers: true, fitDuration: true, controllers: false, typeOn: false },
+                null).plan;
+        });
+        var singEffect = findNativeEffect(singLayer);
+        check(singEffect !== null, "the native effect is on the sung layer");
+        if (singEffect) {
+            check(singEffect.numProperties === 215,
+                "the effect registers 215 parameters (got " + singEffect.numProperties + ")");
+            var readMelody = melodyFromEffect(singEffect);
+            var sameMelody = readMelody.length === singMelody.length;
+            var m;
+            for (m = 0; m < singMelody.length && sameMelody; m += 1) {
+                if (readMelody[m] !== singMelody[m]) { sameMelody = false; }
+            }
+            check(sameMelody, "the melody round-trips through the parameter transport");
+            var readSung = settingsFromEffect(singEffect);
+            check(Math.abs(readSung.melodyBpm - SING_BPM) < 0.01, "the melody tempo round-trips");
+            check(Math.abs(readSung.toneBlend - 0.15) < 0.002, "the tone blend round-trips");
+        }
+        if (sungPlan) {
+            // Four syllables, however many segments the two-beat note needed.
+            check(sungPlan.events.length === 4,
+                "a sung line plans one event per syllable (got " + sungPlan.events.length + ")");
+            // Three beats plus a two-beat note is 2.5s at 120 BPM, and the
+            // engine adds a short tail after the last note.
+            check(sungPlan.duration > 2.5 && sungPlan.duration < 2.8,
+                "the plan lasts as long as the melody (" + sungPlan.duration.toFixed(3) + "s)");
+            var firstGap = sungPlan.events[1].time - sungPlan.events[0].time;
+            check(Math.abs(firstGap - 0.5) < 0.002,
+                "one beat at 120 BPM is half a second (" + firstGap.toFixed(4) + "s)");
+            check(Math.abs(sungPlan.events[3].duration - 1.0) < 0.01,
+                "the two-beat note lasts a second (" + sungPlan.events[3].duration.toFixed(4) + "s)");
+        }
+        var sungMarkers = singLayer.property("ADBE Marker");
+        check(sungMarkers.numKeys === 4,
+            "a held note produces one marker, not one per segment (got " + sungMarkers.numKeys + ")");
+        check(Math.abs((singLayer.outPoint - singLayer.inPoint) - sungPlan.duration) < 0.05,
+            "Fit Duration followed the melody");
+
+        // An ordinary Apply carries no melody, and must leave the layer singing.
+        // Repainting a voice is what Apply is for; silently turning a song back
+        // into speech is not.
+        var plainSettings = {};
+        var key;
+        for (key in singSettings) {
+            if (singSettings.hasOwnProperty(key) && key !== "melody" && key !== "melodyBpm") {
+                plainSettings[key] = singSettings[key];
+            }
+        }
+        attempt("apply again with no melody in hand", function () {
+            applyToTextLayer(singComp, singLayer, "", plainSettings,
+                { markers: true, fitDuration: true, controllers: false, typeOn: false }, null);
+        });
+        singEffect = findNativeEffect(singLayer);
+        check(singEffect && melodyFromEffect(singEffect).length === 4,
+            "Apply left the melody alone");
+
+        // Re-sync reads the layer's own settings back, so it has to keep the
+        // tune across a text edit.
+        singLayer.property("ADBE Text Properties").property("ADBE Text Document")
+            .setValue(new TextDocument("一閃一閃亮"));
+        attempt("re-sync an edited sung line", function () {
+            resyncLayer(singComp, singLayer, { typeOnLeave: 33, typeOnSmoothness: 20 });
+        });
+        singEffect = findNativeEffect(singLayer);
+        check(singEffect && melodyFromEffect(singEffect).length === 4,
+            "Re-sync kept the melody");
+        // --- 13. importing a MIDI file end to end -------------------------------
+        //
+        // Everything above hands the melody straight to applyToTextLayer(). This
+        // is the other half: the engine reads a real file, the panel reads the
+        // engine, and lines land at the times the file says. The file is written
+        // here rather than checked in, so the repository still ships no binaries
+        // it does not build.
+        log("");
+        var midiFile = new File(Folder.temp.fsName + "/island-chatter-host-test.mid");
+        var wrote = false;
+        attempt("write a MIDI file to test with", function () {
+            var b = [];
+            function u8(v) { b.push(v & 0xFF); }
+            function u32(v) { u8(v >> 24); u8(v >> 16); u8(v >> 8); u8(v); }
+            function ascii(s) { var i; for (i = 0; i < s.length; i += 1) { u8(s.charCodeAt(i)); } }
+            function chunk(type, body) {
+                ascii(type); u32(body.length);
+                var i; for (i = 0; i < body.length; i += 1) { b.push(body[i]); }
+            }
+            // Header: format 0, one track, 480 ticks per quarter.
+            ascii("MThd"); u32(6); u8(0); u8(0); u8(0); u8(1); u8(1); u8(0xE0);
+            var track = [];
+            function tu8(v) { track.push(v & 0xFF); }
+            function tvlq(v) {
+                if (v < 128) { tu8(v); return; }
+                tu8(0x80 | ((v >> 7) & 0x7F)); tu8(v & 0x7F);
+            }
+            // 120 BPM, then four one-beat notes back to back.
+            tvlq(0); tu8(0xFF); tu8(0x51); tu8(3); tu8(0x07); tu8(0xA1); tu8(0x20);
+            var pitches = [60, 62, 64, 65];
+            var p;
+            for (p = 0; p < pitches.length; p += 1) {
+                tvlq(0); tu8(0x90); tu8(pitches[p]); tu8(96);
+                tvlq(480); tu8(0x80); tu8(pitches[p]); tu8(0);
+            }
+            tvlq(0); tu8(0xFF); tu8(0x2F); tu8(0x00);
+            chunk("MTrk", track);
+            midiFile.encoding = "BINARY";
+            if (!midiFile.open("w")) { throw new Error("cannot write " + midiFile.fsName); }
+            var text = "";
+            var i;
+            for (i = 0; i < b.length; i += 1) { text += String.fromCharCode(b[i]); }
+            midiFile.write(text);
+            midiFile.close();
+            wrote = true;
+        });
+        if (wrote) {
+            var listed = null;
+            attempt("ask the engine what is in the file", function () {
+                listed = midiTracks(midiFile);
+            });
+            check(listed !== null && listed.tracks.length === 1,
+                "the file has one track");
+            check(listed !== null && listed.tracks[0].notes === 4,
+                "the track has four notes");
+            check(listed !== null && Math.abs(listed.bpm - 120) < 0.5,
+                "the file's tempo came back as 120");
+
+            var songComp = app.project.items.addComp("IC Song", 640, 360, 1, 30, 30);
+            songComp.openInViewer();
+            var imported = null;
+            attempt("import the song", function () {
+                imported = importSong(midiFile, 0, "一閃\n一閃", singSettings,
+                    { markers: true, fitDuration: true, controllers: false, typeOn: false,
+                      rigShared: false, rigCharacter: "" });
+            });
+            if (imported) {
+                check(imported.count === 2, "two lyric lines became two layers");
+                check(imported.extraNotes === 0 && imported.extraSyllables === 0,
+                    "the lyric and the melody matched exactly");
+                var sungLayers = [];
+                var q;
+                for (q = 1; q <= songComp.numLayers; q += 1) {
+                    if (findNativeEffect(songComp.layer(q))) { sungLayers.push(songComp.layer(q)); }
+                }
+                sungLayers.sort(function (a, b) { return a.startTime - b.startTime; });
+                check(sungLayers.length === 2, "both layers carry the effect");
+                if (sungLayers.length === 2) {
+                    // The second line's first note is two beats in: one second
+                    // at 120 BPM. This is what "a song lands at its own times"
+                    // means, and it is the reason Import MIDI ignores the gap.
+                    var apart = sungLayers[1].startTime - sungLayers[0].startTime;
+                    check(Math.abs(apart - 1.0) < 0.01,
+                        "the second line starts at its own first note (" + apart.toFixed(4) + "s)");
+                    check(melodyFromEffect(findNativeEffect(sungLayers[0])).length === 2,
+                        "each line carries its own two notes");
+                }
+            }
+            // With no lyric at all the melody sings its own note names, and
+            // they arrive as the layer's real Source Text — which is why this
+            // needed no new effect parameters.
+            var namedComp = app.project.items.addComp("IC Note Names", 640, 360, 1, 30, 30);
+            namedComp.openInViewer();
+            var namedImport = null;
+            attempt("import with no lyric at all", function () {
+                namedImport = importSong(midiFile, 0, "", singSettings,
+                    { markers: true, fitDuration: true, controllers: false, typeOn: false,
+                      rigShared: false, rigCharacter: "" }, 0);
+            });
+            if (namedImport) {
+                var namedLayer = null;
+                var z;
+                for (z = 1; z <= namedComp.numLayers; z += 1) {
+                    if (findNativeEffect(namedComp.layer(z))) { namedLayer = namedComp.layer(z); }
+                }
+                check(namedLayer !== null, "the note-name layer carries the effect");
+                if (namedLayer) {
+                    var namedText = namedLayer.property("ADBE Text Properties")
+                        .property("ADBE Text Document").value.text;
+                    check(namedText === "do re mi fa",
+                        "the layer says its note names (got \"" + namedText + "\")");
+                    check(melodyFromEffect(findNativeEffect(namedLayer)).length === 4,
+                        "the note-name layer carries all four notes");
+                    check(namedLayer.property("ADBE Marker").numKeys === 4,
+                        "one marker per note name");
+                }
+            }
+            try { namedComp.remove(); } catch (namedCleanup) { log("named cleanup: " + namedCleanup.toString()); }
+            try { songComp.remove(); } catch (songCleanup) { log("song cleanup: " + songCleanup.toString()); }
+            try { midiFile.remove(); } catch (fileCleanup) { log("midi cleanup: " + fileCleanup.toString()); }
+        }
+        try { singComp.remove(); } catch (singCleanup) { log("sing cleanup: " + singCleanup.toString()); }
+
+        try { importComp.remove(); } catch (importCleanup) { log("import cleanup: " + importCleanup.toString()); }
+        comp.openInViewer();
 
         log("");
         log("checks: " + checks + "   failures: " + failures);

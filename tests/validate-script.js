@@ -182,13 +182,72 @@ const extendScriptFiles = [
     .filter((name) => name.endsWith(".jsx"))
     .map((name) => path.join(root, "native", "tests", name)),
 ];
+
+/*
+ * Blank out comments, strings and regex literals in one pass.
+ *
+ * The obvious version is four chained replaces, and it was wrong for two
+ * releases without anyone noticing. The panel writes a generated expression
+ * containing the literal "// Island Chatter mouth switch"; stripping line
+ * comments first ate that string's closing quote, every quote after it paired
+ * up one out of step, and most of the file was blanked before the search ever
+ * ran. The reserved-word check below silently stopped checking anything past
+ * the middle of the panel — which is how `var byte` reached After Effects.
+ *
+ * A single left-to-right scan cannot get out of step, because it only ever
+ * leaves a construct through the delimiter it entered on. Regex literals are
+ * included because bakeFileName() matches a quote inside one.
+ */
+function stripLiterals(source) {
+  let out = "";
+  let index = 0;
+  // Whether a / here begins a regex literal or is a division sign. The usual
+  // heuristic: after a value it divides, after an operator it opens a regex.
+  let previous = "";
+  while (index < source.length) {
+    const here = source[index];
+    const next = source[index + 1];
+    if (here === "/" && next === "/") {
+      while (index < source.length && source[index] !== "\n") { index += 1; }
+      out += " ";
+    } else if (here === "/" && next === "*") {
+      const close = source.indexOf("*/", index + 2);
+      index = close < 0 ? source.length : close + 2;
+      out += " ";
+    } else if (here === '"' || here === "'") {
+      index += 1;
+      while (index < source.length && source[index] !== here) {
+        index += source[index] === "\\" ? 2 : 1;
+      }
+      index += 1;
+      out += here + here;
+      previous = "x";
+    } else if (here === "/" && /[(,=:[!&|?{};+\-*%~^<>]|^$/.test(previous)) {
+      index += 1;
+      let inClass = false;
+      while (index < source.length) {
+        const letter = source[index];
+        if (letter === "\\") { index += 2; continue; }
+        if (letter === "[") { inClass = true; }
+        else if (letter === "]") { inClass = false; }
+        else if (letter === "/" && !inClass) { break; }
+        else if (letter === "\n") { break; }
+        index += 1;
+      }
+      index += 1;
+      out += "/x/";
+      previous = "x";
+    } else {
+      out += here;
+      if (!/\s/.test(here)) { previous = here; }
+      index += 1;
+    }
+  }
+  return out;
+}
+
 for (const filePath of extendScriptFiles) {
-  // Strip comments and string literals so prose and messages do not trip this.
-  const code = fs.readFileSync(filePath, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\/\/[^\n]*/g, " ")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  const code = stripLiterals(fs.readFileSync(filePath, "utf8"));
   for (const word of es3ReservedWords) {
     const declared = new RegExp(`\\b(?:var|function)\\s+${word}\\b`);
     const assigned = new RegExp(`[,(]\\s*${word}\\s*(?:=[^=]|[,)])`);
@@ -204,11 +263,19 @@ for (const filePath of extendScriptFiles) {
 // The parameter ABI is split across three files. Keep them in lockstep.
 const paramsHeader = fs.readFileSync(
   path.join(root, "native", "plugin", "params.hpp"), "utf8");
-if (!/static_assert\(kParamCount == 145/.test(paramsHeader)) {
+if (!/static_assert\(kParamCount == 215/.test(paramsHeader)) {
   throw new Error("params.hpp no longer asserts the published parameter count");
 }
-if (!/static_assert\(kParamSeed == 75/.test(paramsHeader)) {
-  throw new Error("params.hpp must pin the published indices so appends cannot shift them");
+for (const pinned of [
+  /static_assert\(kParamSeed == 75/,
+  /static_assert\(kParamTempoLock == 76/,
+  /static_assert\(kParamTextSecondFirst == 81/,
+  /static_assert\(kParamMelodyLength == 145/,
+  /static_assert\(kParamMelodyFirst == 151/,
+]) {
+  if (!pinned.test(paramsHeader)) {
+    throw new Error("params.hpp must pin the published indices so appends cannot shift them");
+  }
 }
 for (const [constant, index] of [
   ["PARAM_VOICE", 1], ["PARAM_PITCH", 2], ["PARAM_SPEED", 3], ["PARAM_VOLUME", 4],
@@ -217,14 +284,30 @@ for (const [constant, index] of [
   ["PARAM_CUTENESS", 74], ["PARAM_SEED", 75], ["PARAM_TEMPO_LOCK", 76],
   ["PARAM_FORMANT", 77], ["PARAM_SOURCE", 78], ["PARAM_VIBRATO", 79],
   ["PARAM_VIBRATO_RATE", 80],
+  // The melody transport, appended in 1.7.0.
+  ["PARAM_MELODY_LENGTH", 145], ["PARAM_MELODY_BPM", 146],
+  ["PARAM_MELODY_TRANSPOSE", 147], ["PARAM_TONE_BLEND", 148],
+  ["PARAM_PORTAMENTO", 149], ["PARAM_VIBRATO_DELAY", 150],
+  ["PARAM_MELODY_FIRST", 151],
 ]) {
   if (!new RegExp(`var ${constant} = ${index};`).test(nativePanelSource)) {
     throw new Error(`Panel ${constant} must stay at published index ${index}`);
   }
-  // Index 7 opens the 64 text-unit block, which the plug-in registers in a loop.
-  const registered = index === 7
-    ? /PF_ADD_SLIDER\("Text code unit"[^;]*?static_cast<A_long>\(7 \+ index\)\);/s
-    : new RegExp(`PF_ADD_[A-Z_]+\\([^;]*?[ ,]${index}\\);`, "s");
+  // Most ids are written out at the call. The two transports are registered in
+  // a loop, and the melody's own controls go through the enum, so each of those
+  // is matched by the name the plug-in actually uses. Matching "any kParam"
+  // would let one of them register twice and the other not at all.
+  const named = {
+    7: /PF_ADD_SLIDER\("Text code unit"[^;]*?static_cast<A_long>\(7 \+ index\)\);/s,
+    145: /PF_ADD_SLIDER\("Melody length"[^;]*?ae::kParamMelodyLength\);/s,
+    146: /PF_ADD_FLOAT_SLIDERX\("Melody BPM[^;]*?ae::kParamMelodyBpm\);/s,
+    147: /PF_ADD_SLIDER\("Transpose[^;]*?ae::kParamMelodyTranspose\);/s,
+    148: /PF_ADD_FLOAT_SLIDERX\("Tone Blend[^;]*?ae::kParamToneBlend\);/s,
+    149: /PF_ADD_FLOAT_SLIDERX\("Portamento[^;]*?ae::kParamPortamento\);/s,
+    150: /PF_ADD_FLOAT_SLIDERX\("Vibrato Delay[^;]*?ae::kParamVibratoDelay\);/s,
+    151: /PF_ADD_SLIDER\("Melody note"[^;]*?ae::kParamMelodyFirst \+ index\)\);/s,
+  }[index];
+  const registered = named || new RegExp(`PF_ADD_[A-Z_]+\\([^;]*?[ ,]${index}\\);`, "s");
   if (!registered.test(nativePluginSource)) {
     throw new Error(`Native plug-in does not register a parameter with id ${index}`);
   }
@@ -263,6 +346,55 @@ if (/PARAM_TEXT_FIRST \+ index\)/.test(
       throw new Error(
         `A text-unit loop is bounded by ${loop[1]}; each block registers kTextUnitsPerBlock`);
     }
+  }
+  // The melody transport is one loop of kMelodySlots, and it has the same
+  // failure mode: a wrong bound walks its ids past num_params and After Effects
+  // refuses the whole effect with "parameter count mismatch".
+  const melodyLoops = [...nativePluginSource.matchAll(
+    /for \(std::size_t index = 0; index < island_chatter::ae::(\w+); \+\+index\) \{[\s\S]{0,400}?PF_ADD_SLIDER\("Melody note"/g)];
+  if (melodyLoops.length !== 1) {
+    throw new Error(`Expected one melody registration loop, found ${melodyLoops.length}`);
+  }
+  if (melodyLoops[0][1] !== "kMelodySlots") {
+    throw new Error(
+      `The melody loop is bounded by ${melodyLoops[0][1]}; it registers kMelodySlots`);
+  }
+}
+
+// The melody transport size is written down in three places and all three have
+// to agree, or the plug-in reads notes the panel never wrote.
+{
+  const dspHeader = fs.readFileSync(
+    path.join(root, "native", "include", "island_chatter", "dsp.hpp"), "utf8");
+  if (!/kMelodySlots = 64;/.test(paramsHeader) ||
+      !/kMelodySlots = 64;/.test(dspHeader) ||
+      !/var MELODY_SLOTS = 64;/.test(nativePanelSource)) {
+    throw new Error("The melody transport size is not synchronized");
+  }
+  // pitch * 512 + ticks is what makes a note fit one 0-65535 slider. If the
+  // stride and the tick ceiling ever disagree, notes silently collide.
+  if (!/kMelodySlotStride = 512;/.test(dspHeader) ||
+      !/kMelodyMaxTicks = 511;/.test(dspHeader) ||
+      !/var MELODY_SLOT_STRIDE = 512;/.test(nativePanelSource)) {
+    throw new Error("The melody slot encoding is not synchronized");
+  }
+}
+
+// Reading or writing a melody slot must go through the one helper that knows
+// where the block starts, for the same reason text units do.
+if (/PARAM_MELODY_FIRST \+ index\)/.test(
+  nativePanelSource.replace(/function melodySlotProperty[\s\S]*?\n    \}/, ""))) {
+  throw new Error("The panel indexes melody slots without going through melodySlotProperty()");
+}
+
+// The panel must not parse MIDI itself, for the same reason it must not plan
+// its own timings: ExtendScript is ES3, a binary parser written there cannot be
+// tested, and two implementations of the same format drift apart. The engine
+// reads the file and the panel reads the engine's answer.
+for (const symbol of ["MThd", "MTrk", "0x2F", "runningStatus", "variableLength",
+  "ticksPerQuarter", "readVlq"]) {
+  if (nativePanelSource.includes(symbol)) {
+    throw new Error(`The panel appears to parse MIDI itself (${symbol}); ask the engine instead`);
   }
 }
 
@@ -348,8 +480,76 @@ vm.runInContext([
   takeVariable("SYLLABLE_STRIDE"),
   takeVariable("ENGINE_SAMPLE_RATE"),
   ...["clamp", "mouthForReading", "readingTone", "characterFromCode", "trim",
-    "parseEnginePlan", "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo"].map(takeFunction),
+    "parseEnginePlan", "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo",
+    "utf8FromHex", "parseTrackList", "parseSong"].map(takeFunction),
 ].join("\n"), planner);
+
+// --- Reading what the engine says about a MIDI file -------------------------
+//
+// The panel never opens the file itself, so these two parsers are the whole of
+// its MIDI knowledge. Both check the END count on the way in, because
+// callSystem() reports no exit status: a tool that died halfway would otherwise
+// read as a file with fewer tracks, or a song with fewer lines, and the import
+// would quietly build half a scene.
+{
+  const tracks = vm.runInContext(`parseTrackList(${JSON.stringify(
+    "TRACKS 1\nBPM 96\nT 0 0 -\nT 1 14 4d656c6f6479\nEND 2\n")})`, planner);
+  if (tracks.tracks.length !== 2 || tracks.bpm !== 96) {
+    throw new Error("parseTrackList() did not read the track list");
+  }
+  if (tracks.tracks[1].name !== "Melody" || tracks.tracks[1].notes !== 14) {
+    throw new Error("parseTrackList() did not decode a track name");
+  }
+  if (tracks.tracks[0].name !== "") {
+    throw new Error("parseTrackList() invented a name for an unnamed track");
+  }
+  // A track name has no declared encoding in the format. Anything that is not
+  // UTF-8 has to come back empty so the caller can number the track instead of
+  // showing mojibake.
+  if (vm.runInContext(`utf8FromHex("8081")`, planner) !== "" ||
+      vm.runInContext(`utf8FromHex("e6bc")`, planner) !== "") {
+    throw new Error("utf8FromHex() should decline bytes that are not UTF-8");
+  }
+  if (vm.runInContext(`utf8FromHex("e6bca2")`, planner) !== "漢") {
+    throw new Error("utf8FromHex() did not decode a three-byte character");
+  }
+  let refused = false;
+  try {
+    vm.runInContext(`parseTrackList(${JSON.stringify("TRACKS 1\nT 0 4 -\nEND 9\n")})`, planner);
+  } catch (error) { refused = true; }
+  if (!refused) throw new Error("parseTrackList() accepted a truncated reply");
+
+  const song = vm.runInContext(`parseSong(${JSON.stringify(
+    "SONG 1\nBPM 96\nEXTRA 1 2 3 4\n" +
+    "L 0 0 96 7 7 0\nX 0 19968 38275\nN 0 30742 2 30742\n" +
+    "L 1 5 96 7 7 1\nX 1 28415\nN 1 33302\nEND 2\n")})`, planner);
+  if (song.lines.length !== 2 || song.bpm !== 96) {
+    throw new Error("parseSong() did not read the song");
+  }
+  if (song.extraNotes !== 1 || song.extraSyllables !== 2 || song.dropped !== 3 ||
+      song.split !== 4) {
+    throw new Error("parseSong() dropped the counts the panel reports to the user");
+  }
+  if (song.lines[0].text !== "一閃" || song.lines[0].melody.length !== 3) {
+    throw new Error("parseSong() did not read a line's text and melody");
+  }
+  if (song.lines[1].start !== 5 || song.lines[1].continued !== true) {
+    throw new Error("parseSong() did not read where a line starts or that it continues");
+  }
+  refused = false;
+  try {
+    vm.runInContext(`parseSong(${JSON.stringify(
+      "SONG 1\nBPM 96\nEXTRA 0 0 0 0\nL 0 0 96 1 1 0\nX 0 19968\nN 0 30742\nEND 4\n")})`, planner);
+  } catch (error) { refused = true; }
+  if (!refused) throw new Error("parseSong() accepted a truncated reply");
+  // An EXTRA line from before the split count existed still reads, with the
+  // count it does not carry defaulting to zero rather than to NaN.
+  const older = vm.runInContext(`parseSong(${JSON.stringify(
+    "SONG 1\nBPM 96\nEXTRA 0 0 0\nL 0 0 96 1 1 0\nX 0 19968\nN 0 30742\nEND 1\n")})`, planner);
+  if (older.split !== 0) {
+    throw new Error("parseSong() should read a shorter EXTRA line as no splits");
+  }
+}
 
 // Tempo mode across every emotion and character size. The original version only
 // divided the tempo by the syllable slot and ignored the multiplier the engine
@@ -489,6 +689,594 @@ for (const [label, broken] of [
   }
   if (!threw) throw new Error(`parseEnginePlan accepted ${label}`);
 }
+/*
+ * The animation rig.
+ *
+ * mergeRigTimeline() decides every number a rig carries, for one line and for
+ * twenty, and nothing downstream of it knows anything except how to write a
+ * hold key. So it is the whole mechanism, and it is checked here rather than in
+ * After Effects: the host suite can only see that keys exist, which is the kind
+ * of guard this project has been caught by three times.
+ *
+ * The numbers below are written out rather than recomputed, because a test that
+ * derives them the same way the code does agrees with any bug the code has.
+ */
+vm.runInContext(
+  [takeFunction("tonePitch"), takeFunction("mergeRigTimeline")].join("\n"), planner);
+
+const rigLine = (name, start, count, step) => {
+  const events = [];
+  for (let index = 0; index < count; index += 1) {
+    events.push({
+      mouth: (index % 5) + 1,
+      tone: (index % 4) + 1,
+      time: index * step,
+      duration: step,
+    });
+  }
+  return { name, start, order: 0, plan: { events, duration: count * step } };
+};
+const mergeRig = (lines, baseline) =>
+  vm.runInContext(`mergeRigTimeline(${JSON.stringify(lines)}, ${baseline})`, planner);
+// Floating point: 0.2 * 3 is not 0.6000000000000001 for the purposes of a
+// keyframe time, and neither the host nor a reader cares about the difference.
+const keyTimes = (track) => [...track].map((key) => Number(Number(key.time).toFixed(6)));
+const keyValues = (track) => [...track].map((key) => Number(key.value));
+const sameNumbers = (got, want) =>
+  got.length === want.length && got.every((value, at) => Math.abs(value - want[at]) < 1e-6);
+const pinTrack = (label, track, wantTimes, wantValues) => {
+  if (!sameNumbers(keyTimes(track), wantTimes)) {
+    throw new Error(
+      `rig ${label} keys land at [${keyTimes(track)}], expected [${wantTimes}]`);
+  }
+  if (!sameNumbers(keyValues(track), wantValues)) {
+    throw new Error(
+      `rig ${label} holds [${keyValues(track)}], expected [${wantValues}]`);
+  }
+};
+
+// One line, which is what every project built before the shared rig has. This
+// pins the per-layer rig exactly as 1.3.0 wrote it: reopening an old project
+// and pressing Apply must not move a single key.
+{
+  const one = mergeRig([rigLine("A", 0, 3, 0.2)], 0);
+  if (one.overlaps.length) throw new Error("a single line cannot overlap anything");
+  // Mouth shapes 1, 2, 3 held for 82% of each syllable, closed in between.
+  pinTrack("mouth", one.tracks.mouth,
+    [0, 0, 0.164, 0.2, 0.364, 0.4, 0.564], [0, 1, 0, 2, 0, 3, 0]);
+  // Tones 1, 2, 3 through tonePitch(); 100 is the resting pitch.
+  pinTrack("pitch", one.tracks.pitch,
+    [0, 0, 0.164, 0.2, 0.364, 0.4, 0.564], [100, 110, 100, 92, 100, 78, 100]);
+  pinTrack("volume", one.tracks.volume,
+    [0, 0, 0.164, 0.2, 0.364, 0.4, 0.564], [0, 82, 0, 82, 0, 82, 0]);
+  // The head is thrown the other way on each syllable and settles at 38%.
+  pinTrack("bounce", one.tracks.bounce,
+    [0, 0, 0.076, 0.2, 0.276, 0.4, 0.476], [0, 55, 0, -55, 0, 55, 0]);
+  // Three syllables is too few to blink: the first blink is on the fifth.
+  pinTrack("blink", one.tracks.blink, [0], [0]);
+  // Only a shared rig writes these, but they are decided in the same place.
+  pinTrack("speaking", one.tracks.speaking, [0, 0, 0.6], [0, 100, 0]);
+  pinTrack("line", one.tracks.lineIndex, [0, 0, 0.6], [0, 1, 0]);
+}
+
+// A per-layer rig on a layer that does not start at zero rests at its own in
+// point, not at the start of the composition.
+{
+  const late = mergeRig([rigLine("A", 3, 2, 0.2)], 3);
+  for (const name of ["mouth", "volume", "pitch", "bounce", "blink", "speaking", "lineIndex"]) {
+    if (Math.abs(late.tracks[name][0].time - 3) > 1e-9) {
+      throw new Error(`rig ${name} rests at ${late.tracks[name][0].time}s, expected the line's 3s`);
+    }
+  }
+}
+
+// Two lines, and the reason the counter is not per line. Restarting it at every
+// line throws the head the same way at the start of each one and puts a blink on
+// the fifth syllable of every line, which reads as a tic rather than a face.
+{
+  const two = mergeRig([rigLine("A", 0, 5, 0.2), rigLine("B", 2, 6, 0.2)], 0);
+  if (two.overlaps.length) throw new Error("lines a second apart do not overlap");
+  // Syllables 0-4 are A, 5-10 are B, so the blinks are B's first and last but
+  // one. Counted per line they would be at 3.0 alone.
+  pinTrack("blink", two.tracks.blink, [0, 2, 2.065, 3, 3.065], [0, 100, 0, 100, 0]);
+  // B's first syllable is the sixth overall, so the head goes the other way.
+  // Counted per line it would be the first, and go the same way A started.
+  const firstOfB = [...two.tracks.bounce].filter((key) => Math.abs(key.time - 2) < 1e-9);
+  if (firstOfB.length !== 1 || firstOfB[0].value !== -55) {
+    throw new Error(
+      `the sixth syllable overall bounces ${firstOfB.map((key) => key.value)}, expected -55`);
+  }
+  pinTrack("line", two.tracks.lineIndex, [0, 0, 1, 2, 3.2], [0, 1, 0, 2, 0]);
+}
+
+// Lines arrive in whatever order the composition holds them, which is not
+// timeline order. IC Line has to count along the timeline.
+{
+  const swapped = mergeRig([rigLine("B", 2, 2, 0.2), rigLine("A", 0, 2, 0.2)], 0);
+  pinTrack("line", swapped.tracks.lineIndex, [0, 0, 0.4, 2, 2.4], [0, 1, 0, 2, 0]);
+}
+
+// Overlap. The later line wins from the moment it starts; the earlier one is cut
+// there rather than left to close the mouth halfway through the later one.
+{
+  const clash = mergeRig([rigLine("A", 0, 5, 0.2), rigLine("B", 0.5, 3, 0.2)], 0);
+  if (clash.overlaps.join(",") !== "A,B") {
+    throw new Error(`overlapping lines reported as [${clash.overlaps}], expected A and B`);
+  }
+  // A's syllables at 0.6 and 0.8 are masked, and the one at 0.4 closes at the
+  // cut instead of 0.564. Without the cut the mouth would shut at 0.764, in the
+  // middle of B's first word.
+  pinTrack("mouth", clash.tracks.mouth,
+    [0, 0, 0.164, 0.2, 0.364, 0.4, 0.5, 0.5, 0.664, 0.7, 0.864, 0.9, 1.064],
+    [0, 1, 0, 2, 0, 3, 0, 1, 0, 2, 0, 3, 0]);
+  // Exactly one hand-off, at the cut.
+  pinTrack("speaking", clash.tracks.speaking, [0, 0, 0.5, 0.5, 1.1], [0, 100, 0, 100, 0]);
+  // Masked syllables are not spoken by the face, so they do not advance the
+  // count: B opens on the fourth.
+  const firstOfB = [...clash.tracks.bounce].filter((key) => Math.abs(key.time - 0.5) < 1e-9);
+  if (firstOfB.length !== 1 || firstOfB[0].value !== -55) {
+    throw new Error(
+      `after masking, B's first syllable bounces ${firstOfB.map((key) => key.value)}, expected -55`);
+  }
+}
+
+// A rig with no lines left — every one of them removed — must still rest, not
+// keep the keys of layers that are gone.
+{
+  const empty = mergeRig([], 0);
+  pinTrack("mouth", empty.tracks.mouth, [0], [0]);
+  pinTrack("pitch", empty.tracks.pitch, [0], [100]);
+}
+
+/*
+ * Cutting an imported line down to what the transport carries.
+ *
+ * Apply on a layer the user typed truncates and says so. An imported script has
+ * no typist to tell, so a long line becomes several layers instead of losing its
+ * second half — which only helps if the cut lands somewhere that survives it.
+ */
+vm.runInContext([
+  takeVariable("TEXT_UNITS_PER_BLOCK"),
+  takeVariable("MAX_TEXT_UNITS"),
+  takeVariable("BREAK_AFTER"),
+  takeFunction("splitForTransport"),
+].join("\n"), planner);
+const splitScript = (text) =>
+  [...vm.runInContext(`splitForTransport(${JSON.stringify(text)})`, planner)];
+const LIMIT = vm.runInContext("MAX_TEXT_UNITS", planner);
+{
+  // Short enough is left entirely alone.
+  if (splitScript("你好，歡迎來到小島！").join("|") !== "你好，歡迎來到小島！") {
+    throw new Error("splitForTransport() cut a line that already fits");
+  }
+  if (splitScript("").length !== 0) {
+    throw new Error("splitForTransport() invented a chunk out of nothing");
+  }
+  // Exactly at the limit is still one layer; one over is two.
+  if (splitScript("島".repeat(LIMIT)).length !== 1) {
+    throw new Error(`a line of exactly ${LIMIT} units must stay one layer`);
+  }
+  if (splitScript("島".repeat(LIMIT + 1)).length !== 2) {
+    throw new Error(`a line of ${LIMIT + 1} units must become two layers`);
+  }
+  // The cut goes to the last rest before the limit, not to the limit itself.
+  {
+    const rested = `${"島".repeat(40)}。${"民".repeat(LIMIT)}`;
+    const chunks = splitScript(rested);
+    if (chunks[0] !== `${"島".repeat(40)}。`) {
+      throw new Error(
+        `splitForTransport() cut at ${chunks[0].length} units instead of the punctuation at 41`);
+    }
+  }
+  // A pronunciation override is one token. Cutting through it breaks both
+  // halves: "[重" is spoken literally and "chong2]" is nonsense.
+  {
+    const marked = `${"島".repeat(LIMIT - 3)}[重|chong2]新開始`;
+    for (const chunk of splitScript(marked)) {
+      const opens = (chunk.match(/\[/g) || []).length;
+      const closes = (chunk.match(/\]/g) || []).length;
+      if (opens !== closes) {
+        throw new Error(`splitForTransport() cut through an override: "${chunk}"`);
+      }
+    }
+  }
+  // A surrogate pair is one character. Half of one is not a character at all.
+  //
+  // The odd-length prefix is the whole point of this case. Astral characters
+  // alone put every pair on an even boundary, so the limit lands between two
+  // whole characters and a splitter that knows nothing about surrogates looks
+  // correct. One BMP character in front shifts them, and the limit falls
+  // between the two halves of the sixty-fourth pair.
+  {
+    const outside = "\u{2000B}";
+    for (const sample of [outside.repeat(LIMIT), `A${outside.repeat(LIMIT)}`,
+      `${"島".repeat(3)}${outside.repeat(LIMIT)}`]) {
+      for (const chunk of splitScript(sample)) {
+        if (/[\uD800-\uDBFF]$/.test(chunk) || /^[\uDC00-\uDFFF]/.test(chunk)) {
+          throw new Error(
+            `splitForTransport() stranded half a surrogate pair in a ${sample.length}-unit line`);
+        }
+      }
+    }
+  }
+  // Nothing may be lost, and nothing may exceed the transport. Whitespace at a
+  // break is deliberately dropped, so compare with it removed.
+  for (const sample of [
+    "島".repeat(LIMIT * 3 + 7),
+    `${"Hello world ".repeat(40)}done`,
+    `${"島民，".repeat(60)}。`,
+    `[今日|きょう]はいい[天気|てんき]${"です".repeat(90)}`,
+    "\u{2000B}".repeat(LIMIT + 3),
+    // Pathological: one override longer than the entire transport. It cannot
+    // be kept whole, but it must still terminate.
+    `[${"重".repeat(LIMIT * 2)}|chong2]`,
+  ]) {
+    const chunks = splitScript(sample);
+    for (const chunk of chunks) {
+      if (chunk.length > LIMIT) {
+        throw new Error(`splitForTransport() left a ${chunk.length}-unit chunk, limit is ${LIMIT}`);
+      }
+      if (!chunk.length) throw new Error("splitForTransport() produced an empty layer");
+    }
+    const strip = (value) => value.replace(/\s+/g, "");
+    if (strip(chunks.join("")) !== strip(sample)) {
+      throw new Error(`splitForTransport() lost or duplicated text in "${sample.slice(0, 24)}..."`);
+    }
+  }
+}
+
+/*
+ * Laying lines out on the beat.
+ *
+ * The gap is stated in beats and is a minimum, not a distance: the next line
+ * starts on a beat. Converting beats to seconds and adding them would put
+ * nothing on the grid, because a line is only a whole number of beats long when
+ * Tempo Lock is on — and that is exactly the case where the two agree, so a test
+ * that only checks tempo-locked lengths cannot tell them apart.
+ */
+vm.runInContext([
+  takeFunction("beatDuration"),
+  takeFunction("gridStep"),
+  takeFunction("snapForward"),
+  takeFunction("nextLineStart"),
+  takeFunction("splitSpeaker"),
+  takeVariable("SPEAKER_NAME_LIMIT"),
+].join("\n"), planner);
+const nextStart = (previousEnd, gapBeats, bpm) =>
+  vm.runInContext(`nextLineStart(${previousEnd}, ${gapBeats}, ${bpm})`, planner);
+const stepFor = (gapBeats, bpm) =>
+  vm.runInContext(`gridStep(${gapBeats}, ${bpm})`, planner);
+{
+  const beat = 0.5; // 120 BPM
+  // A line that ends on the grid: one beat of gap is exactly one beat.
+  if (Math.abs(nextStart(2 * beat, 1, 120) - 3 * beat) > 1e-9) {
+    throw new Error(`a line ending on a beat should resume one beat later, got ${nextStart(1, 1, 120)}`);
+  }
+  // A line that ends off the grid — which is every line without Tempo Lock.
+  // Adding the gap gives 2.85s; the next beat after that is 3.0s.
+  if (Math.abs(nextStart(2.35, 1, 120) - 3.0) > 1e-9) {
+    throw new Error(
+      `an off-grid line should resume on the next beat (3.0s), got ${nextStart(2.35, 1, 120)}`);
+  }
+
+  /*
+   * The gap is a note value, and the grid has to be as fine as it asks for.
+   *
+   * Snapping every line to a whole beat regardless makes a fractional gap
+   * indistinguishable from a whole one: at 120 BPM a line ending at 0.3s lands
+   * at 1.0s under 0.5 and under 1 alike, which is what "decimals do nothing"
+   * looked like from the outside. These three numbers are the difference.
+   */
+  for (const [gapBeats, expected, note] of [
+    [0.25, 0.5, "semiquaver"],
+    [0.5, 0.75, "quaver"],
+    [1, 1.0, "crotchet"],
+    [2, 1.5, "minim gap, crotchet grid"],
+  ]) {
+    const got = nextStart(0.3, gapBeats, 120);
+    if (Math.abs(got - expected) > 1e-9) {
+      throw new Error(
+        `a ${note} gap after a line ending at 0.3s should resume at ${expected}s, got ${got}s`);
+    }
+  }
+  // A gap of a beat or more still lands on ordinary beats: "leave two beats"
+  // means any beat two beats away, not only every second beat.
+  if (Math.abs(stepFor(2, 120) - beat) > 1e-9 || Math.abs(stepFor(4, 120) - beat) > 1e-9) {
+    throw new Error("a gap of a beat or more must still use the plain beat grid");
+  }
+  // Zero asks for no grid at all: the lines run straight on.
+  if (Math.abs(nextStart(2.35, 0, 120) - 2.35) > 1e-9) {
+    throw new Error(`a zero gap should run straight on, got ${nextStart(2.35, 0, 120)}`);
+  }
+
+  // Every result is on the grid the gap asked for, at any tempo, however
+  // awkward the line's length. This is the property the whole feature is for.
+  for (const bpm of [60, 90, 120, 137, 174]) {
+    for (const gapBeats of [0.25, 0.5, 1, 1.5, 2, 4]) {
+      const step = stepFor(gapBeats, bpm);
+      for (const end of [0, 0.001, 1.37, 2.5, 9.87654]) {
+        const start = nextStart(end, gapBeats, bpm);
+        const steps = start / step;
+        if (Math.abs(steps - Math.round(steps)) > 1e-6) {
+          throw new Error(
+            `${end}s + ${gapBeats} beats at ${bpm} BPM lands at ${steps} steps, off the grid`);
+        }
+        if (start < end - 1e-9) {
+          throw new Error(`a line was placed before the one it follows (${start} < ${end})`);
+        }
+        // Snapping a time already on the grid must not move it. This is what
+        // makes Re-flow idempotent: its first line is snapped every time it
+        // runs, and without the tolerance floating-point dust would push the
+        // whole scene one step later on each press.
+        const again = vm.runInContext(`snapForward(${start}, ${step})`, planner);
+        if (Math.abs(again - start) > 1e-9) {
+          throw new Error(
+            `snapping ${start}s at ${bpm} BPM again moved it to ${again}s; Re-flow would creep`);
+        }
+      }
+    }
+  }
+  // Straight through the arithmetic the layout actually does, for a long scene.
+  // A whole number of steps reached by adding steps is where the dust collects.
+  for (const bpm of [60, 90, 110, 120, 137, 174, 200]) {
+    for (const gapBeats of [0.5, 1]) {
+      const step = stepFor(gapBeats, bpm);
+      let at = 0;
+      for (let line = 0; line < 200; line += 1) {
+        at = nextStart(at, gapBeats, bpm);
+        const again = vm.runInContext(`snapForward(${at}, ${step})`, planner);
+        if (Math.abs(again - at) > 1e-9) {
+          throw new Error(
+            `at ${bpm} BPM, line ${line} sits at ${at}s but snapping again gives ${again}s`);
+        }
+      }
+    }
+  }
+}
+
+/*
+ * The interface translator keeps one side of anything containing " / ", which
+ * is fine for a label written as "English / 中文" and wrong for a value that
+ * happens to have a slash in it. "1 / beat" through "4 / beat" all collapsed to
+ * the single word "beat", so the tempo subdivision menu showed four identical
+ * entries in Chinese and four bare numbers in English. Nothing noticed for four
+ * releases, because the control still worked.
+ */
+{
+  const tableAt = nativePanelSource.indexOf("var IC_JAPANESE_UI = {");
+  const menuLocaliser = { String };
+  vm.createContext(menuLocaliser);
+  vm.runInContext([
+    takeVariable("UI_LANGUAGE"),
+    nativePanelSource.slice(tableAt, nativePanelSource.indexOf("\n    };", tableAt) + 7),
+    takeFunction("T"),
+  ].join("\n"), menuLocaliser);
+  const menus = [...nativePanelSource.matchAll(
+    /add\("dropdownlist", undefined,\s*(\[[^\]]*\])/g)];
+  if (menus.length < 6) {
+    throw new Error(`Found ${menus.length} dropdown menus in the panel; expected at least 6`);
+  }
+  for (const menu of menus) {
+    const items = [...menu[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
+    if (!items.length) continue;
+    for (const language of ["zh", "en", "ja"]) {
+      menuLocaliser.UI_LANGUAGE = language;
+      const shown = items.map((item) =>
+        vm.runInContext(`T(${JSON.stringify(item)})`, menuLocaliser));
+      const seen = new Set();
+      for (let at = 0; at < shown.length; at += 1) {
+        if (seen.has(shown[at])) {
+          throw new Error(
+            `In ${language} the menu [${items.join(", ")}] shows "${shown[at]}" more than once; ` +
+            "a value with a slash in it is being read as an \"English / 中文\" label");
+        }
+        seen.add(shown[at]);
+        if (!shown[at].length) {
+          throw new Error(`In ${language} the menu item "${items[at]}" localises to nothing`);
+        }
+      }
+    }
+  }
+}
+
+/*
+ * A speaker's name in front of a line.
+ */
+{
+  const speaker = (line) =>
+    vm.runInContext(`splitSpeaker(${JSON.stringify(line)})`, planner);
+  for (const [line, name, said] of [
+    ["咪咪：你好嗎", "咪咪", "你好嗎"],
+    ["咪咪: 你好嗎", "咪咪", "你好嗎"],
+    ["Mimi: hello there", "Mimi", "hello there"],
+    // No colon at all.
+    ["你好嗎", "", "你好嗎"],
+    // A colon with nothing after it is a line that ends in one.
+    ["結論：", "", "結論："],
+    // Too far in to be a name.
+    [`${"島".repeat(30)}：真的`, "", `${"島".repeat(30)}：真的`],
+    // Override syntax in the name means it was never a name.
+    ["[重|chong2]新：開始", "", "[重|chong2]新：開始"],
+  ]) {
+    const got = speaker(line);
+    if (got.speaker !== name || got.text !== said) {
+      throw new Error(
+        `splitSpeaker("${line}") read speaker "${got.speaker}" text "${got.text}", ` +
+        `expected "${name}" / "${said}"`);
+    }
+  }
+  // The ambiguity this is gated behind a checkbox for. It parses — which is
+  // precisely why it must never run unless the user says the script has
+  // speakers in it, or "注意" becomes a character and leaves the line.
+  if (speaker("注意：這裡很危險").speaker !== "注意") {
+    throw new Error("splitSpeaker() is expected to be ambiguous; the checkbox is the guard");
+  }
+}
+
+/*
+ * How the rig is wired, which no unit test can see.
+ */
+{
+  const panelRig = nativePanelSource;
+  // The pointer from a line to its rig is a Layer Control, not a name. Names are
+  // the user's to change and layers are theirs to reorder; a Layer Control
+  // survives both, and reads as "None" when the rig is deleted, which is the
+  // only way to notice an orphan.
+  if (!/addProperty\("ADBE Layer Control"\)/.test(panelRig)) {
+    throw new Error("The rig pointer must be a Layer Control, so renaming cannot break it");
+  }
+  // An orphan has to be recognised: a pointer at nothing, at a layer that has
+  // been deleted, or at some other layer entirely.
+  const target = takeFunction("rigTargetLayer");
+  if (!/at < 1 \|\| at > comp\.numLayers/.test(target) || !/isRigLayer\(target\)/.test(target)) {
+    throw new Error("rigTargetLayer() must reject a dangling or non-rig pointer");
+  }
+  // The face reaches the rig through that same pointer. Reaching it by layer
+  // name would put the rig's name into six expressions, where renaming the
+  // character silently breaks every one of them.
+  const mouth = takeFunction("mouthShapeSource");
+  if (/thisComp\.layer\(/.test(mouth)) {
+    throw new Error("The mouth expression names a layer; renaming the rig would break the face");
+  }
+  if (!/catch/.test(mouth)) {
+    throw new Error("The mouth expression must survive a missing rig rather than error");
+  }
+  // Remove has to take the pointer with it, or the line stays a member of a rig
+  // it no longer speaks for.
+  if (!/RIG_TRACK_NAMES\.concat\(\[RIG_TARGET_NAME, BAKE_POINTER_NAME\]\)/
+    .test(takeFunction("removeFromLayer"))) {
+    throw new Error("removeFromLayer() must strip the shared-rig and bake pointers as well");
+  }
+  // Removing effects invalidates every Property handle taken before it, so the
+  // native effect must not be touched again after the rig block.
+  const applying = takeFunction("applyToTextLayer");
+  const rigBlock = applying.indexOf("removePerLayerRig(textLayer)");
+  if (rigBlock < 0) throw new Error("applyToTextLayer() no longer switches rigs");
+  if (/\beffect\b/.test(applying.slice(rigBlock))) {
+    throw new Error(
+      "applyToTextLayer() uses the effect handle after removing effects; AE has invalidated it");
+  }
+  // One rebuild per rig. Rebuilding twice in a pass would read back the keys the
+  // first pass has already replaced.
+  if (!/touched = uniqueLayers\(touched\)/.test(takeFunction("createOrUpdate"))) {
+    throw new Error("createOrUpdate() must collapse a rig that the selection reaches twice");
+  }
+
+  // Importing a script.
+  const importing = takeFunction("importScript");
+  // Laying lines end to end means knowing where each one ends, and only the
+  // plan knows. Honouring an unticked Fit Duration would stack every line of a
+  // twenty-line script on top of the first.
+  if (!/fitDuration: true/.test(importing)) {
+    throw new Error("importScript() must force Fit Duration; sequencing needs each line's length");
+  }
+  // Grown before the layer is placed. Fit Duration clamps to the end of the
+  // composition, so a line placed past it is silently squashed to nothing.
+  const growAt = importing.indexOf("comp.duration = cursor + IMPORT_HEADROOM");
+  const placeAt = importing.indexOf("layer.startTime = cursor");
+  if (growAt < 0 || placeAt < 0 || growAt > placeAt) {
+    throw new Error("importScript() must extend the composition before it places a line");
+  }
+  // One rebuild for the whole script, not one per line: each rebuild re-plans
+  // every member, so per-line would be quadratic in engine calls.
+  if ((importing.match(/rebuildSharedRig\(/g) || []).length !== 1) {
+    throw new Error("importScript() must rebuild the shared rig exactly once");
+  }
+  // The panel forgetting everything on restart is what this replaced.
+  const restoring = takeFunction("restoreState");
+  for (const field of ["markers", "fitDuration", "controllers", "rigShared", "typeOn",
+    "pitch", "speed", "volume", "seed", "gapBeats", "speakers"]) {
+    if (!new RegExp(`"${field}"`).test(restoring)) {
+      throw new Error(`restoreState() does not bring back ${field}`);
+    }
+  }
+  // Restoring Speed writes the slider, and an unguarded write reads as the user
+  // dragging it, which switches tempo mode straight back off.
+  if (!/writingSpeed = true;[\s\S]{0,200}setSliderValue\(speed/.test(restoring)) {
+    throw new Error("restoreState() must guard the Speed write, or tempo mode is lost on restart");
+  }
+  // Chained, not assigned: several of these controls already carry a handler.
+  if (/\.onChange = remember/.test(panelRig)) {
+    throw new Error("Saving state must chain onto existing handlers, not replace them");
+  }
+
+  /*
+   * Re-sync. The entire point is that it does not touch the voice, so the one
+   * thing worth pinning is where the settings it writes come from.
+   */
+  const resync = takeFunction("resyncLayer");
+  if (!/settingsFromEffect\(effect\)/.test(resync)) {
+    throw new Error("resyncLayer() must read the voice off the layer, not take one from the panel");
+  }
+  // Reaching the panel's settings here is the bug it exists to prevent: a
+  // selection spanning two characters would be repainted into one voice.
+  if (/\boptions\.(voice|pitch|speed|volume|consonant|emotion|seed|formant)\b/.test(resync) ||
+      /currentSettings\(/.test(resync)) {
+    throw new Error("resyncLayer() takes a voice setting from the panel; it must use the layer's own");
+  }
+  // Only what the layer already has is rebuilt. Honouring the panel's
+  // checkboxes here would add markers to a layer that deliberately has none.
+  for (const [what, guard] of [
+    ["markers", "hadMarkers"], ["its own rig", "hadOwnRig"], ["Type-On", "hadTypeOn"],
+  ]) {
+    if (!new RegExp(`if \\(${guard}\\)`).test(resync)) {
+      throw new Error(`resyncLayer() must only rebuild ${what} when the layer already had it`);
+    }
+  }
+  if (/options\.markers|options\.controllers|options\.typeOn\b/.test(resync)) {
+    throw new Error("resyncLayer() must not take what to rebuild from the panel's checkboxes");
+  }
+  // An edit that lengthens a line can push it past the end of the composition,
+  // where After Effects clamps the out point and the line is squashed to
+  // whatever room was left — which is the shape of every timing bug this
+  // feature exists to remove.
+  if (/Math\.min\(comp\.duration/.test(resync)) {
+    throw new Error("resyncLayer() clamps the refitted line to the composition instead of growing it");
+  }
+  const grewAt = resync.indexOf("comp.duration = layer.inPoint + plan.duration");
+  const fitAt = resync.indexOf("layer.outPoint =");
+  if (grewAt < 0 || fitAt < 0 || grewAt > fitAt) {
+    throw new Error("resyncLayer() must make room before it refits the line");
+  }
+
+  /*
+   * Re-flow moves layers. Keyframes do not follow, and neither does baked audio.
+   */
+  const reflow = takeFunction("reflowLayers");
+  if (!/rebuildSharedRig\(/.test(reflow)) {
+    throw new Error("reflowLayers() must rebuild the rigs of the lines it moved");
+  }
+  if (!/audioLayer\.startTime = audioLayer\.startTime \+ shift/.test(reflow)) {
+    throw new Error("reflowLayers() must move baked audio with its line, or the sound desyncs");
+  }
+  // startTime, not inPoint: assigning inPoint would silently untrim a line the
+  // user had trimmed.
+  if (!/layer\.startTime = layer\.startTime \+ shift/.test(reflow)) {
+    throw new Error("reflowLayers() must shift startTime so a trimmed line keeps its trim");
+  }
+
+  /*
+   * A bake that no longer matches its line.
+   */
+  const stale = takeFunction("markBakeStale");
+  // Muting the recording is only half of it: the live effect has to come back
+  // on, or the layer goes silent instead of correct.
+  if (!/audioEnabled = false/.test(stale) || !/effect\.enabled = true/.test(stale)) {
+    throw new Error("markBakeStale() must mute the recording and re-enable the live effect");
+  }
+  // Re-baking here would be the obvious move and would throw away the undo
+  // history on every Apply, because releasing the imported WAV needs app.purge().
+  if (/bakeToLayer\(|bakeLayer\(/.test(stale) ||
+      /bakeToLayer\(|bakeLayer\(/.test(takeFunction("applyToTextLayer"))) {
+    throw new Error("Apply must not re-bake; app.purge() would discard the undo history");
+  }
+  // Found by pointer first. The name changes whenever the line is renamed, and
+  // Import names every layer after its own text.
+  if (!/findNamedEffect\(layer, BAKE_POINTER_NAME\)/.test(takeFunction("bakedLayerFor"))) {
+    throw new Error("bakedLayerFor() must use the Layer Control, not only the layer name");
+  }
+}
+
 // Builds are sold, so the licence and the README have to point at the same
 // storefront. A link that rots in one place and not the other sends buyers
 // somewhere that no longer sells anything.
@@ -655,11 +1443,20 @@ for (const smokeFragment of [
   'comp.layers.addText("你好，中文聲音測試！")',
   'effects.addProperty(TONE_MATCH_NAME)',
   'effects.addProperty(EFFECT_NAME)',
-  "EXPECTED_PARAMETERS = 145",
+  "EXPECTED_PARAMETERS = 215",
   '"External audio files: 0"',
 ]) {
   if (!aeSmokeSource.includes(smokeFragment)) {
     throw new Error(`AE direct-text smoke test is missing: ${smokeFragment}`);
+  }
+}
+// The host suite counts the parameters too. A stale number there costs a
+// three-minute host run to discover; here it costs a second.
+{
+  const hostRegressionSource = fs.readFileSync(
+    path.join(root, "native", "tests", "ae-host-regression.jsx"), "utf8");
+  if (!hostRegressionSource.includes("chatter.numProperties === 215")) {
+    throw new Error("ae-host-regression.jsx no longer checks the published parameter count");
   }
 }
 

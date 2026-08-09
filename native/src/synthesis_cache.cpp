@@ -40,6 +40,20 @@ std::string settings_key(const Settings& settings) {
     append_binary(key, settings.source);
     append_binary(key, settings.vibrato_depth);
     append_binary(key, settings.vibrato_rate);
+    // The melody changes every sample of the result, so all of it belongs in
+    // the key — the notes themselves and every control that decides how they
+    // are sung. Volume is still the one deliberate omission.
+    append_binary(key, settings.melody_mode);
+    append_binary(key, settings.melody_bpm);
+    append_binary(key, settings.transpose);
+    append_binary(key, settings.tone_blend);
+    append_binary(key, settings.portamento_seconds);
+    append_binary(key, settings.vibrato_delay);
+    append_binary(key, settings.melody.size());
+    for (const auto& note : settings.melody) {
+        append_binary(key, note.pitch);
+        append_binary(key, note.ticks);
+    }
     return key;
 }
 

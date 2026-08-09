@@ -849,6 +849,238 @@ int main() {
         }
     }
 
+    // --- Singing -----------------------------------------------------------
+    {
+        const auto slot = [](int pitch, int ticks) {
+            return island_chatter::decode_melody_slot(
+                island_chatter::encode_melody_slot(pitch, ticks));
+        };
+        const int beat = island_chatter::kMelodyTicksPerBeat;
+
+        island_chatter::Settings sung;
+        sung.text = "一閃一閃亮";
+        sung.sample_rate = 48000;
+        sung.melody_bpm = 120.0;
+        sung.melody_mode = true;
+        sung.melody = {slot(60, beat), slot(62, beat), slot(0, beat),
+                       slot(64, beat), slot(65, beat), slot(67, beat * 4)};
+
+        // A melody switches nothing on by itself: melody_mode with no notes has
+        // to leave the speaking engine exactly where it was, which is what
+        // makes an older project safe when 1.7.0 opens it.
+        {
+            island_chatter::Settings spoken = sung;
+            spoken.melody.clear();
+            island_chatter::Settings plain = spoken;
+            plain.melody_mode = false;
+            require(island_chatter::synthesize(spoken).samples ==
+                    island_chatter::synthesize(plain).samples,
+                "melody_mode changed the audio without a melody to sing");
+        }
+
+        const auto result = island_chatter::synthesize(sung);
+        const auto& plan = result.diagnostics;
+
+        // Five syllables, however many events the engine needed to render them.
+        require(plan.event_count == 5, "a sung line reported the wrong number of syllables");
+        // One beat at 120 BPM is half a second; the third slot is a rest, so
+        // the fourth syllable starts a beat later than the third one would.
+        require(plan.start_samples[0] == 0, "the first note does not start at zero");
+        require(plan.length_samples[0] == 24000, "a one-beat note is not half a second long");
+        require(plan.start_samples[2] == 72000, "the rest did not move the note after it");
+        require(plan.length_samples[4] == 96000, "the four-beat note is the wrong length");
+
+        // Absolute pitch, and deliberately not the voice preset's register:
+        // MIDI 60 is middle C at 261.626 Hz whichever character is singing.
+        require(std::abs(plan.frequencies[0] - 261.6255653) < 0.001,
+            "a sung note is not at its written pitch");
+        for (std::size_t voice_index = 0; voice_index < island_chatter::voices().size();
+                ++voice_index) {
+            island_chatter::Settings other = sung;
+            other.voice_index = voice_index;
+            require(std::abs(island_chatter::synthesize(other).diagnostics.frequencies[0] -
+                    plan.frequencies[0]) < 0.001,
+                "a voice preset transposed the melody");
+        }
+        {
+            island_chatter::Settings up = sung;
+            up.transpose = 12;
+            require(std::abs(island_chatter::synthesize(up).diagnostics.frequencies[0] -
+                    plan.frequencies[0] * 2.0) < 0.001, "transpose did not move by an octave");
+        }
+
+        // The long note has to be split, or one block touching its tail would
+        // render two seconds of audio on the audio thread.
+        {
+            island_chatter::Utterance utterance(sung);
+            require(utterance.diagnostics().event_count == 5,
+                "the segments of a held note leaked into the plan");
+            utterance.copy_region(0, std::vector<float>(64).data(), 64, 1, 0.78);
+            std::vector<float> tail(64);
+            const auto last = static_cast<std::int64_t>(utterance.sample_count()) - 3000;
+            utterance.copy_region(last, tail.data(), 64, 1, 0.78);
+            // Two blocks, at opposite ends: without segmentation the second one
+            // would have rendered the whole four-beat note.
+            require(utterance.rendered_events() < 5,
+                "a block at the end of a held note rendered more than it needed");
+        }
+
+        // Lazy and eager still agree, sample for sample, at awkward block sizes.
+        {
+            island_chatter::Utterance utterance(sung);
+            std::vector<float> blocked(result.samples.size(), -1.0F);
+            const std::size_t sizes[] = {1, 17, 4801, 12000, 12001, 331};
+            std::size_t cursor = 0;
+            std::size_t which = 0;
+            while (cursor < blocked.size()) {
+                const auto count = std::min(sizes[which % 6], blocked.size() - cursor);
+                utterance.copy_region(static_cast<std::int64_t>(cursor),
+                    blocked.data() + cursor, count, 1, sung.volume);
+                cursor += count;
+                ++which;
+            }
+            require(blocked == result.samples,
+                "a segmented note renders differently one block at a time");
+        }
+
+        // A held note is held. Sampled across the four-beat note, the middle
+        // must not have faded away the way a spoken syllable does.
+        {
+            const auto start = plan.start_samples[4];
+            const auto length = plan.length_samples[4];
+            const auto peak_between = [&](double from, double to) {
+                float peak = 0.0F;
+                for (auto at = start + static_cast<std::size_t>(length * from);
+                        at < start + static_cast<std::size_t>(length * to); ++at) {
+                    peak = std::max(peak, std::abs(result.samples[at]));
+                }
+                return peak;
+            };
+            const float early = peak_between(0.10, 0.20);
+            const float late = peak_between(0.75, 0.85);
+            require(early > 0.05F, "the held note is silent");
+            require(late > early * 0.7F, "the held note faded away instead of sustaining");
+        }
+
+        // The seams between segments must be inaudible.
+        //
+        // This is the mechanism, not a symptom: the phase, the vibrato and the
+        // fixed oscillators are all written against note-global time precisely
+        // so that a seam falls in the middle of a continuous waveform. Take the
+        // offset away and the step at each seam is what shows up here.
+        {
+            const auto start = plan.start_samples[4];
+            const auto length = plan.length_samples[4];
+            const auto segment = static_cast<std::size_t>(0.25 * sung.sample_rate);
+            const auto is_seam = [&](std::size_t at) {
+                const auto into = at - start;
+                return into > 0U && into % segment == 0U;
+            };
+            // The largest step anywhere the seams are not. Measuring against
+            // every step in the note would include the seams themselves, and
+            // then the comparison can never fail however broken the joins are.
+            float ordinary = 0.0F;
+            for (std::size_t at = start + 1; at < start + length; ++at) {
+                if (is_seam(at)) { continue; }
+                ordinary = std::max(ordinary,
+                    std::abs(result.samples[at] - result.samples[at - 1]));
+            }
+            std::size_t seams = 0;
+            for (std::size_t at = start + segment; at + segment < start + length; at += segment) {
+                ++seams;
+                const auto step = std::abs(result.samples[at] - result.samples[at - 1]);
+                require(step <= ordinary,
+                    "a segment seam steps further than anything else in the note");
+            }
+            require(seams >= 3, "the held note was not split into segments at all");
+        }
+
+        // The rendered audio is actually at the written pitch.
+        //
+        // Checking diagnostics.frequencies only proves the planner wrote a
+        // number down. What matters is what comes out, and between the two sit
+        // the harmonic profile, the glide, the vibrato and the segment seams —
+        // any of which could put the note somewhere else.
+        {
+            const auto pitch_of = [&](std::size_t from, std::size_t count) {
+                const auto lowest = static_cast<std::size_t>(sung.sample_rate / 1000);
+                const auto highest = static_cast<std::size_t>(sung.sample_rate / 80);
+                std::vector<double> correlation(highest, 0.0);
+                double best = -1.0;
+                for (auto lag = lowest; lag < highest; ++lag) {
+                    double product = 0.0;
+                    double here = 0.0;
+                    double there = 0.0;
+                    for (std::size_t at = 0; at + lag < count; ++at) {
+                        const double left = result.samples[from + at];
+                        const double right = result.samples[from + at + lag];
+                        product += left * right;
+                        here += left * left;
+                        there += right * right;
+                    }
+                    correlation[lag] = product / std::sqrt(here * there + 1e-12);
+                    best = std::max(best, correlation[lag]);
+                }
+                // The shortest period that correlates nearly as well as the
+                // best one. A periodic signal correlates almost as strongly at
+                // two or three times its period, and picking the raw maximum
+                // lets that win by a hair — which reads as the note being an
+                // octave or a twelfth below where it actually is.
+                for (auto lag = lowest; lag + 1 < highest; ++lag) {
+                    if (correlation[lag] >= best * 0.90 &&
+                            correlation[lag] >= correlation[lag + 1] &&
+                            correlation[lag] >= correlation[lag - 1]) {
+                        return static_cast<double>(sung.sample_rate) / static_cast<double>(lag);
+                    }
+                }
+                return 0.0;
+            };
+            for (std::size_t index = 0; index < plan.event_count; ++index) {
+                const auto from = plan.start_samples[index] +
+                    static_cast<std::size_t>(plan.length_samples[index] * 0.45);
+                const auto count = static_cast<std::size_t>(plan.length_samples[index] * 0.35);
+                const double heard = pitch_of(from, count);
+                const double cents = 1200.0 * std::log2(heard / plan.frequencies[index]);
+                // Twenty cents is a fifth of a semitone: wide enough for the
+                // vibrato and for one sample of autocorrelation resolution,
+                // far tighter than a wrong note.
+                require(std::abs(cents) < 20.0, "a sung note came out at the wrong pitch");
+            }
+        }
+
+        // A melisma holds the syllable through the next note: one syllable, two
+        // notes, and one marker for the panel to place.
+        {
+            island_chatter::Settings held;
+            held.text = "啊-";
+            held.sample_rate = 48000;
+            held.melody_mode = true;
+            held.melody_bpm = 120.0;
+            held.melody = {slot(60, beat), slot(64, beat)};
+            const auto sung_held = island_chatter::synthesize(held);
+            require(sung_held.diagnostics.event_count == 1,
+                "a melisma should be one syllable, not two");
+            require(sung_held.diagnostics.length_samples[0] == 48000,
+                "a melisma should cover both of its notes");
+        }
+
+        // The melody is part of what the cache is keyed on, or a layer would go
+        // on singing the tune it had before.
+        {
+            island_chatter::SynthesisCache melodies(8);
+            island_chatter::Settings other = sung;
+            other.melody[0] = slot(72, beat);
+            require(melodies.get(sung).get() != melodies.get(other).get(),
+                "two different melodies shared one cache entry");
+            island_chatter::Settings faster = sung;
+            faster.melody_bpm = 90.0;
+            require(melodies.get(sung).get() != melodies.get(faster).get(),
+                "the melody tempo is missing from the cache key");
+            require(melodies.get(sung).get() == melodies.get(sung).get(),
+                "the same melody did not hit the cache");
+        }
+    }
+
     std::cout << "Native DSP tests passed: " << first.samples.size() << " samples, peak "
               << first.diagnostics.peak << '\n';
     return 0;

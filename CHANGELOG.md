@@ -1,5 +1,164 @@
 # Changelog
 
+## 1.7.0 - 2026-08-09
+
+角色會唱歌了。
+
+- **Import MIDI / 匯入 MIDI.** 選一個 MIDI 檔，挑一軌，把文字框裡的歌詞唱成那條旋律。
+  一行歌詞一層，每一層放在它自己第一個音符的時間上——匯入 MIDI 不看間隔格線，歌要對在
+  它自己的時間上。一個字配一個音依序發下去，長度一律配合旋律，標記、角色綁定、逐字顯示
+  和配合長度全部照舊跟著計畫走，不必為唱歌另外設定。
+- **音高照 MIDI 寫的唱，不跟聲線走。** 聲線的音域從 0.66 到 1.42，如果讓它參與，同一條
+  旋律換個角色就會差到五度，兩個角色也不可能合唱。角色的差別在共鳴和音色，跟真人一樣。
+  另外有一個**移調**欄位，整條旋律一起搬。
+- **長音撐得住。** 以前每個字固定約 0.19 秒就收掉，一個兩秒的長音會變成短短一聲加一秒半
+  的安靜。現在母音持續發聲，只有頭尾淡入淡出，雙母音的滑移在 90 毫秒內走完然後定住——
+  一秒的「啊」是一個持續的「啊」，不是一個被拉長的滑音。
+- **聲調讓位給旋律，但沒有消失。** 唱歌時音高由旋律決定，完整的四聲會跟旋律打架。四聲
+  現在變成每個音的起音方向：四聲從上面滑下來，二聲從下面滑上來，聽起來還是中文咬字，
+  音準是旋律的。比例可調，預設 15%。
+- **抖音會慢慢浮上來，換音之間會滑。** 音拉長超過設定的秒數之後顫音才長出來，兩個音之間
+  預設滑 40 毫秒。這兩個是「像人唱」跟「像機器唱」的差別。
+- **一字多音（拖腔）。** 歌詞裡打一個 `-`，代表前一個字延續唱到下一個音。它只在有旋律時
+  才這樣讀，所以平常台詞裡的連字號行為完全沒變。一個拖了三個音的字仍然只有一個標記、
+  一次嘴型、一個逐字顯示步驟。
+- **文字框空白就唱唱名。** 沒有歌詞不再是錯誤：旋律會唱出自己的音名，一個音一個字，
+  在長休止的地方自動斷句成好幾層。旁邊的 **Key／唱名調** 決定哪個音是 Do——留在 C 就是
+  固定調，選 G 就是首調，整組唱名跟著移，音高完全不變。黑鍵沿用下面那個白鍵的名字。
+  唱名是生成成圖層真正的文字，所以標記、嘴型、逐字顯示全部照舊，**沒有增加任何參數**。
+- **太長的句子拆成好幾層，不再截斷。** 一層最多 64 個音符格、128 個字，超過的部分以前是
+  直接丟掉（歌詞那半還是默默丟的）。現在會拆成下一層繼續唱，而且**優先切在小節線上**——
+  引擎現在讀 MIDI 的拍號，遇到裝不下就往回退到最近的一條小節線，切在小節中間看起來像出錯，
+  切在小節線上看起來像一句。切點不會落在讀音覆寫 `[重|chong2]` 中間，也不會把字切一半。
+  拆了幾層會寫在狀態列。
+- **和弦只取最高音**，並回報捨棄了幾個音。音符和字數對不上時也會說：多的字用最後一個音
+  唱完，多的音符空著，兩種都寫在狀態列，不會默默處理。
+- **長音在內部切成 0.25 秒的分段。** 這是效能問題不是音色問題：懶渲染的單位是一個事件，
+  一個四秒的長音只要被任何一個音訊區塊碰到,整整四秒都會在音訊執行緒上算出來,正好是
+  `Utterance` 當初存在要消除的那種卡頓。相位、顫音和固定振盪器全部改用「音符內的絕對
+  時間」計算，接縫因此聽不出來。
+- 效果器參數從 145 個增加到 215 個。**舊專案完全不受影響**：旋律長度預設為 0，就是原本
+  的講話路徑，一個位元都沒變。
+
+## 1.6.1 - 2026-08-06
+
+- **The tempo subdivision menu showed four identical entries.** Its items were written
+  "1 / beat" through "4 / beat", and the interface translator keeps one side of anything
+  containing " / " — so all four became the single word "beat" in Chinese, and four bare
+  numbers in English. Broken since the trilingual panel shipped in 1.2.0; the control worked
+  the whole time, which is why nothing noticed. `npm test` now localises every menu in the
+  panel and fails if two entries in one menu collapse to the same label.
+- **The import gap is a note value and fractions now do something.** 1 is a crotchet, 0.5 a
+  quaver, 0.25 a semiquaver, and the grid lines are as fine as the number asks for. Until now
+  every line snapped to a whole beat whatever the gap was, so half a beat and a whole beat
+  landed in the same place most of the time and decimals looked unsupported. A gap of a beat
+  or more still lands on ordinary beats, because "leave two beats" means any beat two beats
+  away rather than only every second one. A gap of 0 now runs the lines straight on instead of
+  snapping to the next beat.
+- The readout beside the gap names the note value as well as the length.
+
+## 1.6.0 - 2026-08-06
+
+The edit cycle: change a line, put the scene back in order, on the beat.
+
+- **Re-sync / 重新同步** updates the selected lines from their own Source Text and **does not
+  touch the voice**. Apply rewrites every selected layer with whatever the panel is showing,
+  which silently repaints a two-character selection into one voice, and repaints any layer
+  applied before the sliders were last nudged. Editing text is the common case and should not
+  require putting the panel back the way it was. Only what a layer already has is rebuilt: a
+  line with no markers does not gain any. The length is always refitted, and the composition
+  grows if the longer line no longer fits — a line clamped at the end of the composition is
+  squashed to whatever room was left.
+- **Re-flow / 重新排列** lays the selected lines out again end to end, using each one's real
+  length. Import produces a tidy scene exactly once; after that, one edited line is longer,
+  one deleted line leaves a hole, and everything after it has to be dragged. Nothing selected
+  means the whole composition. The first line stays where it is apart from being pulled onto
+  the beat. Running it twice changes nothing.
+- **The gap is measured in beats now, and lines land on beats.** It is a minimum rather than a
+  distance: the next line starts on the first beat that is at least the gap away. Converting
+  beats to seconds and adding them would put nothing on the grid, because a line is only a
+  whole number of beats long when Tempo Lock is on.
+- **Speakers / 含角色名.** With it ticked, `咪咪：早安` is read as a line spoken by 咪咪: the
+  name is not spoken, and the line joins that character's shared rig, which is created if it
+  does not exist yet. A whole two-hander goes in as one paste. It is off by default on
+  purpose — nothing separates `咪咪：早安` from `注意：這裡很危險`, and guessing would invent a
+  character called 注意 and eat the word out of the line.
+- **A bake that no longer matches its line is muted rather than left lying.** Baking silences
+  the live effect, so after an edit the layer played a recording of what it used to say and
+  nothing said so. Now the recording is muted, the live effect comes back on, and the layer is
+  marked `(stale)` until it is baked again. It is not re-baked automatically: releasing an
+  imported WAV needs `app.purge()`, so that would throw away the undo history on every Apply.
+- **Baked audio is found by a Layer Control, not by its name**, so renaming a line no longer
+  orphans its recording — and Import names every layer after its own text. Re-flow moves the
+  audio with its line, and Remove takes it away with everything else. The WAV on disk is left
+  alone.
+
+## 1.5.0 - 2026-08-06
+
+A whole script in one go, and a panel that remembers.
+
+- **Import script / 匯入劇本.** Paste a script into the text box and press it: one layer per
+  line, each one applied with the current voice and laid end to end from the current time,
+  with a **Gap / 間隔** you set. Building a twenty-line scene was twenty rounds of new layer,
+  paste, drag, Apply. Fit Duration is forced on for an import whatever the checkbox says,
+  because laying lines end to end means knowing where each one ends, and only the engine's
+  plan knows that. Blank lines are skipped.
+- The composition is **extended if the script does not fit**, and only as far as the script
+  actually needs. A line placed past the end of a composition gets its length clamped to
+  nothing, so the alternative was silently swallowing half the scene.
+- **A line too long for the transport becomes several layers** instead of being cut off at
+  128 UTF-16 units. The break goes to the last punctuation before the limit — where the
+  voice was going to rest anyway — and never through a pronunciation override or a surrogate
+  pair. Pressing Apply on a layer *you* typed still truncates and says so; rewriting text
+  someone typed is a different matter from laying out text they pasted.
+- Importing straight into a shared character rig works: every line joins it and the rig is
+  merged once at the end rather than once per line.
+- **The panel remembers what it was set to.** Every voice control, the tempo, all four
+  workflow checkboxes, the rig mode, the Type-On curves and the import gap survive a restart.
+  Until now only the interface language and saved characters did, so a project spread over
+  several days meant setting it all up again every morning.
+
+## 1.4.0 - 2026-08-06
+
+One rig for a whole character, however many lines they have.
+
+- **A shared animation rig.** Until now every line grew its own `IC Mouth`,
+  `IC Volume`, `IC Pitch`, `IC Head Bounce` and `IC Blink`, so a scene of twenty
+  lines was twenty sets of sliders and there was no way to bind one character's
+  mouth to all of them. Pick **Shared / 共用角色** instead of **Per layer / 每層**,
+  name a character, and the sliders live on one null of their own, driven by
+  whichever line is speaking at that moment. Bind the face once.
+- **The rig holds keyframes, not expressions.** Nothing is evaluated while you
+  play back, the project animates on a machine with no plug-in installed, and a
+  rig whose lines have been deleted goes stale rather than turning into a
+  yellow error. The price is that moving a line does not move the rig with it,
+  which is what **Rebuild / 重建** is for — it re-merges from whatever the lines
+  are doing now, without touching the voice.
+- Two more tracks a shared rig can answer that a single line cannot:
+  **IC Speaking** is 100 while anyone is talking and 0 between lines, and
+  **IC Line** says which line that is. Idle animation and per-line switching
+  both need them.
+- **Blinks and head bounces count across the whole character**, not from the
+  start of each line. Counted per line the head is thrown the same way at every
+  line's first syllable, which reads as a tic rather than a face.
+- **Two lines of one character at once** still build. The later one wins from
+  the moment it starts, the earlier one is cut there instead of closing the
+  mouth in the middle of the later one, and the panel names both on the status
+  line.
+- **The character's voice travels with the project.** Saved characters live in
+  After Effects' preferences, so they vanish when the project moves to another
+  machine; a shared rig stores its voice on its own layer, and picking the
+  character loads it back.
+- **Mouth switch / 建立嘴型切換** wires a face to the rig. Select one precomp of
+  six frames and it drives Time Remap; select up to six layers and it switches
+  their Opacity, topmost first. `IC Mouth` is 0 for closed and 1-5 for a, i, u,
+  e and o — a mapping that until now was written down nowhere the user could
+  see it.
+- Lines point at their rig through a Layer Control, so renaming the character
+  or reordering the composition cannot break the link, and **Remove** reaches
+  everything: take a line off and the rig is rebuilt without it, take the rig
+  off and every line and every mouth layer is unbound.
+
 ## 1.3.0 - 2026-08-05
 
 English, and twice as much room for it.
