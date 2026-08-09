@@ -48,6 +48,12 @@ Bytes chunk(const char* type, const Bytes& body) {
 
 constexpr int kTicksPerQuarter = 480;
 
+// A note is two slots now, so the tests read them back in pairs rather than
+// reaching for one and quietly losing the velocity and the fine length.
+island_chatter::MelodyNote note_at(const island_chatter::song::Line& line, std::size_t index) {
+    return island_chatter::decode_melody(line.slots[index], line.details[index]);
+}
+
 // One track of back-to-back notes, each `beats` long, at `bpm`, in `beats_per_bar`
 // over four.
 island_chatter::midi::File tune(
@@ -79,6 +85,38 @@ island_chatter::midi::File tune(
 
 int main() {
     using namespace island_chatter;
+
+    // --- The two-slot note encoding -----------------------------------------
+    {
+        for (const int pitch : {0, 1, 60, 127}) {
+            for (const int ticks : {1, 6, 8, 96, 383, 1000, kMelodyMaxTicks}) {
+                for (const int velocity : {0, 1, 64, 127}) {
+                    const auto pair = encode_melody(pitch, ticks, velocity);
+                    const auto back = decode_melody(pair.melody, pair.detail);
+                    require(back.pitch == pitch, "pitch did not survive the encoding");
+                    require(back.ticks == ticks, "length did not survive the encoding");
+                    require(back.velocity == velocity, "velocity did not survive the encoding");
+                    require(pair.melody >= 0 && pair.melody <= 65535 &&
+                            pair.detail >= 0 && pair.detail <= 65535,
+                        "a slot fell outside what the parameter can hold");
+                }
+            }
+        }
+        // A 1.7.0 project has no detail slots at all. Its coarse field meant
+        // twenty-fourths of a beat, the unit is now ninety-sixths, and reading
+        // it with a zero detail has to give back exactly the same duration.
+        for (const int coarse : {1, 24, 48, 96, 511}) {
+            const auto old_style = decode_melody(60 * kMelodySlotStride + coarse, 0);
+            require(old_style.ticks == coarse * 4,
+                "a melody stored by 1.7.0 changed length when it was read back");
+            require(old_style.velocity == 0,
+                "a melody stored by 1.7.0 gained a velocity from nowhere");
+        }
+        // Sixty-fourth notes and thirty-second triplets are the point of the
+        // finer unit; both have to be whole numbers of ticks.
+        require(kMelodyTicksPerBeat % 16 == 0, "a sixty-fourth note is not a whole tick count");
+        require(kMelodyTicksPerBeat % 12 == 0, "a thirty-second triplet is not a whole tick count");
+    }
 
     // --- Splitting lyrics --------------------------------------------------
     {
@@ -112,10 +150,10 @@ int main() {
             "a line does not begin at its first note");
         require(std::abs(assignment.lines[0].bpm - 120.0) < 1e-9, "the line's tempo is wrong");
 
-        const auto first = decode_melody_slot(assignment.lines[0].slots.front());
+        const auto first = note_at(assignment.lines[0], 0);
         require(first.pitch == 60, "the first slot has the wrong pitch");
         require(first.ticks == kMelodyTicksPerBeat, "a one-beat note should be 24 ticks");
-        const auto last = decode_melody_slot(assignment.lines[1].slots.back());
+        const auto last = note_at(assignment.lines[1], assignment.lines[1].slots.size() - 1);
         require(last.ticks == kMelodyTicksPerBeat * 2, "a two-beat note should be 48 ticks");
     }
 
@@ -137,8 +175,8 @@ int main() {
         const auto assignment = song::assign(parsed, 0, "一二三");
         const auto& slots = assignment.lines[0].slots;
         require(slots.size() == 5, "the gaps between the notes should be rests");
-        require(decode_melody_slot(slots[1]).pitch == 0, "the second slot should be a rest");
-        require(decode_melody_slot(slots[1]).ticks == kMelodyTicksPerBeat,
+        require(note_at(assignment.lines[0], 1).pitch == 0, "the second slot should be a rest");
+        require(note_at(assignment.lines[0], 1).ticks == kMelodyTicksPerBeat,
             "the rest is the wrong length");
     }
 
@@ -160,9 +198,16 @@ int main() {
         const auto& line = assignment.lines[0];
         require(line.notes == 40, "every note should have been taken");
         long long total = 0;
-        for (const int slot : line.slots) { total += decode_melody_slot(slot).ticks; }
-        const double ticks_per_second = line.bpm * kMelodyTicksPerBeat / 60.0;
-        const double truth = (40.0 / 7.0) * (60.0 / 137.0) * ticks_per_second;
+        for (std::size_t at = 0; at < line.slots.size(); ++at) {
+            total += note_at(line, at).ticks;
+        }
+        // Against what the file actually holds, not against the ideal seventh
+        // of a beat: tune() rounds each length to the file's own 480 per
+        // quarter first, and comparing to the ideal folds that rounding into
+        // the tolerance, which hides exactly the drift this is looking for.
+        const long long file_ticks = std::llround(kTicksPerQuarter / 7.0) * 40;
+        const double truth = static_cast<double>(file_ticks) / kTicksPerQuarter *
+            kMelodyTicksPerBeat;
         require(std::abs(static_cast<double>(total) - truth) <= 1.0,
             "the encoded line drifted away from the melody it came from");
     }
@@ -268,6 +313,33 @@ int main() {
             "a blank lyric should still sing the note names");
     }
 
+    // Note names are wordy, and the text transport is the tighter of the two
+    // budgets. "sol " is four units, so sixty-four names is around two hundred:
+    // counting only the melody slots produced a full layer of notes whose text
+    // was then truncated by the panel, and the layer sang half of them.
+    {
+        std::vector<std::pair<int, double>> notes;
+        for (int index = 0; index < 120; ++index) {
+            notes.emplace_back(60 + (index % 12), 0.5);
+        }
+        const auto file = tune(notes, 120.0);
+        const auto named = song::assign(file, 0, "", 0);
+        std::size_t sung = 0;
+        for (const auto& line : named.lines) {
+            std::size_t units = 0;
+            for (const char letter : line.text) {
+                if ((static_cast<unsigned char>(letter) & 0xC0U) != 0x80U) { ++units; }
+            }
+            require(units <= 128, "a layer of note names overflowed the text transport");
+            require(line.slots.size() <= kMelodySlots, "a layer overflowed the melody transport");
+            require(line.notes == line.syllables,
+                "a note-name layer has a different number of names from notes");
+            sung += line.notes;
+        }
+        require(sung == 120, "note names lost notes to the text limit");
+        require(named.lines.size() > 1, "the names should have been split across layers");
+    }
+
     // A breath breaks the line, so a long melody does not become one layer.
     {
         // Two three-note phrases with three beats of silence between them.
@@ -289,7 +361,7 @@ int main() {
         require(assignment.lines[0].text == "do re mi", "the first phrase is wrong");
         require(assignment.lines[1].text == "fa sol la", "the second phrase is wrong");
         // The rest belongs between the lines, not inside either of them.
-        require(decode_melody_slot(assignment.lines[0].slots.back()).pitch != 0,
+        require(note_at(assignment.lines[0], assignment.lines[0].slots.size() - 1).pitch != 0,
             "a line should not end on a rest");
         // Three one-beat notes end at 1.5s, then three beats of silence: the
         // fourth note is at 3.0s and that is where its layer belongs.
@@ -317,7 +389,7 @@ int main() {
                 "the reported tempo is outside what the parameter can hold");
             // One beat at the file's real tempo, still, once the ticks are read
             // back with the tempo they were written against.
-            const double seconds = decode_melody_slot(line.slots.front()).ticks /
+            const double seconds = note_at(line, 0).ticks /
                 (line.bpm * kMelodyTicksPerBeat / 60.0);
             require(std::abs(seconds - 60.0 / bpm) < 0.02,
                 "clamping the tempo moved the notes");

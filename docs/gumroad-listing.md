@@ -12,7 +12,7 @@
 
 - **匯入 MIDI，角色就會唱歌。** 貼歌詞、選一軌，一個字一個音，落在 MIDI 自己的時間上。
   長音撐得住，聲調讓位給旋律，抖音會慢慢浮上來。歌詞打一個 `-` 就是拖腔。
-  不給歌詞就唱唱名 do re mi，固定調首調都可以。
+  不給歌詞就唱唱名 do re mi，固定調首調都可以。力度照 MIDI 走，強弱有起伏。
 - **貼一整份劇本，一行變一層**，套好聲音、依序排好。劇本裡寫「咪咪：早安」就自動分角色，
   名字不會被唸出來。
 - **間隔用拍算。** 1 是四分音符，0.5 是八分音符，每一句都落在拍點上。
@@ -38,7 +38,8 @@ Built for Chinese first; it speaks Japanese and English too.
 - **Import a MIDI file and the character sings.** Paste the lyrics, pick a track, and every
   syllable takes a note at the time the file says. Long notes are held, tones give way to the
   melody, and vibrato grows in. A `-` in the lyric holds a syllable over. Give it no
-  lyric and it sings the note names instead, fixed or movable do.
+  lyric and it sings the note names instead, fixed or movable do. Velocity is followed,
+  so a phrase has dynamics.
 - **Paste a whole script, get one layer per line**, voiced and laid out in sequence. Write
   `Mimi: Good morning` and the line joins that character without the name being spoken.
 - **Gaps are note values.** 1 is a crotchet, 0.5 a quaver, and every line lands on the beat.
@@ -65,7 +66,7 @@ After Effects のテキストレイヤーにそのままの声を持たせます
 - **MIDI を読み込めばキャラクターが歌います。** 歌詞を貼ってトラックを選ぶだけで、
   1 文字が 1 音を取り、MIDI 自身の時間に並びます。長い音は伸び、声調はメロディーに譲り、
   ビブラートがふくらみます。歌詞の `-` で同じ音節を次の音まで伸ばせます。
-  歌詞を与えなければ階名（ドレミ）で歌います。
+  歌詞を与えなければ階名（ドレミ）で歌います。ベロシティも反映されます。
 - **台本をまるごと貼れば 1 行が 1 レイヤー**になり、声が乗って順番に並びます。
   「ミミ：おはよう」と書けば名前は読まれず、その行がそのキャラに割り当てられます。
 - **間隔は音符の長さで指定。** 1 が 4 分音符、0.5 が 8 分音符。どの行も拍に乗ります。
@@ -86,4 +87,4 @@ Source-available: read the code, build it, use it commercially. Redistributing t
 build is not permitted. An original procedural synthesizer containing no audio assets and no
 Nintendo or *Animal Crossing* audio; not affiliated with Adobe or Nintendo.
 
-Version 1.7.0
+Version 1.8.0

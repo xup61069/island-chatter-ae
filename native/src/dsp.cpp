@@ -143,7 +143,25 @@ struct Event {
     // still matches a single eager pass (invariant 8d).
     double glide_from = 0.0;
     double glide_seconds = 0.0;
+    // How hard the note was struck, as a gain. One is the reference level every
+    // spoken syllable renders at, so a melody carrying no velocity — and every
+    // line the speaking engine produces — is unaffected.
+    double level = 1.0;
 };
+
+// MIDI velocity as a gain.
+//
+// Zero means the file said nothing, so nothing changes. Otherwise the range
+// stops well short of silence: a pianissimo note in a cartoon voice still has
+// to be heard, and the curve reaching exactly one at 127 means a file whose
+// velocities are all full sounds precisely as it did before dynamics existed.
+double velocity_level(int velocity) {
+    if (velocity <= 0) {
+        return 1.0;
+    }
+    const double scaled = std::min(127, velocity) / 127.0;
+    return 0.45 + 0.55 * std::pow(scaled, 1.2);
+}
 
 // How long one segment of a held note is allowed to be.
 //
@@ -1764,6 +1782,7 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             event.source_codepoint = codepoint;
             event.glide_from = previous_frequency > 0.0 ? previous_frequency : event.frequency;
             event.glide_seconds = std::min(portamento, duration * 0.5);
+            event.level = velocity_level(note.velocity);
             event.phase = random.next() * kTwoPi;
             event.seed = static_cast<std::uint32_t>(random.next() * 2147483000.0) + 1U;
             // The vowel the syllable ended on is the one that carries on, which
@@ -1889,6 +1908,7 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             }
             event.glide_from = origin;
             event.glide_seconds = std::min(portamento, duration * 0.5);
+            event.level = velocity_level(note.velocity);
             previous_frequency = event.frequency;
         } else {
             const int note_span = 2 + static_cast<int>(std::llround(
@@ -2268,7 +2288,7 @@ void render_event(Event& event, const Settings& settings, const Voice& voice, fl
         // kReferenceVolume and Volume is applied afterwards as a gain, so moving
         // the slider no longer invalidates the cache.
         const double mixed = (consonant * clamp(settings.consonant, 0.0, 6.0) * consonant_gain + vowel) *
-            attack * release * kReferenceVolume * emphasis_gain;
+            attack * release * kReferenceVolume * emphasis_gain * event.level;
         destination[local] = static_cast<float>((2.0 / kPi) * std::atan(mixed) * 0.915);
     }
 }

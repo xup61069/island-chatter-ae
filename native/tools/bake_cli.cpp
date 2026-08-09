@@ -125,20 +125,35 @@ std::vector<unsigned char> read_all(const std::string& path) {
         std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
 
-std::vector<island_chatter::MelodyNote> parse_melody(const std::string& value) {
-    std::vector<island_chatter::MelodyNote> melody;
+std::vector<int> parse_slots(const std::string& value) {
+    std::vector<int> slots;
     std::size_t index = 0;
     while (index < value.size()) {
         std::size_t next = value.find(',', index);
         if (next == std::string::npos) { next = value.size(); }
         if (next > index) {
-            melody.push_back(island_chatter::decode_melody_slot(
-                std::atoi(value.substr(index, next - index).c_str())));
+            slots.push_back(std::atoi(value.substr(index, next - index).c_str()));
         }
         index = next + 1U;
     }
-    if (melody.size() > island_chatter::kMelodySlots) {
+    return slots;
+}
+
+// A note is two slots. --melody-detail may be omitted or short, which is what a
+// project written before the detail block existed looks like: the missing
+// entries read as zero, which means no velocity and no extra length.
+std::vector<island_chatter::MelodyNote> build_melody(
+    const std::string& melody_slots, const std::string& detail_slots) {
+    const auto coarse = parse_slots(melody_slots);
+    const auto detail = parse_slots(detail_slots);
+    if (coarse.size() > island_chatter::kMelodySlots) {
         throw std::runtime_error("--melody carries more slots than the transport holds");
+    }
+    std::vector<island_chatter::MelodyNote> melody;
+    melody.reserve(coarse.size());
+    for (std::size_t index = 0; index < coarse.size(); ++index) {
+        melody.push_back(island_chatter::decode_melody(
+            coarse[index], index < detail.size() ? detail[index] : 0));
     }
     return melody;
 }
@@ -176,6 +191,12 @@ void print_song(const island_chatter::song::Assignment& assignment) {
             std::cout << " " << slot;
         }
         std::cout << "\n";
+        // Velocity and the fine part of each length, one for one with N.
+        std::cout << "D " << index;
+        for (const int slot : line.details) {
+            std::cout << " " << slot;
+        }
+        std::cout << "\n";
     }
     std::cout << "END " << assignment.lines.size() << "\n";
 }
@@ -209,6 +230,8 @@ int main(int argc, char** argv) {
         std::string output;
         std::string midi_path;
         std::string lyrics;
+        std::string melody_slots;
+        std::string detail_slots;
         std::size_t track = 0;
         int tonic = 0;
         bool have_text = false;
@@ -230,12 +253,9 @@ int main(int argc, char** argv) {
             else if (flag == "--track") track = std::strtoul(value.c_str(), nullptr, 10);
             else if (flag == "--tonic") tonic = std::atoi(value.c_str());
             else if (flag == "--melody") {
-                settings.melody = parse_melody(value);
-                // Asking for a melody is what turns the sung path on. Nothing
-                // else does, which is why a project saved before 1.7.0 — whose
-                // melody length reads as zero — still speaks.
-                settings.melody_mode = !settings.melody.empty();
+                melody_slots = value;
             }
+            else if (flag == "--melody-detail") { detail_slots = value; }
             else if (flag == "--melody-bpm") settings.melody_bpm = std::atof(value.c_str());
             else if (flag == "--transpose") settings.transpose = std::atoi(value.c_str());
             else if (flag == "--tone-blend") settings.tone_blend = std::atof(value.c_str());
@@ -267,6 +287,12 @@ int main(int argc, char** argv) {
             else if (flag == "--vibrato-rate") settings.vibrato_rate = std::atof(value.c_str());
             else usage();
         }
+        // Asking for a melody is what turns the sung path on. Nothing else
+        // does, which is why a project saved before 1.7.0 — whose melody length
+        // reads as zero — still speaks.
+        settings.melody = build_melody(melody_slots, detail_slots);
+        settings.melody_mode = !settings.melody.empty();
+
         // The MIDI modes are about a file, not about an utterance, so they run
         // before the text is required.
         if (list_tracks || dump_song) {

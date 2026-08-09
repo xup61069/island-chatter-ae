@@ -32,6 +32,8 @@ pronunciation adjustable.
 - Import a MIDI file and the character sings: one layer per lyric line, one note per syllable,
   placed at the times the file says
 - With no lyric at all, the melody sings its own note names — fixed or movable do
+- MIDI velocity becomes per-note dynamics, and timing resolves to a ninety-sixth of a
+  beat, so sixty-fourth notes and thirty-second triplets land exactly
 - Sung notes are held rather than clipped, tones give way to the melody, vibrato grows in on a
   long note, and pitches glide into each other; a `-` in the lyric holds a syllable over
 - Paste a whole script and get one layer per line, laid out in sequence, over-long lines split
@@ -155,6 +157,14 @@ tune.
 - **Chords are reduced to their top note**, and it says how many were discarded.
 - **A lyric that does not fit its melody is reported**: spare syllables finish on the last
   pitch, spare notes are left unsung, and both appear in the status line.
+- **Velocity is followed.** Each note takes its dynamics from the file. A melody at full
+  velocity sounds exactly like one carrying none, and the quietest note still carries.
+- **Speak** takes the melody off the selected lines without touching their voice. Apply
+  deliberately leaves a melody alone, so this is the way to undo an import on purpose.
+- **Pressing Sing again asks first** whether to remove the layers the last import left, rather
+  than quietly laying a second copy of the song on top.
+- **Re-flow skips sung lines**, because a song belongs at its MIDI times rather than on the
+  panel's beat grid.
 - **A line too long for one layer is split rather than cut.** A layer carries at most 64 melody
   slots (rests take one too) and 128 characters; the rest continues on the next layer, and the
   split **prefers a bar line**. It never falls inside a `[重|chong2]` override or through a

@@ -55,11 +55,18 @@
     var PARAM_PORTAMENTO = 149;
     var PARAM_VIBRATO_DELAY = 150;
     var PARAM_MELODY_FIRST = 151;
+    // Appended in 1.8.0: velocity and the fine part of each note's length. A
+    // 1.7.0 project reads these as zero, which is no dynamics and no extra
+    // length, and the coarse field alone still means the same durations.
+    var PARAM_MELODY_DETAIL_FIRST = 215;
     // One slot per note, holding pitch * 512 + ticks in the same 0-65535 range
     // a text unit uses. Mirrors kMelodySlots and kMelodySlotStride in
     // native/include/island_chatter/dsp.hpp.
     var MELODY_SLOTS = 64;
     var MELODY_SLOT_STRIDE = 512;
+    // A tick is a ninety-sixth of a beat, split across the two slots as
+    // coarse * 4 + extra. Mirrors kMelodyTicksPerBeat in dsp.hpp.
+    var MELODY_TICKS_PER_BEAT = 96;
     // One syllable slot in seconds before Speed is applied, matching
     // kSyllableStride in native/src/dsp.cpp. Speed for a tempo is therefore
     // BPM * syllablesPerBeat / (60 / kSyllableStride) = BPM * perBeat / 300.
@@ -150,6 +157,10 @@
         return effect.property(PARAM_MELODY_FIRST + index);
     }
 
+    function melodyDetailProperty(effect, index) {
+        return effect.property(PARAM_MELODY_DETAIL_FIRST + index);
+    }
+
     function setEffectParameters(effect, text, settings, time) {
         var units = Math.min(text.length, MAX_TEXT_UNITS);
         setPropertyValue(effect.property(PARAM_VOICE), settings.voice + 1, time);
@@ -204,9 +215,12 @@
             setPropertyValue(effect.property(PARAM_MELODY_LENGTH), notes, time);
             setPropertyValue(effect.property(PARAM_MELODY_BPM),
                 clamp(numberOr(settings.melodyBpm, 120), 20, 400), time);
+            var details = settings.melodyDetails || [];
             for (index = 0; index < MELODY_SLOTS; index += 1) {
                 setPropertyValue(melodySlotProperty(effect, index),
                     index < notes ? settings.melody[index] : 0, time);
+                setPropertyValue(melodyDetailProperty(effect, index),
+                    index < notes && index < details.length ? details[index] : 0, time);
             }
         }
     }
@@ -230,6 +244,16 @@
         return melody;
     }
 
+    function melodyDetailsFromEffect(effect) {
+        var notes = Math.min(Math.round(effect.property(PARAM_MELODY_LENGTH).value), MELODY_SLOTS);
+        var details = [];
+        var index;
+        for (index = 0; index < notes; index += 1) {
+            details.push(Math.round(melodyDetailProperty(effect, index).value));
+        }
+        return details;
+    }
+
     // The inverse of setEffectParameters(): what the layer is actually set to,
     // which is not necessarily what the panel is showing. The melody comes back
     // with it, which is what lets Re-sync rewrite an edited line without the
@@ -237,6 +261,7 @@
     function settingsFromEffect(effect) {
         return {
             melody: melodyFromEffect(effect),
+            melodyDetails: melodyDetailsFromEffect(effect),
             melodyBpm: effect.property(PARAM_MELODY_BPM).value,
             transpose: Math.round(effect.property(PARAM_MELODY_TRANSPOSE).value),
             toneBlend: effect.property(PARAM_TONE_BLEND).value / 100,
@@ -433,6 +458,7 @@
         var melody = melodyFromEffect(effect);
         if (!melody.length) { return ""; }
         return " --melody " + melody.join(",") +
+            " --melody-detail " + melodyDetailsFromEffect(effect).join(",") +
             " --melody-bpm " + effect.property(PARAM_MELODY_BPM).value +
             " --transpose " + Math.round(effect.property(PARAM_MELODY_TRANSPOSE).value) +
             " --tone-blend " + (effect.property(PARAM_TONE_BLEND).value / 100) +
@@ -2162,9 +2188,10 @@
                     notes: parseInt(fields[5], 10),
                     continued: parseInt(fields[6], 10) !== 0,
                     text: "",
-                    melody: []
+                    melody: [],
+                    details: []
                 });
-            } else if (fields[0] === "X" || fields[0] === "N") {
+            } else if (fields[0] === "X" || fields[0] === "N" || fields[0] === "D") {
                 var which = song.lines[parseInt(fields[1], 10)];
                 if (!which) { continue; }
                 for (at = 2; at < fields.length; at += 1) {
@@ -2174,6 +2201,7 @@
                     // reason the timing plan's do: stdout comes back through the
                     // console code page and would turn Chinese into "?".
                     if (fields[0] === "X") { which.text += characterFromCode(number); }
+                    else if (fields[0] === "D") { which.details.push(number); }
                     else { which.melody.push(number); }
                 }
             }
@@ -2197,6 +2225,46 @@
             " --track " + trackIndex +
             " --tonic " + Math.round(tonic || 0) +
             (words ? " --lyrics " + words : "")));
+    }
+
+    /*
+     * Turning a sung line back into a spoken one.
+     *
+     * Apply deliberately leaves a layer's melody alone, so that pressing it on a
+     * song does not silently undo the import — which leaves no way to undo it on
+     * purpose. This is that way. It reads the voice off the layer and puts it
+     * back with an empty melody, so nothing about the character changes, and
+     * refits the length because the line is about to get much shorter.
+     */
+    function clearMelody(comp, layer) {
+        var effect = findNativeEffect(layer);
+        if (!effect || !melodyFromEffect(effect).length) { return false; }
+        var voice = settingsFromEffect(effect);
+        voice.melody = [];
+        voice.melodyDetails = [];
+        setEffectParameters(effect, textFromLayer(layer), voice, comp.time);
+        effect = findNativeEffect(layer);
+        var plan = planFromEngine(effect);
+        layer.outPoint = Math.min(comp.duration,
+            Math.max(layer.inPoint + comp.frameDuration, layer.inPoint + plan.duration));
+        if (hasTimingMarkers(layer)) { updateTimingMarkers(layer, plan); }
+        markBakeStale(comp, layer);
+        return true;
+    }
+
+    // Layers an import created, so a second import can offer to replace them
+    // instead of laying a whole second copy of the song on top of the first.
+    var SONG_TAG_NAME = "IC Song";
+
+    function songLayers(comp) {
+        var found = [];
+        var index;
+        for (index = 1; index <= comp.numLayers; index += 1) {
+            if (findNamedEffect(comp.layer(index), SONG_TAG_NAME)) {
+                found.push(comp.layer(index));
+            }
+        }
+        return found;
     }
 
     function importSong(midiFile, trackIndex, lyrics, settings, options, tonic) {
@@ -2258,8 +2326,10 @@
                 if (settings.hasOwnProperty(key)) { lineSettings[key] = settings[key]; }
             }
             lineSettings.melody = line.melody;
+            lineSettings.melodyDetails = line.details;
             lineSettings.melodyBpm = line.bpm;
             var applied = applyToTextLayer(comp, layer, "", lineSettings, sung, fallbackRig);
+            ensureSlider(layer, SONG_TAG_NAME, 1);
             if (applied.unmarkedKanji) { unmarked.push(applied.unmarkedKanji); }
             // The engine splits a long line rather than cutting it, so this
             // should never fire. It is reported anyway: silently losing the
@@ -2415,14 +2485,30 @@
      * Everything else follows it. Baked audio moves with its line, or the sound
      * ends up under whatever line has taken that place on the timeline.
      */
+    /*
+     * A sung line is not re-flowed.
+     *
+     * Re-flow lays dialogue out end to end on the beat grid, which is exactly
+     * the wrong thing to do to a song: an imported melody sits at the times its
+     * MIDI file says, and dragging it onto the panel's grid takes it off its own
+     * accompaniment. They are skipped and counted rather than refused, because a
+     * scene can hold both and the spoken lines still want tidying.
+     */
     function reflowLayers(comp, layers, gapBeats, bpm) {
         var ordered = [];
+        var sung = 0;
         var index;
         for (index = 0; index < layers.length; index += 1) {
-            if (findNativeEffect(layers[index])) { ordered.push(layers[index]); }
+            var candidate = findNativeEffect(layers[index]);
+            if (!candidate) { continue; }
+            if (melodyFromEffect(candidate).length) { sung += 1; continue; }
+            ordered.push(layers[index]);
         }
         if (!ordered.length) {
-            throw new Error("Select the lines to lay out. / 請選取要排列的台詞圖層。");
+            throw new Error(sung
+                ? "Those lines are singing; Re-flow would take them off their MIDI times." +
+                    "\n選到的都是唱歌圖層。重新排列會把它們從 MIDI 的時間拉走，所以跳過了。"
+                : "Select the lines to lay out. / 請選取要排列的台詞圖層。");
         }
         ordered.sort(function (first, second) {
             return first.inPoint - second.inPoint || first.index - second.index;
@@ -2464,6 +2550,7 @@
         return {
             count: ordered.length,
             rigs: touched.length,
+            sungSkipped: sung,
             grew: comp.duration > wasDuration ? comp.duration : 0,
             overlaps: overlaps
         };
@@ -2560,6 +2647,7 @@
         "Speakers / 含角色名": "話者名つき",
         "Choose MIDI / 選 MIDI": "MIDI を選ぶ",
         "Sing / 唱出來": "歌わせる",
+        "Speak / 改回講話": "しゃべりに戻す",
         "Key / 唱名調": "階名のド",
         "Transpose / 移調": "移調",
         "Tone / 聲調": "声調",
@@ -3104,6 +3192,11 @@
             "\n歌要對在它自己的時間上。長度一律配合旋律。" +
             "\n一個字配一個音，依序發下去；歌詞裡打一個 - 代表前一個字延續唱到下一個音。" +
             "\n和弦只取最高音。音符和字數對不上時會在下面說，不會默默處理。";
+        var clearMelodyButton = singRow.add("button", undefined, "Speak / 改回講話");
+        clearMelodyButton.helpTip = "Take the melody off the selected lines so they speak again." +
+            "\n把選取圖層上的旋律拿掉，變回一般講話。" +
+            "\n\n聲音設定完全不動，長度會重新配合講話的長短。" +
+            "\nApply 是故意不會清掉旋律的（免得誤刪一整首歌），所以要清就按這個。";
         var songReadout = singRow.add("statictext", undefined, "");
         songReadout.preferredSize.width = 190;
 
@@ -3686,6 +3779,7 @@
                 var laid = reflowLayers(comp, layers, currentGapBeats(), currentBpm());
                 status.text = "Re-flowed / 已排列 " + laid.count + " layer(s) @ " +
                     currentGapBeats() + " 拍" +
+                    (laid.sungSkipped ? "  (唱歌 " + laid.sungSkipped + " 層維持原位)" : "") +
                     (laid.rigs ? "  rig x" + laid.rigs : "") +
                     (laid.grew ? "  合成延長到 " + laid.grew.toFixed(2) + "s" : "");
                 if (laid.overlaps.length) {
@@ -3788,8 +3882,26 @@
                 alert("Choose a track first. / 請先選一個軌道。");
                 return;
             }
+            // A second import used to lay a whole extra copy of the song on top
+            // of the first, with no hint that it had.
+            var comp = app.project ? app.project.activeItem : null;
+            var already = (comp && comp instanceof CompItem) ? songLayers(comp) : [];
+            var replacing = false;
+            if (already.length) {
+                replacing = confirm("There are already " + already.length +
+                    " layer(s) here from an earlier MIDI import." +
+                    "\n這個合成裡已經有 " + already.length + " 層是之前匯入的。" +
+                    "\n\n要先移除它們嗎？按「否」就直接再加一份。");
+            }
             app.beginUndoGroup(SCRIPT_NAME + " - Import MIDI");
             try {
+                if (replacing) {
+                    var gone;
+                    for (gone = already.length - 1; gone >= 0; gone -= 1) {
+                        removeFromLayer(comp, already[gone]);
+                        already[gone].remove();
+                    }
+                }
                 var sungSettings = currentSettings();
                 var sung = importSong(chosenMidi, track.index, lyrics, sungSettings,
                     currentOptions(), currentSolfegeKey());
@@ -3824,6 +3936,35 @@
             } finally {
                 app.endUndoGroup();
                 remember();
+            }
+        };
+
+        clearMelodyButton.onClick = function () {
+            var comp = app.project ? app.project.activeItem : null;
+            if (!(comp && comp instanceof CompItem)) {
+                alert("Open an active composition first. / 請先開啟合成。");
+                return;
+            }
+            var chosen = selectedTextLayers(comp);
+            if (!chosen.length) {
+                alert("Select the lines to turn back into speech. / 請選取要改回講話的圖層。");
+                return;
+            }
+            app.beginUndoGroup(SCRIPT_NAME + " - Clear melody");
+            try {
+                var cleared = 0;
+                var at;
+                for (at = 0; at < chosen.length; at += 1) {
+                    if (clearMelody(comp, chosen[at])) { cleared += 1; }
+                }
+                status.text = cleared
+                    ? "Speaking again / 已改回講話 " + cleared + " 層"
+                    : "None of those were singing / 選取的圖層沒有旋律";
+            } catch (error) {
+                status.text = "Error / 錯誤";
+                alert(error.toString());
+            } finally {
+                app.endUndoGroup();
             }
         };
 

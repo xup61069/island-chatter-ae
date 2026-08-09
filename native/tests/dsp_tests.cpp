@@ -851,9 +851,11 @@ int main() {
 
     // --- Singing -----------------------------------------------------------
     {
+        // Built through the transport encoding on purpose, so the round trip
+        // is exercised by every case below rather than assumed.
         const auto slot = [](int pitch, int ticks) {
-            return island_chatter::decode_melody_slot(
-                island_chatter::encode_melody_slot(pitch, ticks));
+            const auto pair = island_chatter::encode_melody(pitch, ticks, 0);
+            return island_chatter::decode_melody(pair.melody, pair.detail);
         };
         const int beat = island_chatter::kMelodyTicksPerBeat;
 
@@ -1046,6 +1048,52 @@ int main() {
                 // far tighter than a wrong note.
                 require(std::abs(cents) < 20.0, "a sung note came out at the wrong pitch");
             }
+        }
+
+        // Velocity is a per-note gain, and full velocity is the reference.
+        //
+        // That last part is what keeps a melody carrying no dynamics — every
+        // 1.7.0 project — sounding exactly as it did: the curve reaches one at
+        // 127, and zero means "the file said nothing" rather than silence.
+        {
+            island_chatter::Settings loud = sung;
+            loud.melody.clear();
+            loud.melody.push_back(island_chatter::MelodyNote{60, beat * 2, 127});
+            island_chatter::Settings silentAboutIt = loud;
+            silentAboutIt.melody[0].velocity = 0;
+            require(island_chatter::synthesize(loud).samples ==
+                    island_chatter::synthesize(silentAboutIt).samples,
+                "full velocity should sound the same as no velocity at all");
+
+            island_chatter::Settings soft = loud;
+            soft.melody[0].velocity = 20;
+            const auto quiet = island_chatter::synthesize(soft);
+            const auto full = island_chatter::synthesize(loud);
+            require(quiet.diagnostics.peak < full.diagnostics.peak * 0.85F,
+                "a soft note is not quieter than a loud one");
+            require(quiet.diagnostics.peak > full.diagnostics.peak * 0.25F,
+                "a soft note vanished; the range should stop well short of silence");
+        }
+
+        // The finer tick unit has to reach the notes it was widened for.
+        {
+            island_chatter::Settings fast = sung;
+            fast.text = "一二三四";
+            fast.melody.clear();
+            // Four sixty-fourth notes: a sixteenth of a beat each.
+            for (int index = 0; index < 4; ++index) {
+                fast.melody.push_back(island_chatter::MelodyNote{
+                    60 + index, island_chatter::kMelodyTicksPerBeat / 16, 0});
+            }
+            const auto quick = island_chatter::synthesize(fast);
+            require(quick.diagnostics.event_count == 4, "four short notes are four syllables");
+            // A sixteenth of a beat at 120 BPM is 31.25 ms, which is 1500
+            // samples at 48 kHz. The old twenty-fourth grid could not describe
+            // it at all.
+            require(quick.diagnostics.length_samples[0] == 1500,
+                "a sixty-fourth note came out the wrong length");
+            require(quick.diagnostics.start_samples[1] == 1500,
+                "the second short note starts in the wrong place");
         }
 
         // A melisma holds the syllable through the next note: one syllable, two

@@ -263,7 +263,7 @@ for (const filePath of extendScriptFiles) {
 // The parameter ABI is split across three files. Keep them in lockstep.
 const paramsHeader = fs.readFileSync(
   path.join(root, "native", "plugin", "params.hpp"), "utf8");
-if (!/static_assert\(kParamCount == 215/.test(paramsHeader)) {
+if (!/static_assert\(kParamCount == 279/.test(paramsHeader)) {
   throw new Error("params.hpp no longer asserts the published parameter count");
 }
 for (const pinned of [
@@ -272,6 +272,7 @@ for (const pinned of [
   /static_assert\(kParamTextSecondFirst == 81/,
   /static_assert\(kParamMelodyLength == 145/,
   /static_assert\(kParamMelodyFirst == 151/,
+  /static_assert\(kParamMelodyDetailFirst == 215/,
 ]) {
   if (!pinned.test(paramsHeader)) {
     throw new Error("params.hpp must pin the published indices so appends cannot shift them");
@@ -288,7 +289,7 @@ for (const [constant, index] of [
   ["PARAM_MELODY_LENGTH", 145], ["PARAM_MELODY_BPM", 146],
   ["PARAM_MELODY_TRANSPOSE", 147], ["PARAM_TONE_BLEND", 148],
   ["PARAM_PORTAMENTO", 149], ["PARAM_VIBRATO_DELAY", 150],
-  ["PARAM_MELODY_FIRST", 151],
+  ["PARAM_MELODY_FIRST", 151], ["PARAM_MELODY_DETAIL_FIRST", 215],
 ]) {
   if (!new RegExp(`var ${constant} = ${index};`).test(nativePanelSource)) {
     throw new Error(`Panel ${constant} must stay at published index ${index}`);
@@ -306,6 +307,7 @@ for (const [constant, index] of [
     149: /PF_ADD_FLOAT_SLIDERX\("Portamento[^;]*?ae::kParamPortamento\);/s,
     150: /PF_ADD_FLOAT_SLIDERX\("Vibrato Delay[^;]*?ae::kParamVibratoDelay\);/s,
     151: /PF_ADD_SLIDER\("Melody note"[^;]*?ae::kParamMelodyFirst \+ index\)\);/s,
+    215: /PF_ADD_SLIDER\("Melody detail"[^;]*?ae::kParamMelodyDetailFirst \+ index\)\);/s,
   }[index];
   const registered = named || new RegExp(`PF_ADD_[A-Z_]+\\([^;]*?[ ,]${index}\\);`, "s");
   if (!registered.test(nativePluginSource)) {
@@ -350,14 +352,18 @@ if (/PARAM_TEXT_FIRST \+ index\)/.test(
   // The melody transport is one loop of kMelodySlots, and it has the same
   // failure mode: a wrong bound walks its ids past num_params and After Effects
   // refuses the whole effect with "parameter count mismatch".
-  const melodyLoops = [...nativePluginSource.matchAll(
-    /for \(std::size_t index = 0; index < island_chatter::ae::(\w+); \+\+index\) \{[\s\S]{0,400}?PF_ADD_SLIDER\("Melody note"/g)];
-  if (melodyLoops.length !== 1) {
-    throw new Error(`Expected one melody registration loop, found ${melodyLoops.length}`);
-  }
-  if (melodyLoops[0][1] !== "kMelodySlots") {
-    throw new Error(
-      `The melody loop is bounded by ${melodyLoops[0][1]}; it registers kMelodySlots`);
+  for (const which of ["Melody note", "Melody detail"]) {
+    const melodyLoops = [...nativePluginSource.matchAll(new RegExp(
+      "for \\(std::size_t index = 0; index < island_chatter::ae::(\\w+); \\+\\+index\\) \\{" +
+      `[\\s\\S]{0,400}?PF_ADD_SLIDER\\("${which}"`,
+      "g"))];
+    if (melodyLoops.length !== 1) {
+      throw new Error(`Expected one ${which} registration loop, found ${melodyLoops.length}`);
+    }
+    if (melodyLoops[0][1] !== "kMelodySlots") {
+      throw new Error(
+        `The ${which} loop is bounded by ${melodyLoops[0][1]}; it registers kMelodySlots`);
+    }
   }
 }
 
@@ -374,9 +380,15 @@ if (/PARAM_TEXT_FIRST \+ index\)/.test(
   // pitch * 512 + ticks is what makes a note fit one 0-65535 slider. If the
   // stride and the tick ceiling ever disagree, notes silently collide.
   if (!/kMelodySlotStride = 512;/.test(dspHeader) ||
-      !/kMelodyMaxTicks = 511;/.test(dspHeader) ||
+      !/kMelodyCoarseStride = 4;/.test(dspHeader) ||
       !/var MELODY_SLOT_STRIDE = 512;/.test(nativePanelSource)) {
     throw new Error("The melody slot encoding is not synchronized");
+  }
+  // The tick unit is written down in both places and decides what a stored
+  // melody means; a mismatch would play every note at the wrong length.
+  if (!/kMelodyTicksPerBeat = 96;/.test(dspHeader) ||
+      !/var MELODY_TICKS_PER_BEAT = 96;/.test(nativePanelSource)) {
+    throw new Error("The melody tick unit is not synchronized");
   }
 }
 
@@ -1443,7 +1455,7 @@ for (const smokeFragment of [
   'comp.layers.addText("你好，中文聲音測試！")',
   'effects.addProperty(TONE_MATCH_NAME)',
   'effects.addProperty(EFFECT_NAME)',
-  "EXPECTED_PARAMETERS = 215",
+  "EXPECTED_PARAMETERS = 279",
   '"External audio files: 0"',
 ]) {
   if (!aeSmokeSource.includes(smokeFragment)) {
@@ -1455,7 +1467,7 @@ for (const smokeFragment of [
 {
   const hostRegressionSource = fs.readFileSync(
     path.join(root, "native", "tests", "ae-host-regression.jsx"), "utf8");
-  if (!hostRegressionSource.includes("chatter.numProperties === 215")) {
+  if (!hostRegressionSource.includes("chatter.numProperties === 279")) {
     throw new Error("ae-host-regression.jsx no longer checks the published parameter count");
   }
 }

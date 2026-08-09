@@ -6,10 +6,10 @@
     var report = new File(root + "/ae-smoke-test-result.txt");
     var EFFECT_NAME = "Island Chatter Native";
     var TONE_MATCH_NAME = "ADBE Aud Tone";
-    // 1 implicit input + 214 registered parameters. After Effects also reports a
+    // 1 implicit input + 278 registered parameters. After Effects also reports a
     // trailing built-in group, so the scripted count matches by construction.
-    var EXPECTED_PARAMETERS = 215;
-    var EXPECTED_VERSION = "1.7.0";
+    var EXPECTED_PARAMETERS = 279;
+    var EXPECTED_VERSION = "1.8.0";
     var ownsProject = false;
 
     function writeReport(message) {

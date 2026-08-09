@@ -106,7 +106,7 @@
             check(tone.propertyIndex < chatter.propertyIndex, "Tone sits before the native effect");
             check(tone.propertyIndex === chatter.propertyIndex - 1, "Tone is immediately before it");
             check(tone.property(6).value === 0, "Tone level is zero");
-            check(chatter.numProperties === 215, "native effect exposes 215 parameters, got " + chatter.numProperties);
+            check(chatter.numProperties === 279, "native effect exposes 279 parameters, got " + chatter.numProperties);
             check(Math.round(chatter.property(6).value) === TEXT.length,
                 "text length parameter is " + TEXT.length + ", got " + Math.round(chatter.property(6).value));
             var textOk = true;
@@ -865,8 +865,8 @@
         var singEffect = findNativeEffect(singLayer);
         check(singEffect !== null, "the native effect is on the sung layer");
         if (singEffect) {
-            check(singEffect.numProperties === 215,
-                "the effect registers 215 parameters (got " + singEffect.numProperties + ")");
+            check(singEffect.numProperties === 279,
+                "the effect registers 279 parameters (got " + singEffect.numProperties + ")");
             var readMelody = melodyFromEffect(singEffect);
             var sameMelody = readMelody.length === singMelody.length;
             var m;

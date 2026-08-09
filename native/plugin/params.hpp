@@ -44,6 +44,11 @@ enum ParamIndex : int {
     kParamPortamento,
     kParamVibratoDelay,
     kParamMelodyFirst,
+    // Appended in 1.8.0, one per melody slot: velocity and the fine part of the
+    // note's length. A 1.7.0 project reads these as zero, which means no
+    // dynamics and no extra length — and because the tick unit is now four
+    // times finer, the coarse field alone still describes the same durations.
+    kParamMelodyDetailFirst = kParamMelodyFirst + 64,
 };
 
 // Units 0-63 live at kParamTextFirst, 64-127 at kParamTextSecondFirst.
@@ -54,13 +59,14 @@ inline constexpr std::size_t kMaxTextUnits = kTextUnitsPerBlock * 2;
 // static_asserts that the two agree.
 inline constexpr std::size_t kMelodySlots = 64;
 inline constexpr int kParamCount =
-    kParamMelodyFirst + static_cast<int>(kMelodySlots);
+    kParamMelodyDetailFirst + static_cast<int>(kMelodySlots);
 
 static_assert(kParamSeed == 75, "Published parameter indices must never move");
 static_assert(kParamTempoLock == 76, "Published parameter indices must never move");
 static_assert(kParamTextSecondFirst == 81, "Published parameter indices must never move");
 static_assert(kParamMelodyLength == 145, "Published parameter indices must never move");
 static_assert(kParamMelodyFirst == 151, "Published parameter indices must never move");
-static_assert(kParamCount == 215, "Changing the parameter count breaks saved AE projects");
+static_assert(kParamMelodyDetailFirst == 215, "Published parameter indices must never move");
+static_assert(kParamCount == 279, "Changing the parameter count breaks saved AE projects");
 
 }  // namespace island_chatter::ae

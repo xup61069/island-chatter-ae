@@ -66,30 +66,64 @@ struct Voice {
 // the same way text is: in appended, invisible parameters that an older project
 // simply reads as zero. pitch * 512 + ticks fills those sixteen bits exactly.
 //
-// A tick is a twenty-fourth of a beat, which divides both triplets (4 ticks to
-// a triplet sixteenth) and thirty-second notes (3 ticks) without a remainder.
-// Nine bits of it reach 21.3 beats, longer than anything anyone sustains.
+// A tick is a ninety-sixth of a beat, which divides sixty-fourth notes (6
+// ticks), thirty-second triplets (8) and everything coarser without a
+// remainder. It does not fit in one slider beside the pitch, so a note is two:
+//
+//   melody slot : pitch * 512 + coarse        coarse in quarters of a tick unit
+//   detail slot : velocity * 512 + extra      extra makes up the remainder
+//
+//   ticks = coarse * 4 + extra
+//
+// That split is what keeps 1.7.0 projects sounding the same. Their detail slots
+// read as zero, so ticks = coarse * 4 — and since the tick unit is now four
+// times finer, that is exactly the duration coarse meant when it was
+// twenty-fourths. Velocity zero means the file said nothing about dynamics and
+// the note is sung at the reference level, which is what those projects get.
 inline constexpr std::size_t kMelodySlots = 64;
-inline constexpr int kMelodyTicksPerBeat = 24;
-inline constexpr int kMelodyMaxTicks = 511;
+inline constexpr int kMelodyTicksPerBeat = 96;
+// How many tick units one step of the coarse field is worth.
+inline constexpr int kMelodyCoarseStride = 4;
+inline constexpr int kMelodyMaxField = 511;
 inline constexpr int kMelodySlotStride = 512;
+// The longest note two fields can describe together.
+inline constexpr int kMelodyMaxTicks =
+    kMelodyMaxField * kMelodyCoarseStride + kMelodyMaxField;
 
 struct MelodyNote {
     // MIDI note number, or zero for a rest. Losing note 0 costs nothing: it is
     // C-1 at 8.18 Hz, an octave below the bottom of a piano.
     int pitch = 0;
     int ticks = 0;
+    // 1-127 as the file wrote it, or 0 for "no dynamics given".
+    int velocity = 0;
 };
 
-inline constexpr int encode_melody_slot(int pitch, int ticks) {
-    const int held = pitch < 0 ? 0 : (pitch > 127 ? 127 : pitch);
-    const int held_ticks = ticks < 0 ? 0 : (ticks > kMelodyMaxTicks ? kMelodyMaxTicks : ticks);
-    return held * kMelodySlotStride + held_ticks;
+struct MelodySlotPair {
+    int melody = 0;
+    int detail = 0;
+};
+
+inline constexpr int clamp_field(int value, int highest) {
+    return value < 0 ? 0 : (value > highest ? highest : value);
 }
 
-inline constexpr MelodyNote decode_melody_slot(int slot) {
-    const int held = slot < 0 ? 0 : (slot > 65535 ? 65535 : slot);
-    return MelodyNote{held / kMelodySlotStride, held % kMelodySlotStride};
+inline constexpr MelodySlotPair encode_melody(int pitch, int ticks, int velocity) {
+    const int held_ticks = clamp_field(ticks, kMelodyMaxTicks);
+    const int coarse = clamp_field(held_ticks / kMelodyCoarseStride, kMelodyMaxField);
+    const int extra = clamp_field(held_ticks - coarse * kMelodyCoarseStride, kMelodyMaxField);
+    return MelodySlotPair{
+        clamp_field(pitch, 127) * kMelodySlotStride + coarse,
+        clamp_field(velocity, 127) * kMelodySlotStride + extra};
+}
+
+inline constexpr MelodyNote decode_melody(int melody_slot, int detail_slot) {
+    const int melody = clamp_field(melody_slot, 65535);
+    const int detail = clamp_field(detail_slot, 65535);
+    return MelodyNote{
+        melody / kMelodySlotStride,
+        (melody % kMelodySlotStride) * kMelodyCoarseStride + (detail % kMelodySlotStride),
+        detail / kMelodySlotStride};
 }
 
 struct Settings {

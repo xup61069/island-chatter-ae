@@ -21,6 +21,9 @@ struct Line {
     // the beat labelling becomes nominal.
     double bpm = 120.0;
     std::vector<int> slots;
+    // One per melody slot, carrying velocity and the fine part of the
+    // length. Always the same size as `slots`.
+    std::vector<int> details;
     std::size_t syllables = 0;
     std::size_t notes = 0;
     // This line is the rest of the one before it. A lyric line, or a stretch of

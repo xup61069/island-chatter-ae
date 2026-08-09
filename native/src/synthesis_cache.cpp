@@ -53,6 +53,7 @@ std::string settings_key(const Settings& settings) {
     for (const auto& note : settings.melody) {
         append_binary(key, note.pitch);
         append_binary(key, note.ticks);
+        append_binary(key, note.velocity);
     }
     return key;
 }

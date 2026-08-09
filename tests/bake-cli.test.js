@@ -252,6 +252,18 @@ const planOf = (text, extra = []) => {
       "--dump-song places a line at the time of its first note");
     check(/^EXTRA \d+ \d+ \d+ \d+$/m.test(song),
       "--dump-song reports leftovers, dropped chord notes and splits");
+    // Every note is two slots, and the second list is what carries velocity and
+    // the fine part of the length. A missing D record looks like nothing at all
+    // going wrong: the melody still plays, just flat and on the coarse grid.
+    {
+      const nLines = lines.filter((line) => line.startsWith("N "));
+      const dLines = lines.filter((line) => line.startsWith("D "));
+      check(dLines.length === nLines.length,
+        `every line has a detail record (${dLines.length} D vs ${nLines.length} N)`);
+      const sameLength = nLines.every((line, at) =>
+        line.split(" ").length === (dLines[at] || "").split(" ").length);
+      check(sameLength, "each detail record has one entry per melody slot");
+    }
 
     // With no lyrics the melody sings its own note names, and they come back as
     // the text for the layer — which is what makes the feature need no new

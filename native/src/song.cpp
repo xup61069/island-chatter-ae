@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 namespace island_chatter::song {
@@ -233,6 +234,12 @@ Assignment assign(
         bool ran_out_of_room = false;
         {
             std::size_t slots = 0;
+            // Note names are generated text, and they are wordy: "sol " is four
+            // units, so sixty-four of them is around two hundred — well past
+            // what the text transport carries. Counting only the melody slots
+            // let a full layer of notes arrive with half its words missing,
+            // because the panel then truncated the text and nothing said so.
+            std::size_t units = utf16_length(line.text);
             long long dry_cursor = 0;
             std::size_t at = note_index;
             while (take < want && at < melody.notes.size()) {
@@ -251,11 +258,18 @@ Assignment assign(
                     bar_cut = take;
                 }
                 const bool wants_rest = rest >= kSmallestRestTicks && take > 0;
-                if (slots + (wants_rest ? 2U : 1U) > kMelodySlots) {
+                std::size_t wanted_units = 0;
+                if (naming) {
+                    wanted_units = std::strlen(solfege_name(note.pitch, tonic)) +
+                        (units > 0 ? 1U : 0U);
+                }
+                if (slots + (wants_rest ? 2U : 1U) > kMelodySlots ||
+                        units + wanted_units > kMaxTextUnits) {
                     ran_out_of_room = true;
                     break;
                 }
                 slots += wants_rest ? 2U : 1U;
+                units += wanted_units;
                 dry_cursor = on + std::max<long long>(1, off - on);
                 ++take;
                 ++at;
@@ -296,12 +310,17 @@ Assignment assign(
 
             const bool wants_rest = rest >= kSmallestRestTicks && line.notes > 0;
             if (wants_rest) {
-                line.slots.push_back(encode_melody_slot(
-                    0, static_cast<int>(std::min<long long>(rest, kMelodyMaxTicks))));
+                const auto pair = encode_melody(
+                    0, static_cast<int>(std::min<long long>(rest, kMelodyMaxTicks)), 0);
+                line.slots.push_back(pair.melody);
+                line.details.push_back(pair.detail);
             }
-            line.slots.push_back(encode_melody_slot(
+            const auto pair = encode_melody(
                 std::min(127, std::max(1, static_cast<int>(note.pitch))),
-                static_cast<int>(std::min<long long>(sounding, kMelodyMaxTicks))));
+                static_cast<int>(std::min<long long>(sounding, kMelodyMaxTicks)),
+                note.velocity);
+            line.slots.push_back(pair.melody);
+            line.details.push_back(pair.detail);
             if (naming) {
                 if (!line.text.empty()) { line.text.push_back(' '); }
                 line.text += solfege_name(note.pitch, tonic);

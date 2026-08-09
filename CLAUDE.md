@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v1.6.1` (Windows x64).
+- Current public release: `v1.8.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -66,11 +66,11 @@ effect.
 ## Compatibility invariants
 
 1. **Parameter order is a saved-project ABI.** `params.hpp`, the native plug-in, the panel constants,
-   PiPL version, and tests must remain synchronized. There are 215 slots including input: input
+   PiPL version, and tests must remain synchronized. There are 279 slots including input: input
    `0`, visible voice controls `1-5`, text length `6`, text units 0-63 at `7-70`, creative
    controls `71-75`, tempo lock `76`, timbre `77-80`, text units 64-127 at `81-144`, melody
-   length `145`, melody tempo/transpose/tone-blend/portamento/vibrato-delay `146-150`, and
-   melody slots 0-63 at `151-214`.
+   length `145`, melody tempo/transpose/tone-blend/portamento/vibrato-delay `146-150`,
+   melody slots 0-63 at `151-214`, and melody detail slots 0-63 at `215-278`.
    Append new parameters; never reorder or reuse a
    published index. Every appended parameter needs a default that reproduces the previous
    behaviour, or older projects change how they sound when they are opened.
@@ -311,11 +311,24 @@ effect.
     action the user presses constantly. The recording is found through the `IC Bake` Layer
     Control first and only then by name, because Import names every layer after its own text
     and an edit therefore renames it.
-8t. **A melody is one slider per note, and length zero is what keeps 1.6.x safe.**
-    `pitch * 512 + ticks` fills a 0-65535 slider exactly: pitch 0-127 with 0 meaning a rest,
-    and nine bits of ticks at a twenty-fourth of a beat, which divides both triplets and
-    thirty-seconds and reaches 21 beats. Sixty-four slots, registered in one loop, appended
-    after the second text block for the same reason that block was appended where it was.
+8t. **A melody is two sliders per note, and length zero is what keeps 1.6.x safe.**
+    A note does not fit in sixteen bits beside its pitch, so it is split across two appended
+    blocks:
+
+        melody slot : pitch * 512 + coarse       pitch 0-127, 0 meaning a rest
+        detail slot : velocity * 512 + extra     velocity 0 meaning "not given"
+        ticks       = coarse * 4 + extra         a tick is a ninety-sixth of a beat
+
+    That split is not decoration: it is what let 1.8.0 make the grid four times finer without
+    reinterpreting a published index. A 1.7.0 project has no detail block, so its slots read
+    as zero, `ticks = coarse * 4`, and because the unit shrank by the same factor of four the
+    duration is bit-for-bit the one it always meant. Velocity zero means the file said nothing
+    about dynamics, not that the note is silent — and `velocity_level()` reaches exactly 1.0 at
+    127, so a melody at full velocity sounds like one carrying no velocity at all.
+
+    A ninety-sixth of a beat divides sixty-fourth notes (6 ticks) and thirty-second triplets
+    (8). Sixty-four slots per block, each registered in one loop, appended after the block
+    before it for the same reason that one was appended where it was.
 
     The engine never infers singing from the notes alone: `melody_mode` is a separate flag,
     because the importer has to ask how many notes a lyric line wants *before* it has any,

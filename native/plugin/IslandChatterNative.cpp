@@ -94,8 +94,12 @@ std::vector<island_chatter::MelodyNote> melody_from_params(PF_ParamDef* params[]
     std::vector<island_chatter::MelodyNote> melody;
     melody.reserve(static_cast<std::size_t>(length));
     for (A_long index = 0; index < length; ++index) {
-        melody.push_back(island_chatter::decode_melody_slot(std::clamp<A_long>(
-            params[island_chatter::ae::kParamMelodyFirst + index]->u.sd.value, 0, 65535)));
+        melody.push_back(island_chatter::decode_melody(
+            std::clamp<A_long>(
+                params[island_chatter::ae::kParamMelodyFirst + index]->u.sd.value, 0, 65535),
+            std::clamp<A_long>(
+                params[island_chatter::ae::kParamMelodyDetailFirst + index]->u.sd.value,
+                0, 65535)));
     }
     return melody;
 }
@@ -279,6 +283,16 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
         def.ui_flags = PF_PUI_INVISIBLE;
         PF_ADD_SLIDER("Melody note", 0, 65535, 0, 65535, 0,
             static_cast<A_long>(island_chatter::ae::kParamMelodyFirst + index));
+    }
+    // Velocity and the fine part of each note's length, appended in 1.8.0.
+    // Bounded by kMelodySlots for the same reason the two blocks above are: a
+    // wrong bound walks these ids past num_params and After Effects refuses the
+    // whole effect with "parameter count mismatch".
+    for (std::size_t index = 0; index < island_chatter::ae::kMelodySlots; ++index) {
+        AEFX_CLR_STRUCT(def);
+        def.ui_flags = PF_PUI_INVISIBLE;
+        PF_ADD_SLIDER("Melody detail", 0, 65535, 0, 65535, 0,
+            static_cast<A_long>(island_chatter::ae::kParamMelodyDetailFirst + index));
     }
     out_data->num_params = island_chatter::ae::kParamCount;
     return PF_Err_NONE;
