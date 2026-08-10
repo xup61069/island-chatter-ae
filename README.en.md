@@ -36,8 +36,8 @@ pronunciation adjustable.
   beat, so sixty-fourth notes and thirty-second triplets land exactly
 - Sung notes are held rather than clipped, tones give way to the melody, vibrato grows in on a
   long note, and pitches glide into each other; a `-` in the lyric holds a syllable over
-- The mouth stays open through a sung phrase and closes only on a real rest, instead of
-  twitching shut between every note
+- The mouth closes only where there is a pause to close for; consecutive syllables just change
+  shape. Tick Chatter for the old syllable-by-syllable flap
 - Paste a whole script and get one layer per line, laid out in sequence, over-long lines split
 - Speaker names in the script assign each line to its character in one pass
 - Gaps are counted in beats, and every line lands on the beat

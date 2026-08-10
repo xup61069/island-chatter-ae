@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v1.9.1` (Windows x64).
+- Current public release: `v1.10.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -358,7 +358,21 @@ effect.
     Type-On steps. `dsp_tests.cpp` measures the step at each seam against the largest step
     anywhere else in the note — not against every step, which would include the seams and
     could never fail.
-8x. **The mouth shuts on a gap, not on a percentage.** Speaking, every syllable closes at 82%
+8x. **The mouth shuts on a gap, not on a percentage — and that is now the default for speech
+    too.** Until 1.9.1 every syllable closed at 82% of its length. On ten syllables of ordinary
+    dialogue that is nineteen open-shut cycles with the mouth shut 41% of the frames, reported
+    twice as the mouth "constantly cutting to the closed layer". From 1.10.0 a spoken line
+    closes only where there is a pause, leaving five closes at the punctuation and the end.
+
+    The old look is a panel tick, `mouthChatter`, and ticking it reproduces 1.3.0 key for key —
+    `validate-script.js` still pins that path exactly, which is what invariant 8l asks for; the
+    default path is pinned beside it. A sung line ignores the tick entirely, because there the
+    short closes are sub-frame and that is a sampling artefact rather than a style.
+
+    `mouthChatter` is a panel-wide preference read at the two places that build a rig, not a
+    per-layer parameter: a scene with half its lines flapping and half legato is not a look
+    anyone wants, and it would otherwise need an ABI slot. Nothing rewrites existing keys until
+    the user presses Rebuild or Apply. Speaking, every syllable closes at 82%
     of its length and the closed span runs to the next syllable — in dialogue that includes the
     gap and any punctuation rest, so it lasts long enough to read as a mouth closing, and it is
     the chatter look the product is named for. Sung notes butt straight together, so the same

@@ -744,6 +744,22 @@
      */
     var MOUTH_CLOSE_FRAMES = 2;
 
+    /*
+     * Which of the two mouth styles the rig is written in.
+     *
+     * A panel-wide preference rather than a per-layer one, because it is a look
+     * for the whole film: a scene with half its lines flapping and half of them
+     * legato is not a thing anyone wants. It is read at the two places that
+     * build a rig and handed to mergeRigTimeline() explicitly, so the function
+     * itself stays pure and the portable tests can pin both styles.
+     *
+     * False — the default since 1.10.0 — closes the mouth only where there is a
+     * pause to close for. True is what every release up to 1.9.1 wrote: a close
+     * at 82% of every syllable, which on ordinary dialogue is nineteen open-shut
+     * cycles for ten syllables and the mouth shut 41% of the time.
+     */
+    var mouthChatter = false;
+
     // How long a sung note's head bounce may last. Without it a four-beat note
     // leans slowly to one side for three quarters of a second.
     var SUNG_BOUNCE_SECONDS = 0.12;
@@ -796,7 +812,10 @@
                 var finish;
                 var shuts = true;
                 var bounceEnd;
-                if (line.sung) {
+                // Chatter is the spoken look only. A sung line always uses the
+                // pause rule, because there the short closes are sub-frame and
+                // that is a sampling artefact rather than a style.
+                if (line.sung || !line.chatter) {
                     // A sung note runs to its own end, and only shuts if the
                     // silence after it is long enough to see. Two notes with
                     // nothing between them just change shape.
@@ -807,8 +826,11 @@
                     finish = Math.min(start + event.duration, until);
                     shuts = (until - finish) >= visibleGap ||
                         at + 1 >= line.plan.events.length;
-                    bounceEnd = Math.min(
-                        start + Math.min(event.duration * 0.38, SUNG_BOUNCE_SECONDS), limit);
+                    // Only a held note needs the bounce capped; a spoken
+                    // syllable is far too short to reach it.
+                    bounceEnd = line.sung
+                        ? Math.min(start + Math.min(event.duration * 0.38, SUNG_BOUNCE_SECONDS), limit)
+                        : Math.min(start + event.duration * 0.38, limit);
                 } else {
                     finish = Math.min(start + event.duration * 0.82, limit);
                     bounceEnd = Math.min(start + event.duration * 0.38, limit);
@@ -865,7 +887,8 @@
         var effect = findNativeEffect(layer);
         var merged = mergeRigTimeline(
             [{ name: layer.name, start: layer.inPoint, plan: plan, order: 0,
-               sung: !!(effect && melodyFromEffect(effect).length) }],
+               sung: !!(effect && melodyFromEffect(effect).length),
+               chatter: mouthChatter }],
             layer.inPoint, comp.frameDuration);
         writeRigLayer(layer, merged.tracks, false);
     }
@@ -1064,7 +1087,8 @@
                 order: index,
                 // A sung line is legato; a spoken one is not, and the mouth
                 // shuts on a different rule for each.
-                sung: melodyFromEffect(effect).length > 0
+                sung: melodyFromEffect(effect).length > 0,
+                chatter: mouthChatter
             });
         }
         var merged = mergeRigTimeline(lines, rigLayer.inPoint, comp.frameDuration);
@@ -2747,6 +2771,7 @@
         "Gap / 間隔": "あいだ",
         "Speakers / 含角色名": "話者名つき",
         "Hold / 接到下一句": "次までのばす",
+        "Chatter / 逐字開合": "1 音ずつ開閉",
         "Choose MIDI / 選 MIDI": "MIDI を選ぶ",
         "Sing / 唱出來": "歌わせる",
         "Speak / 改回講話": "しゃべりに戻す",
@@ -3156,6 +3181,16 @@
         controllers.value = true;
         var typeOn = animationRow.add("checkbox", undefined, "Type-On / 逐字顯示");
         typeOn.value = false;
+        var chatterOn = animationRow.add("checkbox", undefined, "Chatter / 逐字開合");
+        chatterOn.helpTip = "Close the mouth on every syllable, the way every release up to" +
+            " 1.9.1 did." +
+            "\n每個字都把嘴巴閉一次，1.9.1 以前的作法。" +
+            "\n\n預設是關的：嘴巴只在真的有停頓的地方閉（標點、句尾），連著的字之間只換嘴型。" +
+            "\n一句十個字的台詞，舊作法會開合 19 次、嘴巴有 41% 的時間是閉的；" +
+            "\n新作法是 5 次、27%，而那 5 次都落在該閉的地方。" +
+            "\n\n勾起來就會回到舊的樣子。唱歌的句子不受這個勾選影響——" +
+            "\n那裡的短閉嘴比一個影格還短，是取樣問題不是風格。" +
+            "\n\n改了之後要按 Rebuild／重建（共用）或重新 Apply（每層）才會重寫關鍵影格。";
         var typeOnCenter = animationRow.add("checkbox", undefined, "Center / 維持置中");
         typeOnCenter.value = true;
         typeOnCenter.helpTip = "Keep the revealed text centred as it types on, gliding into" +
@@ -3513,6 +3548,7 @@
                 rigShared: rigShared.value ? 1 : 0,
                 typeOn: typeOn.value ? 1 : 0,
                 typeOnCenter: typeOnCenter.value ? 1 : 0,
+                chatter: chatterOn.value ? 1 : 0,
                 easeLeave: easeLeave.value,
                 smoothness: smoothness.value,
                 gapBeats: currentGapBeats(),
@@ -3588,6 +3624,8 @@
             rigShared.value = !rigPerLayer.value;
             typeOn.value = storedNumber(state, "typeOn", 0) !== 0;
             typeOnCenter.value = storedNumber(state, "typeOnCenter", 1) !== 0;
+            chatterOn.value = storedNumber(state, "chatter", 0) !== 0;
+            mouthChatter = chatterOn.value;
             setSliderValue(easeLeave, clamp(storedNumber(state, "easeLeave", DEFAULT_LEAVE_INFLUENCE),
                 MIN_INFLUENCE, MAX_INFLUENCE));
             setSliderValue(smoothness, clamp(storedNumber(state, "smoothness", DEFAULT_SMOOTHNESS), 0, 100));
@@ -4137,11 +4175,20 @@
         var remembered = [voice, emotion, characterSize, source, perBeat, pitch, speed,
             volume, consonant, clarity, cuteness, formant, vibrato, vibratoRate, seed,
             markers, fitDuration, controllers, typeOn, typeOnCenter, rigPerLayer,
-            rigShared, easeLeave, smoothness, speakersOn, holdOn];
+            rigShared, easeLeave, smoothness, speakersOn, holdOn, chatterOn];
         var rememberAt;
         for (rememberAt = 0; rememberAt < remembered.length; rememberAt += 1) {
             alsoRemember(remembered[rememberAt], "onChange");
         }
+        // The rig builders read this rather than being handed it through eight
+        // call sites, so the checkbox keeps it in step.
+        chatterOn.onClick = (function (existing) {
+            return function () {
+                mouthChatter = chatterOn.value;
+                if (existing) { existing.call(this); }
+            };
+        }(chatterOn.onClick));
+        alsoRemember(chatterOn, "onClick");
         alsoRemember(tempoOn, "onClick");
         alsoRemember(bpmField, "onChange");
         alsoRemember(gapField, "onChange");

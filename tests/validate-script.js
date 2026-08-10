@@ -720,7 +720,10 @@ vm.runInContext([
   takeFunction("mergeRigTimeline"),
 ].join("\n"), planner);
 
-const rigLine = (name, start, count, step) => {
+// `chatter` defaults to true here so every pin below keeps describing the
+// legacy mouth exactly as 1.3.0 wrote it. From 1.10.0 the panel's default is
+// the other way — the pause rule — and that is pinned separately further down.
+const rigLine = (name, start, count, step, chatter = true) => {
   const events = [];
   for (let index = 0; index < count; index += 1) {
     events.push({
@@ -730,7 +733,7 @@ const rigLine = (name, start, count, step) => {
       duration: step,
     });
   }
-  return { name, start, order: 0, plan: { events, duration: count * step } };
+  return { name, start, order: 0, chatter, plan: { events, duration: count * step } };
 };
 const mergeRig = (lines, baseline) =>
   vm.runInContext(`mergeRigTimeline(${JSON.stringify(lines)}, ${baseline})`, planner);
@@ -834,6 +837,61 @@ const pinTrack = (label, track, wantTimes, wantValues) => {
     throw new Error(
       `after masking, B's first syllable bounces ${firstOfB.map((key) => key.value)}, expected -55`);
   }
+}
+
+/*
+ * Spoken lines close on a pause too, from 1.10.0 — and the old look is still
+ * one tick away.
+ *
+ * The 82% rule shuts the mouth on every syllable: measured on ten syllables of
+ * ordinary dialogue, nineteen open-shut cycles and the mouth shut for 41% of
+ * the frames. Reported twice as the mouth "constantly cutting to the closed
+ * layer". The pause rule leaves five closes, all of them at punctuation or the
+ * end of the line.
+ */
+{
+  const frame = 1 / 30;
+  const paused = vm.runInContext(
+    `mergeRigTimeline(${JSON.stringify([rigLine("A", 0, 4, 0.2, false)])}, 0, ${frame})`,
+    planner);
+  // Four syllables running straight on: the shapes change, and the only close
+  // is the one at the end of the line.
+  pinTrack("spoken mouth, pause rule", paused.tracks.mouth,
+    [0, 0, 0.2, 0.4, 0.6, 0.8], [0, 1, 2, 3, 4, 0]);
+  // Volume follows the mouth, or anything driven by it flickers the same way.
+  pinTrack("spoken volume, pause rule", paused.tracks.volume,
+    [0, 0, 0.2, 0.4, 0.6, 0.8], [0, 82, 82, 82, 82, 0]);
+  // The bounce is untouched by the mouth rule: a spoken syllable is far too
+  // short to reach the sung cap, and capping it would move old projects.
+  pinTrack("spoken bounce, pause rule", paused.tracks.bounce,
+    [0, 0, 0.076, 0.2, 0.276, 0.4, 0.476, 0.6, 0.676],
+    [0, 55, 0, -55, 0, 55, 0, -55, 0]);
+
+  // A punctuation rest is a real pause, so the mouth does close there. The
+  // engine leaves a gap between the events; anything at least two frames wide
+  // has to shut.
+  const withRest = {
+    name: "R", start: 0, order: 0, chatter: false,
+    plan: {
+      duration: 1.0,
+      events: [
+        { mouth: 1, tone: 1, time: 0, duration: 0.2 },
+        { mouth: 2, tone: 1, time: 0.2, duration: 0.2 },
+        // 0.3 s of silence: a comma.
+        { mouth: 3, tone: 1, time: 0.7, duration: 0.2 },
+      ],
+    },
+  };
+  const rested = vm.runInContext(
+    `mergeRigTimeline(${JSON.stringify([withRest])}, 0, ${frame})`, planner);
+  pinTrack("spoken mouth across a rest", rested.tracks.mouth,
+    [0, 0, 0.2, 0.4, 0.7, 0.9], [0, 1, 2, 0, 3, 0]);
+
+  // And the tick brings the old look back, unchanged.
+  const flapping = mergeRig([rigLine("A", 0, 4, 0.2)], 0);
+  pinTrack("spoken mouth, chatter ticked", flapping.tracks.mouth,
+    [0, 0, 0.164, 0.2, 0.364, 0.4, 0.564, 0.6, 0.764],
+    [0, 1, 0, 2, 0, 3, 0, 4, 0]);
 }
 
 /*
