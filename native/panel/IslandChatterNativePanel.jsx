@@ -689,9 +689,34 @@
      * and so it can be exercised in tests/validate-script.js without a host.
      * Everything downstream of it only knows how to write a hold key.
      */
-    var RIG_TRACKS = ["mouth", "volume", "pitch", "bounce", "blink"];
-    var RIG_TRACK_NAMES = ["IC Mouth", "IC Volume", "IC Pitch", "IC Head Bounce", "IC Blink"];
-    var RIG_TRACK_DEFAULTS = [0, 0, 100, 0, 0];
+    var RIG_TRACKS = ["mouth", "volume", "pitch", "bounce", "blink", "accent"];
+    var RIG_TRACK_NAMES = ["IC Mouth", "IC Volume", "IC Pitch", "IC Head Bounce", "IC Blink",
+        "IC Accent"];
+    // Accent rests at 50, which is where every syllable leaves it.
+    var RIG_TRACK_DEFAULTS = [0, 0, 100, 0, 0, 50];
+
+    /*
+     * IC Accent: 100 at the top of every syllable, settling to 50 across it.
+     *
+     * The other five tracks are hold keys — nothing between one key and the
+     * next, because a rig that interpolates costs a per-frame evaluation and
+     * this one deliberately does not. Accent is the exception: a value that
+     * snapped between 100 and 50 would be the same thing IC Volume already
+     * gives. What makes it useful is the shape, so it is the one track written
+     * with a curve.
+     *
+     * Fast out of the attack and slow into the settle, which is how anything
+     * struck behaves. The influences are the two ends of that: a small one
+     * leaves at speed, a large one arrives crawling.
+     *
+     * Each key still holds where it lands, so the value sits at 50 through a
+     * pause and snaps back to 100 on the next syllable rather than ramping up
+     * to meet it.
+     */
+    var ACCENT_HIGH = 100;
+    var ACCENT_LOW = 50;
+    var ACCENT_ATTACK = { holdIn: true, inInfluence: 8, outInfluence: 8 };
+    var ACCENT_SETTLE = { holdOut: true, inInfluence: 85, outInfluence: 85 };
     // Only a shared rig carries these. A per-layer rig would answer "line 1" and
     // "speaking" for its whole length, which is not worth two more sliders on
     // every one of twenty layers.
@@ -766,7 +791,7 @@
 
     function mergeRigTimeline(lines, baseline, frameDuration) {
         var tracks = {
-            mouth: [], volume: [], pitch: [], bounce: [], blink: [],
+            mouth: [], volume: [], pitch: [], bounce: [], blink: [], accent: [],
             speaking: [], lineIndex: []
         };
         var overlaps = [];
@@ -779,6 +804,7 @@
         key(tracks.pitch, baseline, 100);
         key(tracks.bounce, baseline, 0);
         key(tracks.blink, baseline, 0);
+        key(tracks.accent, baseline, ACCENT_LOW);
         key(tracks.speaking, baseline, 0);
         key(tracks.lineIndex, baseline, 0);
 
@@ -843,6 +869,15 @@
                 key(tracks.pitch, finish, 100);
                 key(tracks.bounce, start, syllable % 2 ? -55 : 55);
                 key(tracks.bounce, bounceEnd, 0);
+                // Struck at the top of the syllable and left to settle across
+                // it, whatever the mouth is doing.
+                tracks.accent.push(
+                    { time: start, value: ACCENT_HIGH, shape: ACCENT_ATTACK });
+                tracks.accent.push({
+                    time: Math.min(start + event.duration, limit),
+                    value: ACCENT_LOW,
+                    shape: ACCENT_SETTLE
+                });
                 if (syllable > 0 && syllable % 5 === 0) {
                     key(tracks.blink, start, 100);
                     key(tracks.blink, Math.min(start + 0.065, limit), 0);
@@ -855,11 +890,44 @@
         return { tracks: tracks, overlaps: overlaps };
     }
 
+    /*
+     * A key with a different interpolation on each side.
+     *
+     * setEasedKey() is bezier on both, which Type-On wants and Accent does not:
+     * Accent has to leave the settle as a hard step and arrive at it on a
+     * curve. AE takes the two independently, so the shape is described rather
+     * than approximated.
+     */
+    function setShapedKey(property, time, value, shape) {
+        property.setValueAtTime(time, value);
+        try {
+            var index = property.nearestKeyIndex(time);
+            // Ease first, type second. setTemporalEaseAtKey() puts the key back
+            // to bezier on both sides, so setting the interpolation before it
+            // is silently undone — verified against After Effects 26: the eases
+            // landed, both HOLD sides did not, and the track read as a ramp
+            // where it should have stepped. The host suite checks the types
+            // back off the layer for exactly this reason.
+            property.setTemporalEaseAtKey(index,
+                [new KeyframeEase(0, shape.inInfluence)],
+                [new KeyframeEase(0, shape.outInfluence)]);
+            property.setInterpolationTypeAtKey(index,
+                shape.holdIn ? KeyframeInterpolationType.HOLD : KeyframeInterpolationType.BEZIER,
+                shape.holdOut ? KeyframeInterpolationType.HOLD : KeyframeInterpolationType.BEZIER);
+        } catch (error) {
+            // Older hosts may reject one of the two; the values still land.
+        }
+    }
+
     function writeRigTrack(slider, keys) {
         clearKeys(slider);
         var index;
         for (index = 0; index < keys.length; index += 1) {
-            setHoldKey(slider, keys[index].time, keys[index].value);
+            if (keys[index].shape) {
+                setShapedKey(slider, keys[index].time, keys[index].value, keys[index].shape);
+            } else {
+                setHoldKey(slider, keys[index].time, keys[index].value);
+            }
         }
     }
 

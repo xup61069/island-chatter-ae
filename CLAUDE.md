@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v1.10.0` (Windows x64).
+- Current public release: `v1.11.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -358,6 +358,16 @@ effect.
     Type-On steps. `dsp_tests.cpp` measures the step at each seam against the largest step
     anywhere else in the note — not against every step, which would include the seams and
     could never fail.
+8y. **Set the temporal ease before the interpolation type, never after.** After Effects 26
+    puts a key back to bezier on both sides when `setTemporalEaseAtKey()` is called, so an
+    interpolation type set beforehand is silently undone. `IC Accent` needs a step on one side
+    of each key and a curve on the other, and written the obvious way round it came out as a
+    ramp: the eases landed, both HOLD sides did not, and nothing threw — `setShapedKey()`
+    swallows failures so an older host still gets the values, which is the same catch that
+    hides the two traps in `setEasedKey()`.
+
+    Nothing portable can see this. `ae-host-regression.jsx` reads the interpolation types and
+    the ease influences back off the layer, which is how it was found.
 8x. **The mouth shuts on a gap, not on a percentage — and that is now the default for speech
     too.** Until 1.9.1 every syllable closed at 82% of its length. On ten syllables of ordinary
     dialogue that is nineteen open-shut cycles with the mouth shut 41% of the frames, reported

@@ -133,13 +133,63 @@
         check(markers.numKeys === plan.events.length,
             "marker count matches syllable count (" + markers.numKeys + " vs " + plan.events.length + ")");
 
-        var rigNames = ["IC Mouth", "IC Volume", "IC Pitch", "IC Head Bounce", "IC Blink"];
+        var rigNames = ["IC Mouth", "IC Volume", "IC Pitch", "IC Head Bounce", "IC Blink",
+            "IC Accent"];
         var rigOk = true;
         for (var r = 0; r < rigNames.length; r += 1) {
             var slider = findNamedEffect(layer, rigNames[r]);
             if (!slider || slider.property(1).numKeys === 0) { rigOk = false; }
         }
-        check(rigOk, "all five rig sliders exist and are keyframed");
+        check(rigOk, "all six rig sliders exist and are keyframed");
+
+        // --- 1b. IC Accent actually carries its curve ------------------------
+        //
+        // setShapedKey() swallows a failed setInterpolationTypeAtKey or
+        // setTemporalEaseAtKey, exactly as setEasedKey() does and for the same
+        // reason — an older host should still get the values. The cost is that
+        // a rejected call leaves keys that look animated and carry no shape at
+        // all, which is the one thing this track exists for. So it is read back
+        // rather than assumed.
+        var accent = findNamedEffect(layer, "IC Accent");
+        if (check(accent !== null, "IC Accent exists")) {
+            var accentSlider = accent.property(1);
+            check(accentSlider.numKeys >= 4,
+                "IC Accent has a key pair per syllable (" + accentSlider.numKeys + ")");
+            // Found by value rather than counted from the start: a line whose
+            // first syllable begins at the layer's in point writes its rest key
+            // and its first strike at the same time, and the second overwrites
+            // the first, so there is no fixed index to reach for.
+            var strike = 0, settle = 0;
+            var k;
+            for (k = 1; k < accentSlider.numKeys; k += 1) {
+                if (Math.abs(accentSlider.keyValue(k) - 100) < 0.001 &&
+                        Math.abs(accentSlider.keyValue(k + 1) - 50) < 0.001) {
+                    strike = k; settle = k + 1; break;
+                }
+            }
+            check(strike > 0, "IC Accent has a 100-then-50 pair");
+            if (strike > 0) {
+            check(accentSlider.keyInInterpolationType(strike) ===
+                    KeyframeInterpolationType.HOLD,
+                "the strike steps in rather than ramping up from the settle");
+            check(accentSlider.keyOutInterpolationType(strike) ===
+                    KeyframeInterpolationType.BEZIER,
+                "the strike leaves on a curve");
+            check(accentSlider.keyInInterpolationType(settle) ===
+                    KeyframeInterpolationType.BEZIER,
+                "the settle arrives on a curve");
+            check(accentSlider.keyOutInterpolationType(settle) ===
+                    KeyframeInterpolationType.HOLD,
+                "the settle holds until the next syllable");
+            // Fast out, slow in — the influences are the whole shape, and a
+            // swallowed setTemporalEaseAtKey would leave both at the default.
+            var leaving = accentSlider.keyOutTemporalEase(strike)[0].influence;
+            var arriving = accentSlider.keyInTemporalEase(settle)[0].influence;
+            check(leaving < arriving,
+                "accent leaves at influence " + leaving.toFixed(1) +
+                " and arrives at " + arriving.toFixed(1) + "; it must leave faster");
+            }
+        }
 
         // --- 2. repeat apply ------------------------------------------------
         attempt("repeat apply (Property handle invalidation)", function () {
@@ -377,7 +427,7 @@
             check(isRigLayer(rigLayer), "the rig layer is recognised as one");
             check(rigLayer.name === "IC Rig Mimi", "the rig is named after the character, got " + rigLayer.name);
             var sharedNames = ["IC Mouth", "IC Volume", "IC Pitch", "IC Head Bounce",
-                "IC Blink", "IC Speaking", "IC Line"];
+                "IC Blink", "IC Accent", "IC Speaking", "IC Line"];
             var sharedOk = true;
             var totalKeys = 0;
             for (s = 0; s < sharedNames.length; s += 1) {

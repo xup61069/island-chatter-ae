@@ -44,7 +44,7 @@ pronunciation adjustable.
 - Re-sync edits text without touching the voice; Re-flow puts the scene back in order
 - The panel remembers its settings between sessions
 - Optional Fit Duration and `IC:` per-syllable timing markers
-- Optional `IC Mouth`, `IC Volume`, `IC Pitch`, `IC Head Bounce`, `IC Blink` animation controllers
+- Optional `IC Mouth`, `IC Volume`, `IC Pitch`, `IC Head Bounce`, `IC Blink`, `IC Accent` animation controllers
 - One rig shared by a whole character, driven by whichever line is speaking, so twenty lines are bound once
 - One click wires mouth layers or a mouth precomp to that rig
 - Optional Type-On animation that leaves Source Text intact, with centring and smooth glide

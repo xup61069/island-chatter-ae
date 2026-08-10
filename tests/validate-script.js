@@ -145,6 +145,7 @@ for (const fragment of [
   'new MarkerValue("IC:',
   '"IC Mouth"',
   '"IC Head Bounce"',
+  '"IC Accent"',
   '"Island Chatter Type-On"',
 ]) {
   if (!nativePanelSource.includes(fragment)) {
@@ -716,6 +717,10 @@ for (const [label, broken] of [
 vm.runInContext([
   takeVariable("MOUTH_CLOSE_FRAMES"),
   takeVariable("SUNG_BOUNCE_SECONDS"),
+  takeVariable("ACCENT_HIGH"),
+  takeVariable("ACCENT_LOW"),
+  takeVariable("ACCENT_ATTACK"),
+  takeVariable("ACCENT_SETTLE"),
   takeFunction("tonePitch"),
   takeFunction("mergeRigTimeline"),
 ].join("\n"), planner);
@@ -837,6 +842,58 @@ const pinTrack = (label, track, wantTimes, wantValues) => {
     throw new Error(
       `after masking, B's first syllable bounces ${firstOfB.map((key) => key.value)}, expected -55`);
   }
+}
+
+/*
+ * IC Accent: struck at 100 on every syllable, settling to 50 across it.
+ *
+ * The only track written with a curve. Every other one is hold keys, so a
+ * shape is the whole reason this exists — a value that merely stepped between
+ * 100 and 50 would be IC Volume with different numbers. What has to be pinned
+ * is therefore not just the values but which side of each key is a step and
+ * which is eased, because getting that backwards produces a track that looks
+ * animated and reads as a ramp.
+ */
+{
+  const accented = mergeRig([rigLine("A", 0, 3, 0.2)], 0);
+  pinTrack("accent", accented.tracks.accent,
+    [0, 0, 0.2, 0.2, 0.4, 0.4, 0.6],
+    [50, 100, 50, 100, 50, 100, 50]);
+  const shapes = [...accented.tracks.accent].map((key) => key.shape);
+  if (shapes[0] !== undefined) {
+    throw new Error("the accent rest key should be a plain hold, like every other track's");
+  }
+  const attack = vm.runInContext("ACCENT_ATTACK", planner);
+  const settle = vm.runInContext("ACCENT_SETTLE", planner);
+  // Struck: a step into 100 so it snaps rather than ramping up from the settle.
+  // Settled: a step out of 50 so it stays there until the next syllable.
+  if (!attack.holdIn || attack.holdOut) {
+    throw new Error("the accent attack must step in and ease out");
+  }
+  if (settle.holdIn || !settle.holdOut) {
+    throw new Error("the accent settle must ease in and step out");
+  }
+  // Fast out, slow in. Influence is how long the curve spends near the key, so
+  // leaving needs a small one and arriving a large one; swapping them gives a
+  // slow start and a hard stop, which is the opposite motion.
+  if (!(attack.outInfluence < settle.inInfluence)) {
+    throw new Error(
+      `accent leaves at influence ${attack.outInfluence} and arrives at ` +
+      `${settle.inInfluence}; it must leave faster than it arrives`);
+  }
+  for (let at = 1; at < shapes.length; at += 1) {
+    const want = at % 2 === 1 ? attack : settle;
+    if (shapes[at] !== want) {
+      throw new Error(`accent key ${at} carries the wrong shape`);
+    }
+  }
+  // A sung note settles across its whole length, however long that is.
+  const sungAccent = vm.runInContext(
+    `mergeRigTimeline(${JSON.stringify([{
+      name: "S", start: 0, order: 0, sung: true,
+      plan: { duration: 2, events: [{ mouth: 1, tone: 5, time: 0, duration: 2 }] },
+    }])}, 0, ${1 / 30})`, planner);
+  pinTrack("accent on a held note", sungAccent.tracks.accent, [0, 0, 2], [50, 100, 50]);
 }
 
 /*
