@@ -1974,6 +1974,42 @@
         return { speaker: name, text: said };
     }
 
+    /*
+     * Subtitles that stay up until the next one arrives.
+     *
+     * Fit Duration ends a line where its audio ends, which is right for the
+     * sound and wrong for the words: between "……好啊。" and the reply there is a
+     * beat of silence, and the screen goes blank for it. Reading a scene back
+     * then flickers, one line at a time.
+     *
+     * Only ever extends. A gap of zero already runs the lines straight on, and
+     * two lines that deliberately overlap must not be pulled shorter to meet.
+     * The last line keeps its own length, because there is nothing after it to
+     * hold on for.
+     *
+     * The audio is unaffected: past the end of the utterance copy_region fills
+     * silence, and the Tone bootstrap is at level zero.
+     */
+    function holdUntilNextLine(comp, layers) {
+        var ordered = [];
+        var index;
+        for (index = 0; index < layers.length; index += 1) {
+            if (findNativeEffect(layers[index])) { ordered.push(layers[index]); }
+        }
+        ordered.sort(function (first, second) {
+            return first.inPoint - second.inPoint || first.index - second.index;
+        });
+        var held = 0;
+        for (index = 0; index + 1 < ordered.length; index += 1) {
+            var until = Math.min(ordered[index + 1].inPoint, comp.duration);
+            if (until > ordered[index].outPoint + 0.0005) {
+                ordered[index].outPoint = until;
+                held += 1;
+            }
+        }
+        return held;
+    }
+
     function importScript(scriptText, settings, options, gapBeats, bpm) {
         if (!app.project) { app.newProject(); }
         var comp = app.project.activeItem;
@@ -2063,6 +2099,9 @@
             if (made[index].outPoint > wanted) { wanted = made[index].outPoint; }
         }
         if (Math.abs(comp.duration - wanted) > 0.0005) { comp.duration = wanted; }
+        // After the composition has settled, so a line is never held past the
+        // end of it and then clamped back.
+        var held = options.hold ? holdUntilNextLine(comp, made) : 0;
         var overlaps = [];
         touched = uniqueLayers(touched);
         for (index = 0; index < touched.length; index += 1) {
@@ -2072,6 +2111,7 @@
         for (index = 0; index < made.length; index += 1) { made[index].selected = true; }
         return {
             count: made.length,
+            held: held,
             // How many script lines were too long for one layer and became
             // several, so the panel can say so rather than leave the user
             // counting layers.
@@ -2494,7 +2534,7 @@
      * accompaniment. They are skipped and counted rather than refused, because a
      * scene can hold both and the spoken lines still want tidying.
      */
-    function reflowLayers(comp, layers, gapBeats, bpm) {
+    function reflowLayers(comp, layers, gapBeats, bpm, hold) {
         var ordered = [];
         var sung = 0;
         var index;
@@ -2540,6 +2580,10 @@
             if (ordered[index].outPoint > wanted) { wanted = ordered[index].outPoint; }
         }
         if (Math.abs(comp.duration - wanted) > 0.0005) { comp.duration = wanted; }
+        // Re-flow has to hold as well as lay out. Laying the scene out again
+        // without it would silently undo every hold the import made, which is
+        // the first thing anyone does after editing a line.
+        var held = hold ? holdUntilNextLine(comp, ordered) : 0;
         // Keyframes do not follow a layer that has been moved, so every rig the
         // moved lines belong to has to be merged again.
         var overlaps = [];
@@ -2550,6 +2594,7 @@
         return {
             count: ordered.length,
             rigs: touched.length,
+            held: held,
             sungSkipped: sung,
             grew: comp.duration > wasDuration ? comp.duration : 0,
             overlaps: overlaps
@@ -2645,6 +2690,7 @@
         "Import script / 匯入劇本": "台本を読み込む",
         "Gap / 間隔": "あいだ",
         "Speakers / 含角色名": "話者名つき",
+        "Hold / 接到下一句": "次までのばす",
         "Choose MIDI / 選 MIDI": "MIDI を選ぶ",
         "Sing / 唱出來": "歌わせる",
         "Speak / 改回講話": "しゃべりに戻す",
@@ -3138,6 +3184,15 @@
             "\n填 0 就是完全不留白也不對齊，一句接著一句。";
         var gapReadout = importRow.add("statictext", undefined, "");
         gapReadout.preferredSize.width = 150;
+        var holdOn = importRow.add("checkbox", undefined, "Hold / 接到下一句");
+        holdOn.helpTip = "Keep each line on screen until the next one starts, instead of" +
+            " ending where its audio does." +
+            "\n每一句的字留到下一句開始才消失，而不是講完就不見。" +
+            "\n\n配合長度是照語音的長短切的，聲音對、字幕不對：兩句之間空一拍，畫面就空一拍。" +
+            "\n勾了之後只會延長、不會縮短——間隔填 0 或兩句本來就重疊的話不受影響，" +
+            "\n最後一句也維持自己的長度。" +
+            "\n\n聲音完全不變：語音結束之後那段是靜音。" +
+            "\n「重新排列」也會照這個設定重新接好。";
         var speakersOn = importRow.add("checkbox", undefined, "Speakers / 含角色名");
         speakersOn.helpTip = "Read \"Mimi: hello\" as a line spoken by Mimi: the name is" +
             " stripped and the line joins that character's rig." +
@@ -3364,7 +3419,8 @@
                 typeOnCenter: typeOnCenter.value,
                 typeOnLeave: easeLeave.value,
                 typeOnSmoothness: smoothness.value,
-                speakers: speakersOn.value
+                speakers: speakersOn.value,
+                hold: holdOn.value
             };
         }
 
@@ -3405,6 +3461,7 @@
                 smoothness: smoothness.value,
                 gapBeats: currentGapBeats(),
                 speakers: speakersOn.value ? 1 : 0,
+                hold: holdOn.value ? 1 : 0,
                 // How a melody is sung is a panel setting and survives a
                 // restart. The melody and the file it came from do not: they
                 // belong to the layers, and a remembered path that no longer
@@ -3480,6 +3537,7 @@
             setSliderValue(smoothness, clamp(storedNumber(state, "smoothness", DEFAULT_SMOOTHNESS), 0, 100));
             gapField.text = String(Math.max(0, storedNumber(state, "gapBeats", 1)));
             speakersOn.value = storedNumber(state, "speakers", 0) !== 0;
+            holdOn.value = storedNumber(state, "hold", 0) !== 0;
             transposeField.text = String(clamp(Math.round(storedNumber(state, "transpose", 0)), -48, 48));
             toneBlendField.text = String(clamp(Math.round(storedNumber(state, "toneBlend", 15)), 0, 100));
             solfegeKey.selection = clamp(Math.round(storedNumber(state, "solfegeKey", 0)), 0, solfegeKey.items.length - 1);
@@ -3776,9 +3834,11 @@
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Re-flow");
             try {
-                var laid = reflowLayers(comp, layers, currentGapBeats(), currentBpm());
+                var laid = reflowLayers(comp, layers, currentGapBeats(), currentBpm(),
+                    holdOn.value);
                 status.text = "Re-flowed / 已排列 " + laid.count + " layer(s) @ " +
                     currentGapBeats() + " 拍" +
+                    (laid.held ? "  接到下一句 x" + laid.held : "") +
                     (laid.sungSkipped ? "  (唱歌 " + laid.sungSkipped + " 層維持原位)" : "") +
                     (laid.rigs ? "  rig x" + laid.rigs : "") +
                     (laid.grew ? "  合成延長到 " + laid.grew.toFixed(2) + "s" : "");
@@ -3806,6 +3866,7 @@
                 refreshCharacters(chosenCharacter());
                 status.text = "Imported / 已匯入 " + imported.count + " layer(s)" +
                     (imported.split > 0 ? "  (+" + imported.split + " 斷句)" : "") +
+                    (imported.held ? "  接到下一句 x" + imported.held : "") +
                     (imported.cast.length ? "  角色: " + imported.cast.join(", ") : "") +
                     (imported.grew ? "  合成延長到 " + imported.grew.toFixed(2) + "s" : "");
                 if (imported.overlaps.length) {
@@ -4020,7 +4081,7 @@
         var remembered = [voice, emotion, characterSize, source, perBeat, pitch, speed,
             volume, consonant, clarity, cuteness, formant, vibrato, vibratoRate, seed,
             markers, fitDuration, controllers, typeOn, typeOnCenter, rigPerLayer,
-            rigShared, easeLeave, smoothness, speakersOn];
+            rigShared, easeLeave, smoothness, speakersOn, holdOn];
         var rememberAt;
         for (rememberAt = 0; rememberAt < remembered.length; rememberAt += 1) {
             alsoRemember(remembered[rememberAt], "onChange");

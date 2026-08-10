@@ -835,6 +835,95 @@
         }
         try { editComp.remove(); } catch (editCleanup) { log("edit cleanup: " + editCleanup.toString()); }
 
+        // --- 11b. holding a line until the next one -----------------------------
+        //
+        // Fit Duration ends a line where its audio ends, which leaves the screen
+        // blank in every gap. Hold extends each line to the next one's start,
+        // and must only ever extend: a gap of zero already runs the lines on.
+        log("");
+        var holdComp = app.project.items.addComp("IC Hold", 640, 360, 1, 60, 30);
+        holdComp.openInViewer();
+        var holdImport = null;
+        attempt("import a script with Hold on", function () {
+            holdImport = importScript("第一句。\n第二句。\n第三句。", settings,
+                { markers: false, fitDuration: true, controllers: false, typeOn: false,
+                  rigShared: false, rigCharacter: "", speakers: false, hold: true },
+                2, 120);
+        });
+        if (holdImport) {
+            var holdLines = [];
+            var hl;
+            for (hl = 1; hl <= holdComp.numLayers; hl += 1) {
+                if (findNativeEffect(holdComp.layer(hl))) { holdLines.push(holdComp.layer(hl)); }
+            }
+            holdLines.sort(function (a, b) { return a.inPoint - b.inPoint; });
+            check(holdLines.length === 3, "three lines were imported");
+            check(holdImport.held === 2, "two of the three were held (got " + holdImport.held + ")");
+            if (holdLines.length === 3) {
+                var joined = true;
+                var g;
+                for (g = 0; g + 1 < holdLines.length; g += 1) {
+                    if (Math.abs(holdLines[g].outPoint - holdLines[g + 1].inPoint) > 0.002) {
+                        joined = false;
+                        log("    line " + g + " ends " + holdLines[g].outPoint.toFixed(4) +
+                            ", next starts " + holdLines[g + 1].inPoint.toFixed(4));
+                    }
+                }
+                check(joined, "each line runs right up to the next one");
+                // The last line keeps its own length: there is nothing after it
+                // to hold on for, and stretching it to the end of the
+                // composition would be inventing a duration.
+                var lastPlan = planFromEngine(findNativeEffect(holdLines[2]));
+                check(Math.abs((holdLines[2].outPoint - holdLines[2].inPoint) - lastPlan.duration) < 0.05,
+                    "the last line still ends with its own audio");
+                // Re-flow has to keep them joined rather than snapping every
+                // line back to its audio length.
+                attempt("re-flow with Hold on", function () {
+                    reflowLayers(holdComp, holdLines, 2, 120, true);
+                });
+                holdLines.sort(function (a, b) { return a.inPoint - b.inPoint; });
+                var stillJoined = true;
+                for (g = 0; g + 1 < holdLines.length; g += 1) {
+                    if (Math.abs(holdLines[g].outPoint - holdLines[g + 1].inPoint) > 0.002) {
+                        stillJoined = false;
+                    }
+                }
+                check(stillJoined, "re-flow put the holds back");
+                // And with it off, the lines go back to their own lengths.
+                attempt("re-flow with Hold off", function () {
+                    reflowLayers(holdComp, holdLines, 2, 120, false);
+                });
+                holdLines.sort(function (a, b) { return a.inPoint - b.inPoint; });
+                var firstPlan = planFromEngine(findNativeEffect(holdLines[0]));
+                check(Math.abs((holdLines[0].outPoint - holdLines[0].inPoint) - firstPlan.duration) < 0.05,
+                    "with Hold off a line ends with its audio again");
+            }
+        }
+        // A gap of zero already runs the lines straight on, so holding must not
+        // move anything at all.
+        var tightComp = app.project.items.addComp("IC Hold Tight", 640, 360, 1, 60, 30);
+        tightComp.openInViewer();
+        attempt("import with no gap at all", function () {
+            importScript("甲。\n乙。", settings,
+                { markers: false, fitDuration: true, controllers: false, typeOn: false,
+                  rigShared: false, rigCharacter: "", speakers: false, hold: false },
+                0, 120);
+        });
+        var tightLines = [];
+        var tl;
+        for (tl = 1; tl <= tightComp.numLayers; tl += 1) {
+            if (findNativeEffect(tightComp.layer(tl))) { tightLines.push(tightComp.layer(tl)); }
+        }
+        if (tightLines.length === 2) {
+            tightLines.sort(function (a, b) { return a.inPoint - b.inPoint; });
+            var before = tightLines[0].outPoint;
+            var moved = holdUntilNextLine(tightComp, tightLines);
+            check(moved === 0 && Math.abs(tightLines[0].outPoint - before) < 0.0005,
+                "holding lines that already run on changes nothing");
+        }
+        try { tightComp.remove(); } catch (tightCleanup) { log("tight cleanup: " + tightCleanup.toString()); }
+        try { holdComp.remove(); } catch (holdCleanup) { log("hold cleanup: " + holdCleanup.toString()); }
+
         // --- 12. singing --------------------------------------------------------
         //
         // The melody crosses into the effect as sixty-four appended parameters,

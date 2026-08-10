@@ -16,6 +16,7 @@
 - **貼一整份劇本，一行變一層**，套好聲音、依序排好。劇本裡寫「咪咪：早安」就自動分角色，
   名字不會被唸出來。
 - **間隔用拍算。** 1 是四分音符，0.5 是八分音符，每一句都落在拍點上。
+  字幕還可以留到下一句才消失，中間不會空畫面。
 - **改字不會弄壞聲音。** 重新同步只更新文字和長度，跨角色一起選也不會被蓋掉；
   重新排列會讓後面的句子自己讓位。
 - **一個角色的嘴巴綁一次。** 二十句台詞共用一組控制器，由當下正在講話的那一句驅動。
@@ -43,6 +44,7 @@ Built for Chinese first; it speaks Japanese and English too.
 - **Paste a whole script, get one layer per line**, voiced and laid out in sequence. Write
   `Mimi: Good morning` and the line joins that character without the name being spoken.
 - **Gaps are note values.** 1 is a crotchet, 0.5 a quaver, and every line lands on the beat.
+  Lines can also hold on screen until the next one starts, so nothing flickers.
 - **Editing text will not repaint your voices.** Re-sync updates text and length only; Re-flow
   moves everything after an edited line out of the way.
 - **Bind a character's mouth once.** Twenty lines share one set of controls, driven by whichever
@@ -70,6 +72,7 @@ After Effects のテキストレイヤーにそのままの声を持たせます
 - **台本をまるごと貼れば 1 行が 1 レイヤー**になり、声が乗って順番に並びます。
   「ミミ：おはよう」と書けば名前は読まれず、その行がそのキャラに割り当てられます。
 - **間隔は音符の長さで指定。** 1 が 4 分音符、0.5 が 8 分音符。どの行も拍に乗ります。
+  文字を次のセリフまで残すこともできます。
 - **文字を直しても声は塗り替わりません。** 文字だけ更新はテキストと長さだけを直し、
   並べ直すで以降のセリフが自分で場所を空けます。
 - **口パクをつなぐのは一度だけ。** 20 行が 1 セットの制御を共有し、
@@ -87,4 +90,4 @@ Source-available: read the code, build it, use it commercially. Redistributing t
 build is not permitted. An original procedural synthesizer containing no audio assets and no
 Nintendo or *Animal Crossing* audio; not affiliated with Adobe or Nintendo.
 
-Version 1.8.0
+Version 1.9.0

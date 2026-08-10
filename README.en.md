@@ -215,6 +215,20 @@ Paste a script into the text box and press **Import script**: **one layer per li
 applied with the current voice and laid end to end from the current time. Blank lines are
 skipped.
 
+### Holding a line until the next one
+
+Tick **Hold** and each line stays on screen until the next one starts.
+
+Fit Duration ends a line where its *audio* ends, which is right for the sound and wrong for the
+words: leave a beat between two lines and the screen goes blank for it, so reading a scene back
+flickers one line at a time. Hold only ever extends — a gap of zero already runs the lines on,
+two lines that deliberately overlap are left alone, and the last line keeps its own length.
+
+**Re-flow honours the same tick**, so laying the scene out again after an edit does not silently
+undo every hold.
+
+> The audio does not change: past the end of an utterance there is silence.
+
 ### The gap is in beats, and every line lands on one
 
 **Gap** is a number of beats against the BPM above, and **fractions are note values**:
