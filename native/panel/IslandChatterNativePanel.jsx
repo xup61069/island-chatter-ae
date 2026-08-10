@@ -720,12 +720,43 @@
      * rather than left to close the mouth in the middle of the later one, and
      * both names come back so the panel can say so.
      */
-    function mergeRigTimeline(lines, baseline) {
+    /*
+     * When the mouth shuts.
+     *
+     * Speaking, every syllable closes at 82% of its length, and the closed span
+     * runs from there to the next syllable — which in dialogue includes the gap
+     * and any punctuation rest, so it lasts long enough to read as a mouth
+     * closing. Measured on ordinary dialogue: eleven closes, the longest 242 ms,
+     * one of them under a frame.
+     *
+     * Sung notes butt straight up against each other, so that span collapses to
+     * the 18% bite and nothing else. On a real song line that is 36 closes in
+     * 5.4 seconds with 24 of them shorter than a frame at 30 fps — and hold keys
+     * are sampled per frame, so which ones land is arbitrary. The mouth does not
+     * close, it flickers. The same rule fails the other way on a held note: two
+     * seconds of "ah" shuts the mouth for 360 ms in the middle of it.
+     *
+     * A percentage was the wrong unit for both. Closing the mouth takes about as
+     * long whatever the note does, and it only happens when there is a break to
+     * close for. So a sung line closes only when the silence that follows is at
+     * least this many frames long — frames, because the failure is a
+     * frame-sampling artefact and the threshold has to be in the same units.
+     */
+    var MOUTH_CLOSE_FRAMES = 2;
+
+    // How long a sung note's head bounce may last. Without it a four-beat note
+    // leans slowly to one side for three quarters of a second.
+    var SUNG_BOUNCE_SECONDS = 0.12;
+
+    function mergeRigTimeline(lines, baseline, frameDuration) {
         var tracks = {
             mouth: [], volume: [], pitch: [], bounce: [], blink: [],
             speaking: [], lineIndex: []
         };
         var overlaps = [];
+        // Thirty frames a second unless the caller says otherwise, which only
+        // the portable tests ever leave out.
+        var visibleGap = MOUTH_CLOSE_FRAMES * (frameDuration > 0 ? frameDuration : 1 / 30);
         function key(track, time, value) { track.push({ time: time, value: value }); }
         key(tracks.mouth, baseline, 0);
         key(tracks.volume, baseline, 0);
@@ -762,15 +793,34 @@
                 // Cut by a later line: the audio still plays, but the face
                 // belongs to whoever is talking now.
                 if (start >= limit) { continue; }
-                var finish = Math.min(start + event.duration * 0.82, limit);
+                var finish;
+                var shuts = true;
+                var bounceEnd;
+                if (line.sung) {
+                    // A sung note runs to its own end, and only shuts if the
+                    // silence after it is long enough to see. Two notes with
+                    // nothing between them just change shape.
+                    var nextStart = at + 1 < line.plan.events.length
+                        ? line.start + line.plan.events[at + 1].time
+                        : limit;
+                    var until = Math.min(nextStart, limit);
+                    finish = Math.min(start + event.duration, until);
+                    shuts = (until - finish) >= visibleGap ||
+                        at + 1 >= line.plan.events.length;
+                    bounceEnd = Math.min(
+                        start + Math.min(event.duration * 0.38, SUNG_BOUNCE_SECONDS), limit);
+                } else {
+                    finish = Math.min(start + event.duration * 0.82, limit);
+                    bounceEnd = Math.min(start + event.duration * 0.38, limit);
+                }
                 key(tracks.mouth, start, event.mouth);
-                key(tracks.mouth, finish, 0);
+                if (shuts) { key(tracks.mouth, finish, 0); }
                 key(tracks.volume, start, 82);
-                key(tracks.volume, finish, 0);
+                if (shuts) { key(tracks.volume, finish, 0); }
                 key(tracks.pitch, start, tonePitch(event.tone));
                 key(tracks.pitch, finish, 100);
                 key(tracks.bounce, start, syllable % 2 ? -55 : 55);
-                key(tracks.bounce, Math.min(start + event.duration * 0.38, limit), 0);
+                key(tracks.bounce, bounceEnd, 0);
                 if (syllable > 0 && syllable % 5 === 0) {
                     key(tracks.blink, start, 100);
                     key(tracks.blink, Math.min(start + 0.065, limit), 0);
@@ -811,9 +861,12 @@
         }
     }
 
-    function updateAnimationControls(layer, plan) {
+    function updateAnimationControls(comp, layer, plan) {
+        var effect = findNativeEffect(layer);
         var merged = mergeRigTimeline(
-            [{ name: layer.name, start: layer.inPoint, plan: plan, order: 0 }], layer.inPoint);
+            [{ name: layer.name, start: layer.inPoint, plan: plan, order: 0,
+               sung: !!(effect && melodyFromEffect(effect).length) }],
+            layer.inPoint, comp.frameDuration);
         writeRigLayer(layer, merged.tracks, false);
     }
 
@@ -1008,10 +1061,13 @@
                 name: members[index].name,
                 start: members[index].inPoint,
                 plan: plan,
-                order: index
+                order: index,
+                // A sung line is legato; a spoken one is not, and the mouth
+                // shuts on a different rule for each.
+                sung: melodyFromEffect(effect).length > 0
             });
         }
-        var merged = mergeRigTimeline(lines, rigLayer.inPoint);
+        var merged = mergeRigTimeline(lines, rigLayer.inPoint, comp.frameDuration);
         writeRigLayer(rigLayer, merged.tracks, true);
         return { lines: lines.length, overlaps: merged.overlaps };
     }
@@ -1432,7 +1488,7 @@
             ensureRigTarget(textLayer, rigLayer);
         } else {
             if (previousRig) { unbindFromRig(textLayer); }
-            if (options.controllers) { updateAnimationControls(textLayer, plan); }
+            if (options.controllers) { updateAnimationControls(comp, textLayer, plan); }
         }
         if (options.typeOn) {
             updateTypeOn(textLayer, plan, comp.time,
@@ -2450,7 +2506,7 @@
         layer.outPoint = Math.max(layer.inPoint + comp.frameDuration,
             layer.inPoint + plan.duration);
         if (hadMarkers) { updateTimingMarkers(layer, plan); }
-        if (hadOwnRig) { updateAnimationControls(layer, plan); }
+        if (hadOwnRig) { updateAnimationControls(comp, layer, plan); }
         if (hadTypeOn) {
             updateTypeOn(layer, plan, comp.time,
                 typeOnCurve(options.typeOnLeave), options.typeOnSmoothness);

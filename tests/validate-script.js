@@ -713,8 +713,12 @@ for (const [label, broken] of [
  * The numbers below are written out rather than recomputed, because a test that
  * derives them the same way the code does agrees with any bug the code has.
  */
-vm.runInContext(
-  [takeFunction("tonePitch"), takeFunction("mergeRigTimeline")].join("\n"), planner);
+vm.runInContext([
+  takeVariable("MOUTH_CLOSE_FRAMES"),
+  takeVariable("SUNG_BOUNCE_SECONDS"),
+  takeFunction("tonePitch"),
+  takeFunction("mergeRigTimeline"),
+].join("\n"), planner);
 
 const rigLine = (name, start, count, step) => {
   const events = [];
@@ -829,6 +833,92 @@ const pinTrack = (label, track, wantTimes, wantValues) => {
   if (firstOfB.length !== 1 || firstOfB[0].value !== -55) {
     throw new Error(
       `after masking, B's first syllable bounces ${firstOfB.map((key) => key.value)}, expected -55`);
+  }
+}
+
+/*
+ * A sung line is legato, and its mouth must not flicker.
+ *
+ * Speaking, the closed span runs from 82% of a syllable to the start of the
+ * next, which in dialogue includes the gap and any rest — long enough to read.
+ * Sung notes butt straight together, so the same rule leaves only the 18% bite:
+ * on a real song line that was 36 closes in 5.4 seconds, 24 of them shorter
+ * than a frame at 30 fps. Hold keys are sampled per frame, so which ones landed
+ * was arbitrary and the mouth twitched rather than closed.
+ */
+{
+  const sungLine = (start, count, step, gapAfter) => {
+    const events = [];
+    for (let index = 0; index < count; index += 1) {
+      events.push({
+        mouth: (index % 5) + 1,
+        tone: 5,
+        time: index * (step + (gapAfter || 0)),
+        duration: step,
+      });
+    }
+    const span = count * (step + (gapAfter || 0));
+    return { name: "S", start, order: 0, sung: true, plan: { events, duration: span } };
+  };
+  const frame = 1 / 30;
+  const mergeSung = (lines, baseline) =>
+    vm.runInContext(
+      `mergeRigTimeline(${JSON.stringify(lines)}, ${baseline}, ${frame})`, planner);
+
+  // Six notes back to back. The mouth changes shape five times and shuts once,
+  // at the end of the line.
+  const legato = mergeSung([sungLine(0, 6, 0.155, 0)], 0);
+  const shuts = [...legato.tracks.mouth].filter((key) => key.value === 0);
+  // One at the baseline, one at the end of the line, and nothing in between.
+  if (shuts.length !== 2) {
+    throw new Error(
+      `a legato sung line shuts the mouth ${shuts.length} times, expected 2 ` +
+      `(the rest position and the end of the line)`);
+  }
+  if (Math.abs(shuts[1].time - 6 * 0.155) > 1e-6) {
+    throw new Error(`the sung line should shut at its end, not at ${shuts[1].time}`);
+  }
+  // And no closed span may be shorter than the threshold, which is the whole
+  // point: a close nobody can see is a close that flickers.
+  const closedSpans = (track, until) => {
+    const keys = [...track].sort((a, b) => a.time - b.time);
+    const spans = [];
+    for (let at = 0; at < keys.length; at += 1) {
+      if (keys[at].value !== 0) continue;
+      const ends = at + 1 < keys.length ? keys[at + 1].time : until;
+      if (ends > keys[at].time) spans.push(ends - keys[at].time);
+    }
+    return spans;
+  };
+  for (const span of closedSpans(legato.tracks.mouth, 6 * 0.155)) {
+    if (span < 2 * frame - 1e-9) {
+      throw new Error(`a sung line left a ${(span * 1000).toFixed(0)} ms close, under two frames`);
+    }
+  }
+
+  // A real silence between notes still closes the mouth: holding it open
+  // through a rest is the opposite mistake.
+  const breathing = mergeSung([sungLine(0, 4, 0.3, 0.4)], 0);
+  const breathShuts = [...breathing.tracks.mouth].filter((key) => key.value === 0);
+  if (breathShuts.length !== 5) {
+    throw new Error(
+      `a sung line with rests shuts ${breathShuts.length} times, expected 5`);
+  }
+
+  // A held note does not lean slowly to one side for most of its length.
+  const held = mergeSung([sungLine(0, 1, 2.0, 0)], 0);
+  const bounceBack = [...held.tracks.bounce].filter((key) => key.value === 0 && key.time > 0);
+  if (!bounceBack.length ||
+      Math.abs(bounceBack[0].time - vm.runInContext("SUNG_BOUNCE_SECONDS", planner)) > 1e-6) {
+    throw new Error(
+      `a two-second note bounces for ${bounceBack.length ? bounceBack[0].time : "?"}s, ` +
+      "expected the sung cap");
+  }
+  // The same note spoken keeps the old proportional bounce, untouched.
+  const spokenHeld = mergeRig([rigLine("A", 0, 1, 2.0)], 0);
+  const spokenBack = [...spokenHeld.tracks.bounce].filter((key) => key.value === 0 && key.time > 0);
+  if (!spokenBack.length || Math.abs(spokenBack[0].time - 0.76) > 1e-6) {
+    throw new Error("the spoken bounce moved; only the sung path was meant to change");
   }
 }
 

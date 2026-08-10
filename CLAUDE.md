@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v1.9.0` (Windows x64).
+- Current public release: `v1.9.1` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -358,6 +358,25 @@ effect.
     Type-On steps. `dsp_tests.cpp` measures the step at each seam against the largest step
     anywhere else in the note — not against every step, which would include the seams and
     could never fail.
+8x. **The mouth shuts on a gap, not on a percentage.** Speaking, every syllable closes at 82%
+    of its length and the closed span runs to the next syllable — in dialogue that includes the
+    gap and any punctuation rest, so it lasts long enough to read as a mouth closing, and it is
+    the chatter look the product is named for. Sung notes butt straight together, so the same
+    rule leaves only the 18% bite: measured on a real song line, 36 closes in 5.4 seconds with
+    24 of them shorter than one frame at 30 fps. Hold keys are sampled per frame, so which ones
+    landed was arbitrary and the mouth twitched rather than closed. The same rule failed the
+    other way on a held note, shutting the mouth for 360 ms in the middle of a two-second "ah".
+
+    A sung line therefore closes only when the silence after a note is at least
+    `MOUTH_CLOSE_FRAMES` frames long, and always at the end of the line. **Frames, not seconds**
+    — the failure is a frame-sampling artefact, so a threshold in seconds would simply reappear
+    at another frame rate. `mergeRigTimeline()` takes `comp.frameDuration` for this and stays
+    pure. The head bounce is capped at `SUNG_BOUNCE_SECONDS` on the same path, or a four-beat
+    note leans slowly to one side for three quarters of a second.
+
+    The new rule is bound to the line carrying a melody, not applied globally, so speech is
+    untouched: `validate-script.js` pins every spoken key against what 1.3.0 wrote (invariant
+    8l) and that pin still passes unchanged.
 8w. **Nothing sung is ever truncated to make it fit; it is split on a bar line.** A layer
     carries 64 melody slots and 128 text units, and a line over either becomes as many layers
     as it needs. `song::assign()` decides the note count in a dry pass *before* encoding
