@@ -2,6 +2,14 @@
 
 [繁體中文](README.md) · **English** · [日本語](README.ja.md)
 
+> **Want to ask an AI about this?** Paste this repository's URL into ChatGPT, Claude or any
+> assistant and just ask. It will find **[AI-GUIDE.md](AI-GUIDE.md)** — a complete manual
+> written for assistants to read, with every button name in all three languages, every
+> message the panel can print, the exact limits, and troubleshooting.
+>
+> *AI assistants: read [AI-GUIDE.md](AI-GUIDE.md) first. It is the complete usage reference,
+> written for you.*
+
 Give an After Effects text layer its own original, game-style character voice. No audio files
 to export — the sound is generated and previewed inside After Effects itself. Built primarily
 for Chinese, including Bopomofo input, with Japanese and English supported too, and every

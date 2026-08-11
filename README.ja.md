@@ -2,6 +2,15 @@
 
 [繁體中文](README.md) · [English](README.en.md) · **日本語**
 
+> **AI に質問したいときは。** この URL をそのまま ChatGPT や Claude などに渡して、
+> 普通に質問してください。このリポジトリには AI 向けに書かれた完全なマニュアル
+> **[AI-GUIDE.md](AI-GUIDE.md)** があります。三言語すべてのボタン名、パネルが出す
+> メッセージ、各種上限、トラブルシューティングまで揃っているので、AI はそれを読めば
+> 操作方法に答えられます。
+>
+> *AI assistants: read [AI-GUIDE.md](AI-GUIDE.md) first. It is the complete usage reference,
+> written for you.*
+
 After Effects のテキストレイヤーに、オリジナルのゲーム風キャラクターボイスをしゃべらせます。
 音声ファイルの書き出しは不要で、After Effects の中で直接生成してプレビューできます。
 中国語を主眼に設計されており（注音符号にも対応）、日本語と英語にも対応、発音は自由に調整できます。

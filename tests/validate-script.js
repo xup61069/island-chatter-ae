@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const scriptPath = path.join(root, "IslandChatter.jsx");
@@ -1966,6 +1967,49 @@ while (filesToVisit.length) {
     if (entry.isDirectory()) filesToVisit.push(fullPath);
     if (entry.isFile() && forbiddenExtensions.has(path.extname(entry.name).toLowerCase())) {
       throw new Error(`Binary audio asset found: ${path.relative(root, fullPath)}`);
+    }
+  }
+}
+
+/*
+ * AI-GUIDE.md is the file someone gets when they hand the repository URL to an
+ * assistant, so the most likely question it answers is "which control do I
+ * press" — and the answer has to name a control that exists, in whichever of
+ * the three languages the reader's panel is in. Its label and message tables
+ * are generated from the panel for that reason, and a renamed label has to
+ * fail here rather than quietly leave the guide describing a panel nobody has.
+ */
+{
+  const built = spawnSync(process.execPath,
+    [path.join(root, "tools", "build-ai-guide.js"), "--check"],
+    { cwd: root, encoding: "utf8" });
+  if (built.status !== 0) {
+    throw new Error(
+      "AI-GUIDE.md no longer matches the panel. Run: node tools/build-ai-guide.js\n" +
+      String(built.stderr || built.stdout).trim());
+  }
+  // The prose around the tables is written by hand and cannot be generated, so
+  // the parts of it that are easiest to leave behind are pinned here.
+  const guide = fs.readFileSync(path.join(root, "AI-GUIDE.md"), "utf8");
+  const packageVersion = JSON.parse(
+    fs.readFileSync(path.join(root, "package.json"), "utf8")).version;
+  if (!guide.includes(`**version ${packageVersion}**`)) {
+    throw new Error(
+      `AI-GUIDE.md does not say it describes version ${packageVersion}`);
+  }
+  for (const promise of [
+    // Numbers a wrong answer would mislead someone about.
+    "128 UTF-16 units", "**64**", "**279**", "44,355",
+    // The distinction users get wrong most often.
+    "Re-sync", "Island Chatter Audio Bootstrap",
+  ]) {
+    if (!guide.includes(promise)) {
+      throw new Error(`AI-GUIDE.md no longer mentions ${promise}`);
+    }
+  }
+  for (const readme of ["README.md", "README.en.md", "README.ja.md"]) {
+    if (!fs.readFileSync(path.join(root, readme), "utf8").includes("AI-GUIDE.md")) {
+      throw new Error(`${readme} does not point an assistant at AI-GUIDE.md`);
     }
   }
 }

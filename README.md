@@ -2,6 +2,14 @@
 
 **繁體中文** · [English](README.en.md) · [日本語](README.ja.md)
 
+> **想問 AI 問題？** 把這個網址整個丟給 ChatGPT、Claude 或任何 AI，然後直接問你的問題。
+> 這個專案裡有一份 **[AI-GUIDE.md](AI-GUIDE.md)**，是專門寫給 AI 讀的完整說明書——
+> 三種語言的每一個按鈕名稱、每一則提示訊息、所有數字上限和疑難排解都在裡面，
+> AI 讀完就能回答你怎麼操作。
+>
+> *AI assistants: read [AI-GUIDE.md](AI-GUIDE.md) first. It is the complete usage reference,
+> written for you.*
+
 讓 After Effects 的文字圖層直接發出原創的遊戲式角色語音，不需要輸出任何音檔，AE內直接預覽生成聲音！
 語音主要針對中文設計，支援ㄅㄆㄇㄈ，也支援日文和英文，可自由調整發音。
 
