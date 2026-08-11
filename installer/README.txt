@@ -23,3 +23,19 @@ Remove:  double-click Uninstall.bat.
 The resources folder holds the plug-in itself and the install scripts; there is
 nothing in there you need to touch. See LICENSE for terms and
 resources\THIRD_PARTY_NOTICES.md for third-party data notices.
+
+------------------------------------------------
+
+インストール：Install.bat をダブルクリックし、ユーザーアカウント制御の
+              画面で「はい」を押してください。
+              先に After Effects を完全に終了しておいてください。
+              終わったら After Effects を起動し、
+              ウィンドウ > IslandChatterNativePanel.jsx を開きます。
+
+アンインストール：Uninstall.bat をダブルクリックします。
+
+resources フォルダーにはプラグイン本体とインストール用スクリプトが入っています。
+手で触る必要はありません。ライセンスは LICENSE を、第三者データについては
+resources\THIRD_PARTY_NOTICES.md をご覧ください。
+
+パネルの表示言語は 繁體中文／English／日本語 から選べます。

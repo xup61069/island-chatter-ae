@@ -490,8 +490,7 @@
     function requireEngineTool() {
         var tool = bakeToolFile();
         if (!tool) {
-            throw new Error("island_chatter_bake.exe is missing. Reinstall Island Chatter." +
-                "\n找不到 island_chatter_bake.exe，請重新安裝 Island Chatter。");
+            throw new Error(M("island_chatter_bake.exe is missing. Reinstall Island Chatter. / 找不到 island_chatter_bake.exe，請重新安裝 Island Chatter。"));
         }
         return tool;
     }
@@ -533,8 +532,9 @@
         // callSystem() reports no exit status, so a tool that died halfway would
         // otherwise read as a short utterance and silently shorten the layer.
         if (!rate || samples < 0 || declared !== events.length) {
-            throw new Error("Island Chatter could not read the timing plan." +
-                "\n無法取得語音時間表。\n\n" + reply);
+            throw new Error(
+                M("Island Chatter could not read the timing plan. / Island Chatter 無法讀取時間規劃。") +
+                "\n\n" + reply);
         }
         return { events: events, duration: samples / rate };
     }
@@ -1231,8 +1231,8 @@
     function buildMouthSwitch(comp, rigLayer, targets) {
         var index;
         if (!targets.length) {
-            throw new Error("Select the mouth layers, or one mouth precomp." +
-                "\n請先選取嘴型圖層，或一個嘴型合成。");
+            throw new Error(
+                M("Select the mouth layers, or one mouth precomp. / 請選取嘴型圖層，或一個嘴型合成。"));
         }
         if (targets.length === 1 && targets[0].source && targets[0].source instanceof CompItem) {
             ensureRigTarget(targets[0], rigLayer);
@@ -1241,9 +1241,9 @@
             return { kind: "remap", count: 1 };
         }
         if (targets.length > MOUTH_SHAPE_COUNT) {
-            throw new Error("A mouth has " + MOUTH_SHAPE_COUNT +
-                " shapes: closed, a, i, u, e, o." +
-                "\n嘴型只有 " + MOUTH_SHAPE_COUNT + " 種：閉嘴、a、i、u、e、o。");
+            throw new Error(M(
+                "A mouth needs {0} shapes: closed, a, i, u, e, o. / 一組嘴型需要 {0} 張：閉嘴、a、i、u、e、o。",
+                MOUTH_SHAPE_COUNT));
         }
         // Topmost is shape 0. Some rule has to decide, and stacking order is the
         // one the user can see and change without leaving the timeline.
@@ -1256,8 +1256,8 @@
         for (index = 0; index < ordered.length; index += 1) {
             var opacity = opacityProperty(ordered[index]);
             if (!opacity) {
-                throw new Error(ordered[index].name + " has no Opacity to switch." +
-                    "\n這個圖層沒有不透明度可以切換：" + ordered[index].name);
+                throw new Error(M("{0} has no Opacity to switch. / {0} 沒有可切換的不透明度。",
+                    ordered[index].name));
             }
             opacity.expression = mouthOpacityExpression(index);
         }
@@ -1437,16 +1437,14 @@
         var selector = findNamedProperty(
             animator.property("ADBE Text Selectors"), "Island Chatter Reveal");
         if (!opacity || !selector) {
-            throw new Error("Type-On could not build its text animator on this layer." +
-                "\n無法在此圖層建立 Type-On 文字動畫器。");
+            throw new Error(M("Type-On could not build its text animator on this layer. / 逐字顯示無法在這個圖層上建立文字動畫。"));
         }
         // A Range Selector carries both percentage and index controls; only the
         // pair matching its Units setting is writable.
         var start = findPropertyByMatchName(selector, "ADBE Text Percent Start");
         var end = findPropertyByMatchName(selector, "ADBE Text Percent End");
         if (!start || !end) {
-            throw new Error("The Type-On range selector has no percentage controls." +
-                "\nType-On 的範圍選取器找不到百分比控制項。");
+            throw new Error(M("The Type-On range selector has no percentage controls. / 逐字顯示的範圍選取器沒有百分比控制項。"));
         }
         // Keyed properties reject setValue(); the user may have animated either
         // of these after a previous Apply.
@@ -1454,9 +1452,8 @@
             setPropertyValue(opacity, 0, time);
             setPropertyValue(end, 100, time);
         } catch (hidden) {
-            throw new Error("Set the Island Chatter Reveal selector's Advanced > Units back to" +
-                " Percentage, then apply again.\n請把 Island Chatter Reveal 選取器的" +
-                " Advanced > Units 改回 Percentage 後再套用一次。\n(" + hidden.toString() + ")");
+            throw new Error(M("Set the Island Chatter Reveal selector's Advanced > Units back to Percentage. / 請把 Island Chatter Reveal 選取器的 Advanced > Units 改回 Percentage。") +
+                "\n(" + hidden.toString() + ")");
         }
         clearKeys(start);
         setEasedKey(start, layer.inPoint, 0, curve);
@@ -1495,8 +1492,8 @@
         try {
             return layer.property("ADBE Effect Parade").addProperty(EFFECT_NAME);
         } catch (error) {
-            throw new Error("Native effect is not installed: " + EFFECT_NAME +
-                "\n尚未安裝原生效果：" + EFFECT_NAME);
+            throw new Error(M("Native effect is not installed: {0} / 找不到已安裝的效果：{0}",
+                EFFECT_NAME) + "\n(" + error.toString() + ")");
         }
     }
 
@@ -1522,7 +1519,8 @@
             try {
                 tone = layer.property("ADBE Effect Parade").addProperty(TONE_MATCH_NAME);
             } catch (error) {
-                throw new Error("The built-in Tone effect is unavailable.\n找不到 AE 內建的 Tone／音調效果。");
+                throw new Error(
+                    M("The built-in Tone effect is unavailable. / 找不到 AE 內建的 Tone／音調效果。"));
             }
         }
         tone.name = TONE_DISPLAY_NAME;
@@ -1767,13 +1765,11 @@
     // Beside the .aep, so baked audio travels with the project.
     function bakeFolder() {
         if (!app.project.file) {
-            throw new Error("Save the project first so the audio can go beside it." +
-                "\n請先儲存專案，音訊才能存在專案旁邊。");
+            throw new Error(M("Save the project first so the audio can go beside it. / 請先儲存專案，音訊會放在專案檔旁邊。"));
         }
         var folder = new Folder(app.project.file.parent.fsName + "/" + BAKE_FOLDER_NAME);
         if (!folder.exists && !folder.create()) {
-            throw new Error("Could not create " + folder.fsName +
-                "\n無法建立資料夾：" + folder.fsName);
+            throw new Error(M("Could not create {0} / 無法建立 {0}", folder.fsName));
         }
         return folder;
     }
@@ -1805,7 +1801,7 @@
         var tool = requireEngineTool();
         var effect = findNativeEffect(layer);
         if (!effect) {
-            throw new Error("Apply Island Chatter to this layer first. / 請先對此圖層按 Apply。");
+            throw new Error(M("Apply Island Chatter to this layer first. / 請先對此圖層按 Apply。"));
         }
         var target = new File(folder.fsName + "/" + bakeFileName(layer) + ".wav");
 
@@ -1829,7 +1825,7 @@
             failure = attempt();
         }
         if (failure) {
-            throw new Error("Bake failed for " + layer.name + "\n轉檔失敗：" + layer.name +
+            throw new Error(M("Bake failed for {0} / 轉檔失敗：{0}", layer.name) +
                 "\n\n" + target.fsName + "\n" + failure);
         }
         return target;
@@ -1968,7 +1964,7 @@
         if (!app.project) { app.newProject(); }
         var comp = app.project.activeItem;
         if (!(comp && comp instanceof CompItem)) {
-            throw new Error("Open an active composition first. / 請先開啟合成。");
+            throw new Error(M("Open an active composition first. / 請先開啟合成。"));
         }
         var layers = selectedTextLayers(comp);
         if (!layers.length) {
@@ -1982,7 +1978,7 @@
         var rigLayer = null;
         if (options.rigShared) {
             if (!options.rigCharacter) {
-                throw new Error("Choose or create a character first. / 請先選擇或新增角色。");
+                throw new Error(M("Choose or create a character first. / 請先選擇或新增角色。"));
             }
             rigLayer = ensureRigLayer(comp, options.rigCharacter);
             writeRigSettings(rigLayer, settings);
@@ -2162,7 +2158,7 @@
         if (!app.project) { app.newProject(); }
         var comp = app.project.activeItem;
         if (!(comp && comp instanceof CompItem)) {
-            throw new Error("Open an active composition first. / 請先開啟合成。");
+            throw new Error(M("Open an active composition first. / 請先開啟合成。"));
         }
         var written = String(scriptText).split(/[\r\n]+/);
         var spoken = [];
@@ -2182,14 +2178,14 @@
             }
         }
         if (!spoken.length) {
-            throw new Error("There is no script to import. / 沒有可以匯入的劇本文字。");
+            throw new Error(M("There is no script to import. / 沒有可以匯入的劇本文字。"));
         }
         // The character chosen in the panel is what a line with no speaker in
         // front of it belongs to.
         var fallbackRig = null;
         if (options.rigShared) {
             if (!options.rigCharacter) {
-                throw new Error("Choose or create a character first. / 請先選擇或新增角色。");
+                throw new Error(M("Choose or create a character first. / 請先選擇或新增角色。"));
             }
             fallbackRig = ensureRigLayer(comp, options.rigCharacter);
             writeRigSettings(fallbackRig, settings);
@@ -2341,8 +2337,9 @@
         // callSystem() reports no exit status, so a tool that died halfway would
         // otherwise read as a file with fewer tracks in it.
         if (declared !== tracks.length) {
-            throw new Error("Island Chatter could not read that MIDI file." +
-                "\n無法讀取這個 MIDI 檔。\n\n" + reply);
+            throw new Error(
+                M("Island Chatter could not read that MIDI file. / Island Chatter 無法讀取這個 MIDI 檔。") +
+                "\n\n" + reply);
         }
         return { tracks: tracks, bpm: bpm };
     }
@@ -2395,8 +2392,9 @@
             }
         }
         if (declared !== song.lines.length) {
-            throw new Error("Island Chatter could not lay out that song." +
-                "\n無法把歌詞和旋律對起來。\n\n" + reply);
+            throw new Error(
+                M("Island Chatter could not lay out that song. / Island Chatter 無法排出這首歌。") +
+                "\n\n" + reply);
         }
         return song;
     }
@@ -2459,18 +2457,18 @@
         if (!app.project) { app.newProject(); }
         var comp = app.project.activeItem;
         if (!(comp && comp instanceof CompItem)) {
-            throw new Error("Open an active composition first. / 請先開啟合成。");
+            throw new Error(M("Open an active composition first. / 請先開啟合成。"));
         }
         // No lyric is not an error: the engine sings the melody's own note
         // names instead, and hands them back as the text for each layer.
         var song = songFromMidi(midiFile, trackIndex, lyrics, tonic);
         if (!song.lines.length) {
-            throw new Error("There is nothing to sing on that track. / 這一軌沒有東西可以唱。");
+            throw new Error(M("There is nothing to sing on that track. / 這一軌沒有東西可以唱。"));
         }
         var fallbackRig = null;
         if (options.rigShared) {
             if (!options.rigCharacter) {
-                throw new Error("Choose or create a character first. / 請先選擇或新增角色。");
+                throw new Error(M("Choose or create a character first. / 請先選擇或新增角色。"));
             }
             fallbackRig = ensureRigLayer(comp, options.rigCharacter);
             writeRigSettings(fallbackRig, settings);
@@ -2694,9 +2692,8 @@
         }
         if (!ordered.length) {
             throw new Error(sung
-                ? "Those lines are singing; Re-flow would take them off their MIDI times." +
-                    "\n選到的都是唱歌圖層。重新排列會把它們從 MIDI 的時間拉走，所以跳過了。"
-                : "Select the lines to lay out. / 請選取要排列的台詞圖層。");
+                ? M("Those lines are singing; Re-flow would take them off their MIDI times. / 選到的都是唱歌圖層，重新排列會把它們從 MIDI 的時間拉走。")
+                : M("Select the lines to lay out. / 請選取要排列的台詞圖層。"));
         }
         ordered.sort(function (first, second) {
             return first.inPoint - second.inPoint || first.index - second.index;
@@ -2753,7 +2750,10 @@
         var group = parent.add("group");
         group.orientation = "row";
         var title = group.add("statictext", undefined, label);
+        // A deliberate width, so every slider starts in the same column. It
+        // must survive a language change, which is what icFixedWidth says.
         title.preferredSize.width = 110;
+        title.icFixedWidth = true;
         var slider = group.add("slider", undefined, value, minimum, maximum);
         slider.alignment = ["fill", "center"];
         var field = group.add("edittext", undefined, value.toFixed(2));
@@ -2881,8 +2881,529 @@
         "Select a text layer. / 請選取文字圖層。": "テキストレイヤーを選んでください。",
         "Open an active composition first. / 請先開啟合成。": "先にコンポジションを開いてください。",
         "Apply Island Chatter first, then bake. / 請先按 Apply 再轉成音訊。": "先に適用してから書き出してください。",
-        "Apply Island Chatter to this layer first. / 請先對此圖層按 Apply。": "このレイヤーにまず適用してください。"
+        "Apply Island Chatter to this layer first. / 請先對此圖層按 Apply。": "このレイヤーにまず適用してください。",
+
+        /*
+         * Everything the panel says while it is running, rather than the labels
+         * it was built with. These were written straight into status.text and
+         * alert() until 2.0, which meant every user saw both halves of every
+         * message and a Japanese user saw no Japanese at all — the interface
+         * was translated and the interface's own voice was not.
+         *
+         * {0} and {1} stand in for whatever the message counts, so a
+         * translation can put the number where its own grammar wants it.
+         * Rebuilding these by concatenation is what stranded "已唱出 3 句" in
+         * an English panel.
+         */
+        "Select a saved character first. / 請先選取自訂角色。":
+            "先に保存したキャラを選んでください。",
+        "Select a text layer or enter text first. / 請選取文字圖層或先輸入文字。":
+            "テキストレイヤーを選ぶか、文字を入力してください。",
+        "Select the lines to turn back into speech. / 請選取要改回講話的圖層。":
+            "しゃべりに戻すレイヤーを選んでください。",
+        "Apply Island Chatter to these layers first. / 這些圖層還沒套用過。":
+            "これらのレイヤーにはまだ適用されていません。",
+        "Choose a MIDI file first. / 請先按「選 MIDI」挑一個檔案。":
+            "先に「MIDI を選ぶ」でファイルを選んでください。",
+        "Choose a track first. / 請先選一個軌道。": "先にトラックを選んでください。",
+        "There is nothing to sing on that track. / 這一軌沒有東西可以唱。":
+            "このトラックには歌えるものがありません。",
+        "Choose a MIDI file / 選一個 MIDI 檔": "MIDI ファイルを選ぶ",
+        "Character {0} / 角色 {0}": "キャラ {0}",
+        "Read settings from {0} / 已讀取設定：{0}": "{0} から設定を読み込みました",
+        "Saved {0} / 已儲存：{0}": "{0} を保存しました",
+        "Now editing {0} / 目前角色：{0}": "編集中のキャラ：{0}",
+        "Rebuilt {0} rig(s), {1} line(s) / 已重建 {0} 組控制器、{1} 句":
+            "リグ {0} 組・{1} 行を作り直しました",
+        "Overlapping lines: {0} / 台詞重疊：{0}": "セリフが重なっています：{0}",
+        "Mouth on Time Remap / 嘴型已接上時間重映射":
+            "口パクをタイムリマップにつなぎました",
+        "Mouth switch on {0} layer(s) -> {1} / 已接上嘴型 {0} 層 -> {1}":
+            "口パクを {0} レイヤーにつなぎました -> {1}",
+        "Baked {0} layer(s) -> {1} / 已轉成音訊 {0} 層 -> {1}":
+            "{0} レイヤーを書き出しました -> {1}",
+        "Removed {0} item(s) from {1} layer(s) / 已移除 {1} 層上的 {0} 個項目":
+            "{1} レイヤーから {0} 項目を取り除きました",
+        "Re-synced {0} layer(s) / 已重新同步 {0} 層": "{0} レイヤーを更新しました",
+        "Re-flowed {0} layer(s) @ {1} beat(s) / 已排列 {0} 層 @ {1} 拍":
+            "{0} レイヤーを {1} 拍あけて並べ直しました",
+        "Imported {0} layer(s) / 已匯入 {0} 層": "{0} レイヤーを読み込みました",
+        "Truncated: {0} / 已截斷：{0}": "文字が切れました：{0}",
+        "Kanji read as Chinese: {0} / 漢字以中文讀音唸出：{0}":
+            "漢字は中国語読みです：{0}",
+        "No notes in that file / 這個檔案裡沒有音符": "このファイルに音符がありません",
+        "MIDI loaded: {0} — pick a track, then Sing / 已讀取 {0} —— 選好軌道後按「唱出來」":
+            "MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」",
+        "Sung {0} layer(s) / 已唱出 {0} 層": "{0} レイヤーを歌わせました",
+        "Sung note names on {0} layer(s) / 已唱唱名 {0} 層":
+            "階名で {0} レイヤーを歌わせました",
+        "Sung {0} line(s) — {1} / 已唱出 {0} 句 —— {1}": "{0} 行を歌わせました —— {1}",
+        "Speaking again: {0} layer(s) / 已改回講話 {0} 層":
+            "{0} レイヤーをしゃべりに戻しました",
+        "None of those were singing / 選取的圖層沒有旋律":
+            "選んだレイヤーにメロディがありません",
+        "Applied to {0} layer(s) / 已套用 {0} 個圖層": "{0} レイヤーに適用しました",
+        // Tails, appended to a message above. Each carries its own leading gap
+        // so the caller only ever joins localised pieces.
+        "  rig x{0} / 　控制器 x{0}": "　リグ x{0}",
+        "  stale bake x{0} / 　轉檔過期 x{0}": "　書き出し古い x{0}",
+        "  held x{0} / 　接到下一句 x{0}": "　次までのばす x{0}",
+        "  +{0} split / 　+{0} 斷句": "　+{0} 行に分割",
+        "  cast: {0} / 　角色：{0}": "　キャラ：{0}",
+        "  comp grown to {0}s / 　合成延長到 {0}s": "　コンポを {0}s に延長",
+        "  ({0} sung layer(s) left in place) / 　（唱歌 {0} 層維持原位）":
+            "　（歌の {0} レイヤーはそのまま）",
+        // What did not line up in an import, said out loud rather than guessed at.
+        "{0} syllable(s) with no note / {0} 個字沒有音符（用最後一個音唱完）":
+            "{0} 文字に音符がありません（最後の音でのばします）",
+        "{0} note(s) with no syllable / {0} 個音符沒有字": "{0} 音に歌詞がありません",
+        "{0} note(s) dropped from chords / 和弦捨去 {0} 個音": "和音から {0} 音を省きました",
+        "{0} long line(s) split / 太長的句子拆成 {0} 層": "長い行を {0} レイヤーに分けました",
+        "truncated: {0} / 被截斷：{0}": "切れました：{0}",
+        // The readouts beside the tempo, gap and MIDI controls.
+        "Speed set manually / 語速為手動設定": "はやさは手動設定です",
+        "{0} s/syllable   Speed {1} / {0} 秒／字   Speed {1}": "{0} 秒／音   Speed {1}",
+        "  (x{0} character) / 　（x{0} 角色補償）": "　（x{0} キャラ補正）",
+        "   OUT OF RANGE / 　　超出範圍": "　　範囲外",
+        "= 0s  no grid / = 0s　無格線": "= 0s　グリッドなし",
+        "  sixteenth / 　十六分": "　16 分",
+        "  eighth / 　八分": "　8 分",
+        "  quarter / 　四分": "　4 分",
+        "  half / 　二分": "　2 分",
+        "{0} track(s) · {1} BPM / {0} 軌・{1} BPM": "{0} トラック・{1} BPM",
+        "{0} line(s) · {1} BPM / {0} 句・{1} BPM": "{0} 行・{1} BPM",
+        // The two questions the panel asks, rather than tells.
+        "There are already {0} layer(s) here from an earlier MIDI import.\n\nRemove them first? No adds a second copy. / 這個合成裡已經有 {0} 層是之前匯入的。\n\n要先移除它們嗎？按「否」就直接再加一份。":
+            "このコンポには前回の MIDI 読み込みで作られたレイヤーが {0} 枚あります。" +
+            "\n\n先に取り除きますか？「いいえ」でもう一組追加します。",
+        "Only the first {0} UTF-16 units are spoken; the rest of the Source Text was cut:\n\n{1} / 只會唸出前 {0} 個 UTF-16 字元，超出的 Source Text 已截斷：\n\n{1}":
+            "しゃべるのは最初の {0} UTF-16 単位までです。残りのソーステキストは切りました：\n\n{1}",
+        // Errors raised deep in the panel and shown through alert().
+        "The built-in Tone effect is unavailable. / 找不到 AE 內建的 Tone／音調效果。":
+            "After Effects 内蔵のトーン効果が見つかりません。",
+        "Save the project first so the audio can go beside it. / 請先儲存專案，音訊會放在專案檔旁邊。":
+            "先にプロジェクトを保存してください。音声はその隣に書き出します。",
+        "Could not create {0} / 無法建立 {0}": "{0} を作成できませんでした",
+        "Bake failed for {0} / 轉檔失敗：{0}": "書き出しに失敗しました：{0}",
+        "There is no script to import. / 沒有可以匯入的劇本文字。":
+            "読み込める台本がありません。",
+        "island_chatter_bake.exe is missing. Reinstall Island Chatter. / 找不到 island_chatter_bake.exe，請重新安裝 Island Chatter。":
+            "island_chatter_bake.exe が見つかりません。Island Chatter を入れ直してください。",
+        "Island Chatter could not read the timing plan. / Island Chatter 無法讀取時間規劃。":
+            "タイミングの計算結果を読み取れませんでした。",
+        "Island Chatter could not read that MIDI file. / Island Chatter 無法讀取這個 MIDI 檔。":
+            "この MIDI ファイルを読み取れませんでした。",
+        "Island Chatter could not lay out that song. / Island Chatter 無法排出這首歌。":
+            "この曲を並べられませんでした。",
+        "Select the mouth layers, or one mouth precomp. / 請選取嘴型圖層，或一個嘴型合成。":
+            "口パク用のレイヤー、または口パクコンポを選んでください。",
+        "A mouth needs {0} shapes: closed, a, i, u, e, o. / 一組嘴型需要 {0} 張：閉嘴、a、i、u、e、o。":
+            "口パクには {0} 枚必要です：閉じ、a、i、u、e、o。",
+        "{0} has no Opacity to switch. / {0} 沒有可切換的不透明度。":
+            "{0} には切り替えられる不透明度がありません。",
+        "Type-On could not build its text animator on this layer. / 逐字顯示無法在這個圖層上建立文字動畫。":
+            "このレイヤーに一文字ずつ表示のアニメーターを作れませんでした。",
+        "The Type-On range selector has no percentage controls. / 逐字顯示的範圍選取器沒有百分比控制項。":
+            "一文字ずつ表示の範囲セレクターに％の項目がありません。",
+        "Set the Island Chatter Reveal selector's Advanced > Units back to Percentage. / 請把 Island Chatter Reveal 選取器的 Advanced > Units 改回 Percentage。":
+            "Island Chatter Reveal セレクターの詳細 > 単位を「割合」に戻してください。",
+        "Native effect is not installed: {0} / 找不到已安裝的效果：{0}":
+            "効果がインストールされていません：{0}",
+        "Those lines are singing; Re-flow would take them off their MIDI times. / 選到的都是唱歌圖層，重新排列會把它們從 MIDI 的時間拉走。":
+            "選んだのはすべて歌のレイヤーです。並べ直すと MIDI の時間から外れてしまいます。"
     };
+
+    /*
+     * Tooltips. Not "English / 中文" pairs like every label, because these are
+     * paragraphs rather than names: the Chinese ones explain why a control
+     * exists and what it costs, and squeezing three of those into one key
+     * would be unreadable in the source and impossible to translate cleanly.
+     * A short id, three bodies, and H() picks one.
+     *
+     * Until 2.0 each of these was one thin English sentence with the real
+     * explanation concatenated after it in Chinese, so an English panel showed
+     * a wall of Chinese and a Japanese panel showed the same wall.
+     */
+    var IC_HELP = {};
+    function help(id, en, zh, ja) { IC_HELP[id] = { en: en, zh: zh, ja: ja }; }
+
+    help("language",
+        "Interface language. What is spoken does not change.",
+        "介面語言，不影響唸出來的內容。",
+        "画面の言語です。しゃべる内容は変わりません。");
+
+    help("readLayer",
+        "Load the layer's text and, if Island Chatter is already on it, every" +
+        " voice setting back into this panel.",
+        "把圖層的文字讀進來；若已套用過 Island Chatter，連語音設定一起讀回面板。",
+        "レイヤーのテキストを読み込みます。すでに適用されていれば、" +
+        "\nボイス設定もまとめてこのパネルに戻します。");
+
+    help("pronunciation",
+        "Force a reading where the character alone is ambiguous. Inline" +
+        " overrides, tone-number pinyin and Zhuyin all work." +
+        "\n\nExamples: [重|chong2]新, ni3 hao3, ㄋㄧˇ ㄏㄠˇ",
+        "同一個字有兩種唸法時，在這裡指定。可用行內覆寫、數字調拼音或注音。" +
+        "\n\n例：[重|chong2]新、ni3 hao3、ㄋㄧˇ ㄏㄠˇ",
+        "同じ漢字に読みが二つあるときに指定します。" +
+        "\nインライン指定・数字つきピンイン・注音のどれでも使えます。" +
+        "\n\n例：[重|chong2]新、ni3 hao3、ㄋㄧˇ ㄏㄠˇ");
+
+    help("formant",
+        "Scales the vocal tract without touching the pitch. Left is a small" +
+        " animal, right is a giant.",
+        "縮放口腔大小，音高不變：往左變小動物，往右變巨人。",
+        "音の高さは変えずに、口の中の大きさだけを変えます。" +
+        "\n左へ回すと小動物、右へ回すと巨人になります。");
+
+    help("source",
+        "What the vocal folds are replaced with. This changes the sound source" +
+        " itself, not just the resonance on top of it.",
+        "換掉發聲源本身，不只是換共鳴。",
+        "声帯そのものを何に置き換えるかです。" +
+        "\n響きだけでなく、音の出どころが変わります。");
+
+    help("tempo",
+        "Derive Speed from a tempo instead of setting it by hand.",
+        "用節拍速度推算語速，取代手動設定。",
+        "はやさを手で決めるかわりに、テンポから計算します。");
+
+    help("chatter",
+        "Close the mouth on every syllable, the way every release up to 1.9.1" +
+        " did." +
+        "\n\nOff by default: the mouth now closes only where there is a real" +
+        " pause — punctuation and the end of a line — and consecutive" +
+        " syllables just change shape." +
+        "\nOn ten syllables of dialogue the old rule opened and shut 19 times" +
+        " with the mouth closed 41% of the frames; the new one closes 5 times," +
+        " 27%, and all five land where a mouth should close." +
+        "\n\nTick this to get the old look back. A sung line ignores it either" +
+        " way: there the short closes are shorter than one frame, which is a" +
+        " sampling artefact rather than a style." +
+        "\n\nExisting keyframes are not rewritten until you press Rebuild" +
+        " (shared rig) or Apply again (per-layer).",
+        "每個字都把嘴巴閉一次，1.9.1 以前的作法。" +
+        "\n\n預設是關的：嘴巴只在真的有停頓的地方閉（標點、句尾），連著的字之間只換嘴型。" +
+        "\n一句十個字的台詞，舊作法會開合 19 次、嘴巴有 41% 的時間是閉的；" +
+        "\n新作法是 5 次、27%，而那 5 次都落在該閉的地方。" +
+        "\n\n勾起來就會回到舊的樣子。唱歌的句子不受這個勾選影響——" +
+        "\n那裡的短閉嘴比一個影格還短，是取樣問題不是風格。" +
+        "\n\n改了之後要按 Rebuild／重建（共用）或重新 Apply（每層）才會重寫關鍵影格。",
+        "1 音ごとに口を閉じます。1.9.1 までの動きです。" +
+        "\n\n既定はオフで、句読点と行末など本当に間があるところだけ閉じ、" +
+        "\n続いている音のあいだは口の形だけが変わります。" +
+        "\n10 音のセリフで、昔の規則は 19 回開閉してフレームの 41% が閉じた状態でした。" +
+        "\n今は 5 回・27% で、その 5 回はどれも閉じるべき場所です。" +
+        "\n\nチェックすると昔の見た目に戻ります。歌の行はどちらでも変わりません——" +
+        "\nそこでの短い閉じは 1 フレームより短く、演出ではなくサンプリングの副産物です。" +
+        "\n\n既存のキーフレームは、Rebuild（共有リグ）か再適用（レイヤーごと）まで書き換わりません。");
+
+    help("typeOnCenter",
+        "Keep the revealed text centred as it types on, gliding into place" +
+        " instead of growing out of the left edge. For centre-justified text.",
+        "讓已顯示的文字保持置中並平滑滑動，而不是從左邊長出來。適用於置中對齊的文字。",
+        "表示済みの文字を中央にそろえたまま滑らせます。" +
+        "\n左端から伸びていく代わりです。中央ぞろえのテキスト向け。");
+
+    help("rigPerLayer",
+        "Five sliders on each line, the way it has always worked.",
+        "每一句自己長五根滑桿，跟以前一樣。",
+        "行ごとに 5 本のスライダーが付きます。これまでどおりの動きです。");
+
+    help("rigShared",
+        "One set of sliders on a null, driven by whichever line is speaking." +
+        " This is what lets a whole scene drive one character: the mouth binds" +
+        " to that one set, whatever layer the line happens to be on.",
+        "一整組滑桿放在一個空物件上，由「當下正在講話的那一句」驅動。" +
+        "\n一個角色的嘴巴就綁這一組，不管那句是第幾層。",
+        "スライダー 1 組をヌルに置き、いま話している行がそれを動かします。" +
+        "\nキャラの口はこの 1 組につなぐだけで、行がどのレイヤーにあっても構いません。");
+
+    help("rebuild",
+        "Re-merge the shared rig from its lines. Needed after moving a line in" +
+        " time, because the rig holds keyframes rather than a live link — so it" +
+        " cannot find out on its own.",
+        "重新合併共用控制器。把台詞在時間上搬動之後按一下 —— " +
+        "\n控制器上是關鍵影格，不是即時連動，所以它不會自己知道。",
+        "共有リグを行から作り直します。行を時間軸で動かしたあとに押してください——" +
+        "\nリグはキーフレームで、リアルタイムの連動ではないので、自分では気づきません。");
+
+    help("mouth",
+        "Wire selected layers to the chosen character's IC Mouth." +
+        "\n\nIC Mouth: 0 closed, 1=a, 2=i, 3=u, 4=e, 5=o." +
+        "\nOne mouth precomp -> Time Remap, frame 0 closed, then a i u e o." +
+        "\nSeveral layers -> Opacity switching, top to bottom: closed, a, i, u, e, o." +
+        "\n\n(IC Head Bounce is ±55, IC Blink is 0/100, IC Speaking is 100 while" +
+        " talking, IC Line is which line is running, IC Accent hits 100 on each" +
+        " syllable and settles to 50.)",
+        "把選取的圖層接到所選角色的 IC Mouth 上。" +
+        "\n\nIC Mouth：0 閉嘴，1=a，2=i，3=u，4=e，5=o。" +
+        "\n選一個嘴型合成 → 用時間重映射，第 0 格閉嘴，之後依序 a i u e o。" +
+        "\n選多個圖層 → 用不透明度切換，由上而下依序是閉嘴、a、i、u、e、o。" +
+        "\n\n（IC Head Bounce 是 ±55，IC Blink 是 0／100，" +
+        "\nIC Speaking 講話中為 100，IC Line 是現在第幾句，" +
+        "\nIC Accent 每個字彈到 100 再落到 50。）",
+        "選んだレイヤーを、選んだキャラの IC Mouth につなぎます。" +
+        "\n\nIC Mouth：0 が閉じ、1=a、2=i、3=u、4=e、5=o。" +
+        "\n口パクコンポを 1 つ選ぶ → タイムリマップ。0 フレーム目が閉じ、以降 a i u e o。" +
+        "\n複数レイヤーを選ぶ → 不透明度の切り替え。上から順に閉じ・a・i・u・e・o。" +
+        "\n\n（IC Head Bounce は ±55、IC Blink は 0／100、" +
+        "\nIC Speaking は発話中 100、IC Line は今何行目か、" +
+        "\nIC Accent は 1 音ごとに 100 まで跳ねて 50 に落ちます。）");
+
+    help("leave",
+        "How the reveal and the recentring leave each position. Low leaves at" +
+        " full speed and settles slowly; high draws the whole move out." +
+        "\nThese are ordinary keyframes, so the graph editor still owns them" +
+        " afterwards.",
+        "逐字顯示與置中滑動離開每個位置的方式。低值＝全速離開、慢慢停入；高值＝整段拉長。" +
+        "\n產生的是一般關鍵影格，之後仍可在圖表編輯器裡自由調整。",
+        "一文字ずつ表示と中央そろえが、各位置から離れるときの動き方です。" +
+        "\n低い＝全速で離れてゆっくり止まる、高い＝全体をゆっくり伸ばす。" +
+        "\n作られるのは普通のキーフレームなので、あとからグラフエディターで直せます。");
+
+    help("smoothness",
+        "How softly each character crosses the reveal edge. 0 makes characters" +
+        " pop, higher values fade them in.",
+        "每個字跨過顯示邊界的柔和程度。0 是直接彈出，越高越像淡入。",
+        "文字が表示の境目をまたぐときの柔らかさです。" +
+        "\n0 でぱっと出て、大きくするほどフェードインになります。");
+
+    help("import",
+        "Turn the text box above into one layer per line, laid end to end from" +
+        " the current time." +
+        "\n\nEvery line gets the panel's current voice, and its length follows" +
+        " the speech whether or not Fit Duration is ticked." +
+        "\nA line too long for the transport is split in two at a punctuation" +
+        " mark rather than cut off." +
+        "\nThe composition is grown to fit if it needs to be.",
+        "把上面的文字框一行變一層，從目前時間點依序排好。" +
+        "\n\n每一句都會套用目前的語音設定，長度自動配合語音（不管有沒有勾配合長度）。" +
+        "\n太長的句子會自動斷成兩層，斷在標點上，不會被截掉。" +
+        "\n合成不夠長時會自動延長到剛好放得下。",
+        "上のテキスト欄を 1 行 1 レイヤーにして、現在時間から順に並べます。" +
+        "\n\n各行にはいまのボイス設定が入り、長さは「長さを合わせる」の有無に関わらず音声に従います。" +
+        "\n長すぎる行は句読点で 2 レイヤーに分け、切り捨てません。" +
+        "\nコンポが足りなければ、収まるところまで自動で伸ばします。");
+
+    help("gap",
+        "Beats between one line and the next, against the BPM above. Decimals" +
+        " are fine." +
+        "\n\n1 = a quarter note, 0.5 = an eighth, 0.25 = a sixteenth, 2 = a half." +
+        "\nThe grid gets as fine as the number asks for: 0.5 lands lines on" +
+        " eighth notes." +
+        "\n\nThe next line falls on the first grid step at least this far after" +
+        " the last one ended, so this is a minimum rather than a fixed" +
+        " distance — without tempo lock a line is not a whole number of beats" +
+        " long, and a fixed distance walks off the grid by the third line." +
+        "\n0 means no gap and no grid at all: one line straight after another.",
+        "每一句之間空幾拍，用上面那個 BPM 換算。可以填小數。" +
+        "\n\n1 = 四分音符，0.5 = 八分音符，0.25 = 十六分音符，2 = 二分音符。" +
+        "\n格線會跟著這個數字變細：填 0.5 就對齊到八分音符上。" +
+        "\n\n下一句會落在「上一句結束後至少這麼多」的那個格線上，所以這是最小值、" +
+        "\n不是固定距離 —— 沒開節拍鎖定時每句長度不是整數拍，" +
+        "\n固定距離會讓第三句開始就飄出格線。" +
+        "\n填 0 就是完全不留白也不對齊，一句接著一句。",
+        "行と行のあいだを何拍あけるかを、上の BPM で換算します。小数も使えます。" +
+        "\n\n1 = 4 分音符、0.5 = 8 分音符、0.25 = 16 分音符、2 = 2 分音符。" +
+        "\nグリッドはこの数字の細かさになります。0.5 なら 8 分音符にそろいます。" +
+        "\n\n次の行は「前の行が終わってから、少なくともこれだけ後」の最初のグリッドに乗ります。" +
+        "\nつまり固定の距離ではなく最小値です——テンポロックなしでは行の長さが整数拍にならず、" +
+        "\n固定距離だと 3 行目からグリッドを外れていきます。" +
+        "\n0 なら間隔もグリッドもなしで、そのまま次の行が続きます。");
+
+    help("hold",
+        "Keep each line on screen until the next one starts, instead of ending" +
+        " where its audio does." +
+        "\n\nFit Duration cuts a layer to the length of the speech, so the" +
+        " sound is right and the subtitle is not: a beat of silence between two" +
+        " lines is a beat of blank screen." +
+        "\nThis only ever lengthens a line — a gap of 0, or two lines that" +
+        " already overlap, are untouched, and the last line keeps its own" +
+        " length." +
+        "\n\nThe audio does not change: after the speech ends that stretch is" +
+        " silent. Re-flow honours this setting too.",
+        "每一句的字留到下一句開始才消失，而不是講完就不見。" +
+        "\n\n配合長度是照語音的長短切的，聲音對、字幕不對：兩句之間空一拍，畫面就空一拍。" +
+        "\n勾了之後只會延長、不會縮短——間隔填 0 或兩句本來就重疊的話不受影響，" +
+        "\n最後一句也維持自己的長度。" +
+        "\n\n聲音完全不變：語音結束之後那段是靜音。" +
+        "\n「重新排列」也會照這個設定重新接好。",
+        "各行を、音が終わったところではなく次の行が始まるまで画面に残します。" +
+        "\n\n「長さを合わせる」は音声の長さで切るので、音は合っていても字幕は合いません。" +
+        "\n行間が 1 拍あけば、画面も 1 拍空きます。" +
+        "\nこれは伸ばすだけです——間隔 0 や、もともと重なっている 2 行はそのままで、" +
+        "\n最後の行は自分の長さを保ちます。" +
+        "\n\n音は変わりません。発話のあとは無音です。「並べ直す」もこの設定に従います。");
+
+    help("speakers",
+        "Read \"Mimi: hello\" as a line spoken by Mimi: the name is stripped" +
+        " and the line joins that character's rig. Full-width and half-width" +
+        " colons both count." +
+        "\n\nOff by default, on purpose: \"Warning: it is dangerous here\" looks" +
+        " exactly like a speaker name, and guessing would invent a character" +
+        " called Warning and eat the word out of the line.",
+        "把「咪咪：你好」讀成咪咪講的話 —— 名字不會被唸出來，該句自動加入那個角色。" +
+        "\n全形和半形冒號都可以。" +
+        "\n\n預設關閉是故意的：「注意：這裡很危險」跟角色名長得一模一樣，" +
+        "\n自動判斷會生出一個叫「注意」的角色，還把那兩個字從台詞裡吃掉。",
+        "「ミミ：こんにちは」をミミのセリフとして読みます。" +
+        "\n名前は読み上げず、その行はそのキャラのリグに入ります。全角・半角どちらのコロンでも。" +
+        "\n\n既定でオフなのはわざとです。「注意：ここは危険です」は話者名と見分けがつかず、" +
+        "\n自動で判定すると「注意」というキャラができて、その 2 文字がセリフから消えます。");
+
+    help("chooseMidi",
+        "Pick a MIDI file and list the tracks in it. Nothing is created until" +
+        " Sing." +
+        "\n\nTwo steps, because a MIDI file usually has several tracks and" +
+        " guessing wrong means singing the accompaniment.",
+        "選一個 MIDI 檔，把裡面的軌道列出來。按了不會馬上建圖層。" +
+        "\n\n選好軌道之後再按「唱出來」。分成兩步是因為一個 MIDI 檔常常有好幾軌，" +
+        "\n猜錯會唱到伴奏。",
+        "MIDI ファイルを選び、中のトラックを一覧にします。押しただけでは何も作りません。" +
+        "\n\n2 段階なのは、MIDI ファイルには普通いくつもトラックがあり、" +
+        "\n間違えると伴奏を歌ってしまうからです。");
+
+    help("track",
+        "Which track carries the tune. The one with the most notes is picked" +
+        " for you.",
+        "哪一軌是旋律。預設選音符最多的那一軌。",
+        "どのトラックがメロディかです。音符がいちばん多いものを既定で選びます。");
+
+    help("transpose",
+        "Semitones added to every note, for a tune written outside the" +
+        " character's comfortable range. -12 is an octave down, 12 an octave up." +
+        "\n\nA voice never transposes itself: a note is sung at the pitch the" +
+        " MIDI wrote, so two characters singing together stay in the same key." +
+        " What makes a character sound like itself is resonance and timbre, not" +
+        " register.",
+        "每個音都往上或往下移幾個半音。-12 是低八度，12 是高八度。" +
+        "\n\n聲線不會自己移調：MIDI 寫哪個音就唱哪個音，" +
+        "\n所以兩個角色合唱不會走音。角色的差別在共鳴和音色，不在音高。",
+        "すべての音を何半音ずらすかです。-12 で 1 オクターブ下、12 で 1 オクターブ上。" +
+        "\n\nボイス自体は移調しません。MIDI に書かれた高さでそのまま歌うので、" +
+        "\n2 キャラで歌っても調がずれません。キャラの違いは響きと音色で、音域ではありません。");
+
+    help("key",
+        "Which pitch is do, when the melody sings its own note names." +
+        "\n\nLeave it on C for fixed do. Pick G for movable do and the whole" +
+        " set of names moves with it." +
+        "\nIt changes only the names, never the pitch — that always follows the" +
+        " MIDI. A black key takes the name of the white key below it.",
+        "文字框空白時會唱唱名，這裡決定哪個音是 Do。" +
+        "\n\n留在 C 就是固定調（C 是 Do）。選 G 就是首調（G 是 Do），整組唱名跟著移。" +
+        "\n只影響唱出來的名字，不影響音高——音高永遠照 MIDI 寫的。" +
+        "\n黑鍵沿用下面那個白鍵的名字（升 Do 唱成 Do）。",
+        "歌詞が空のときに階名で歌います。どの音をドにするかをここで決めます。" +
+        "\n\nC のままなら固定ド。G を選べば移動ドになり、階名がまとめてずれます。" +
+        "\n変わるのは名前だけで、音の高さは変わりません——高さは常に MIDI どおりです。" +
+        "\n黒鍵はすぐ下の白鍵の名前を使います。");
+
+    help("toneBlend",
+        "How much of the Mandarin tone contour survives, as a percentage." +
+        "\n\nWhen singing, the melody owns the pitch, and a full tone contour" +
+        " fights it. What is left here becomes the approach to each note — a" +
+        " fourth tone slides down into it, a second tone up — so the" +
+        " articulation still sounds like Mandarin while the tuning belongs to" +
+        " the tune. 0 = none, 100 = all of it.",
+        "中文四聲保留多少（百分比）。" +
+        "\n\n唱歌時音高由旋律決定，完整的四聲會跟旋律打架。" +
+        "\n這裡留下的部分變成每個音的起音方向 —— 四聲從上面滑下來，二聲從下面滑上來，" +
+        "\n聽起來還是中文咬字，但音準是旋律的。0 = 完全不要，100 = 全部保留。",
+        "中国語の四声をどれだけ残すか（％）です。" +
+        "\n\n歌では高さをメロディが決めるので、四声をそのまま出すとぶつかります。" +
+        "\nここで残した分は各音への入り方になります——四声は上から、二声は下から滑り込みます。" +
+        "\n発音は中国語のままで、音程はメロディのものになります。0 = なし、100 = そのまま。");
+
+    help("sing",
+        "Sing the lyrics in the text box to the chosen track." +
+        "\n\nOne layer per lyric line, each placed at the time of its own first" +
+        " note — a MIDI import ignores the gap grid, because a song belongs on" +
+        " its own timing. Length always follows the melody." +
+        "\nOne syllable per note, in order; a - in the lyric holds the previous" +
+        " syllable across the next note. A chord keeps only its top note." +
+        "\nWhatever does not line up is reported below rather than silently" +
+        " absorbed.",
+        "把上面文字框裡的歌詞，照選定那一軌的旋律唱出來。" +
+        "\n\n一行歌詞一層，每一層放在該句第一個音符的時間上 —— 匯入 MIDI 不看間隔格線，" +
+        "\n歌要對在它自己的時間上。長度一律配合旋律。" +
+        "\n一個字配一個音，依序發下去；歌詞裡打一個 - 代表前一個字延續唱到下一個音。" +
+        "\n和弦只取最高音。音符和字數對不上時會在下面說，不會默默處理。",
+        "上のテキスト欄の歌詞を、選んだトラックのメロディで歌わせます。" +
+        "\n\n歌詞 1 行につき 1 レイヤー。各レイヤーはその行の最初の音符の時間に置かれます——" +
+        "\nMIDI の読み込みは間隔グリッドを見ません。歌はそれ自身の時間に合わせるものだからです。" +
+        "\n長さは必ずメロディに従います。" +
+        "\n1 文字に 1 音を順に割り当てます。歌詞の - は、前の文字を次の音までのばす印です。" +
+        "\n和音はいちばん上の音だけを使います。合わなかったところは黙って処理せず、下に表示します。");
+
+    help("speak",
+        "Take the melody off the selected lines so they speak again." +
+        "\n\nThe voice settings are untouched, and the length goes back to what" +
+        " the speech needs." +
+        "\nApply deliberately leaves a melody alone, so a whole song is never" +
+        " lost by accident — which is why clearing one needs its own button.",
+        "把選取圖層上的旋律拿掉，變回一般講話。" +
+        "\n\n聲音設定完全不動，長度會重新配合講話的長短。" +
+        "\nApply 是故意不會清掉旋律的（免得誤刪一整首歌），所以要清就按這個。",
+        "選んだ行からメロディを外して、しゃべりに戻します。" +
+        "\n\nボイス設定はそのままで、長さはしゃべりに合わせ直します。" +
+        "\n適用はメロディをわざと残します（曲をまるごと失わないため）。" +
+        "\nだから消すには専用のこのボタンが要ります。");
+
+    help("resync",
+        "Update the selected lines from their own Source Text, keeping each" +
+        " one's voice exactly as it is." +
+        "\n\nThe difference from Apply: this never touches the sound. Whatever" +
+        " the panel is showing makes no difference — every layer keeps the" +
+        " settings it already stored." +
+        "\nUse it after editing text; select as many layers and as many" +
+        " characters as you like and nothing gets repainted." +
+        "\n\nIt only refreshes what a layer already had: a line with no markers" +
+        " does not gain any. The length is always recomputed.",
+        "用每一層自己的 Source Text 重新同步文字、長度、標記與動畫控制。" +
+        "\n\n和 Apply 的差別：**完全不碰聲音**。面板現在顯示什麼都不影響，" +
+        "\n每層維持它自己已經存著的聲音設定。" +
+        "\n改字的時候用這個，選再多層、跨再多角色都不會被蓋掉。" +
+        "\n\n只會更新這層本來就有的東西：沒有標記的不會被加上標記。長度一律重算。",
+        "選んだ行を、その行自身のソーステキストから作り直します。ボイスはそのままです。" +
+        "\n\n適用との違い：音にはいっさい触れません。パネルの表示が何であっても関係なく、" +
+        "\n各レイヤーは自分が保存している設定を保ちます。" +
+        "\nテキストを直したあとはこちらを。何レイヤー選んでも、キャラをまたいでも上書きされません。" +
+        "\n\n更新されるのはもともとあったものだけです。マーカーのない行にマーカーは付きません。" +
+        "\n長さは必ず計算し直します。");
+
+    help("reflow",
+        "Lay the selected lines out again end to end, using the gap above and" +
+        " each line's real length. With nothing selected it lays out every line" +
+        " in the composition." +
+        "\n\nUse it after editing or deleting a line — everything after it" +
+        " makes room or closes up." +
+        "\nThe first line stays where it is (pulled only to the nearest beat)" +
+        " and the rest follow it. Baked audio moves with its line.",
+        "把選取的台詞依現在的長度重新接起來排好，間隔用上面設定的拍數。" +
+        "\n沒有選取任何圖層時，會排整個合成裡的所有台詞。" +
+        "\n\n改了字、刪了一句之後用這個 —— 後面所有句子會自己讓位或補上。" +
+        "\n第一句留在原地（只會被拉到最近的拍點上），其餘跟著它排。" +
+        "\n轉成音訊過的聲音會跟著它的台詞一起移動。",
+        "選んだ行を、上の間隔と各行の実際の長さで並べ直します。" +
+        "\n何も選んでいなければ、コンポ内のすべてのセリフを並べます。" +
+        "\n\nテキストを直したり 1 行消したあとに——以降の行が自分で詰めたり空けたりします。" +
+        "\n最初の行はその場に残り（いちばん近い拍に寄るだけ）、残りがそれに続きます。" +
+        "\n書き出した音声も、そのセリフと一緒に動きます。");
+
+    help("bake",
+        "Write the voice to {0} beside the project file and bring it back as an" +
+        " audio layer. No render queue, no dialogs.",
+        "把語音寫進專案檔旁邊的「{0}」資料夾並放回專案，不需要算圖佇列。",
+        "音声をプロジェクトファイルの隣の「{0}」に書き出し、" +
+        "\nオーディオレイヤーとして戻します。レンダーキューもダイアログも不要です。");
+
+    help("remove",
+        "Take Island Chatter off the selected layers: the effect, the Tone" +
+        " bootstrap, the rig sliders, the IC: markers and the Type-On animator.",
+        "把 Island Chatter 從選取圖層完全移除：效果、Tone、控制器滑桿、IC: 標記與逐字顯示動畫。",
+        "選んだレイヤーから Island Chatter を取り除きます。" +
+        "\n効果、トーン、リグのスライダー、IC: マーカー、一文字ずつ表示のアニメーターすべてです。");
 
     function T(literal) {
         var text = String(literal);
@@ -2899,9 +3420,86 @@
         return UI_LANGUAGE === "zh" ? text.substring(split + 3) : text.substring(0, split);
     }
 
+    /*
+     * A message with numbers or names in it. Same "English / 中文" key as any
+     * label, so one table answers for the whole interface, with {0}..{2}
+     * standing in for the parts that are the same in every language.
+     *
+     * The placeholders are why this exists rather than concatenation. Written
+     * as "已唱出 " + n + " 句", the count sits between two Chinese fragments
+     * and there is nowhere for a translation to go; every one of these messages
+     * was built that way until 2.0, and every one of them showed Chinese in an
+     * English panel.
+     */
+    function fill(text, values) {
+        var index;
+        for (index = 0; index < values.length; index += 1) {
+            if (values[index] === undefined) { continue; }
+            // Split/join rather than replace(), which with a string pattern
+            // changes only the first match. Nothing shipped needs the second
+            // one yet — T() has already discarded the other language's half by
+            // the time this runs — but a translation is free to name the same
+            // thing twice, and losing it silently is the kind of bug that only
+            // shows up in the language nobody on the project reads.
+            text = text.split("{" + index + "}").join(String(values[index]));
+        }
+        return text;
+    }
+
+    function M(literal, first, second, third) {
+        return fill(T(literal), [first, second, third]);
+    }
+
+    // A tooltip body in the current language. Falls back the way T() does: a
+    // reader who chose 日本語 gets more out of English than out of Chinese.
+    function H(id, first) {
+        var entry = IC_HELP[id];
+        if (!entry || typeof entry.en !== "string") { return ""; }
+        var body = entry.en;
+        if (UI_LANGUAGE === "zh" && entry.zh) { body = entry.zh; }
+        if (UI_LANGUAGE === "ja" && entry.ja) { body = entry.ja; }
+        return fill(body, [first]);
+    }
+
     // Every control that carries a translatable label, with the literal it was
     // built from, so switching language can put it back through T().
     var localisedControls = [];
+    // The same for tooltips, which localiseTree() cannot walk: helpTip is a
+    // plain string with no marker in it saying which of three bodies it is.
+    var localisedTips = [];
+    // Groups and dropdowns whose size depends on text they do not own.
+    var remeasured = [];
+
+    /*
+     * ScriptUI measures a control once and then keeps that size. Writing a
+     * longer string into `.text` afterwards draws it into the old box, and
+     * After Effects renders the overflow as an ellipsis — which is how the
+     * Japanese panel came back reading "中央ぞ…" and "台本を読み…" with empty
+     * space beside it. Nothing was too narrow; every label was still wearing
+     * the Chinese label's measurements.
+     *
+     * -1 asks for a fresh measurement. The height is carried over rather than
+     * also reset, because Apply is deliberately 34 px tall and nothing here
+     * changes how tall a line of text is.
+     */
+    function remeasure(control) {
+        if (control.icFixedWidth) { return; }
+        var height = -1;
+        try { height = control.preferredSize[1]; } catch (ignored) { height = -1; }
+        control.preferredSize = [-1, height];
+    }
+
+    function tip(control, id, value) {
+        localisedTips.push({ control: control, id: id, value: value });
+        control.helpTip = H(id, value);
+        // A slider built by addSlider() carries its own number field, and a
+        // tooltip that stops existing halfway across a control reads as a bug.
+        if (control.valueField) {
+            localisedTips.push({ control: control.valueField, id: id, value: value });
+            control.valueField.helpTip = H(id, value);
+        }
+        return control;
+    }
 
     function looksBilingual(value) {
         return typeof value === "string" && value.indexOf(" / ") > 0;
@@ -2916,26 +3514,54 @@
             node.text = T(node.text);
         }
         if (node.items) {
+            var localisedAny = false;
             for (index = 0; index < node.items.length; index += 1) {
                 if (looksBilingual(node.items[index].text)) {
                     localisedControls.push({
                         control: node.items[index], literal: String(node.items[index].text) });
                     node.items[index].text = T(node.items[index].text);
+                    localisedAny = true;
                 }
             }
+            // A dropdown is as wide as its longest item, so a list whose items
+            // changed has to be measured again even though its own text did not.
+            if (localisedAny) { remeasured.push(node); }
         }
         if (node.children) {
+            // Groups have no deliberate width in this panel; every one of them
+            // is as wide as whatever it holds, so all of them go stale together.
+            remeasured.push(node);
             for (index = 0; index < node.children.length; index += 1) {
                 localiseTree(node.children[index]);
             }
         }
     }
 
+    // Separate from relabelUI() because tip() runs while the panel is being
+    // built, before the stored language has been read back — so the tooltips
+    // it wrote are in whatever UI_LANGUAGE started as, and buildUI has to put
+    // them right in the same pass that localises the labels.
+    function relabelTips() {
+        var index;
+        for (index = 0; index < localisedTips.length; index += 1) {
+            localisedTips[index].control.helpTip =
+                H(localisedTips[index].id, localisedTips[index].value);
+        }
+    }
+
     function relabelUI() {
         var index;
         for (index = 0; index < localisedControls.length; index += 1) {
-            localisedControls[index].control.text = T(localisedControls[index].literal);
+            var control = localisedControls[index].control;
+            control.text = T(localisedControls[index].literal);
+            // A dropdown's items are ListItems rather than controls and have no
+            // size of their own; their list is in `remeasured` instead.
+            if (control.preferredSize) { remeasure(control); }
         }
+        for (index = 0; index < remeasured.length; index += 1) {
+            remeasure(remeasured[index]);
+        }
+        relabelTips();
     }
 
     function buildUI(host) {
@@ -2944,28 +3570,34 @@
         panel.alignChildren = ["fill", "top"];
         panel.margins = 12;
         panel.spacing = 8;
-        // Interface language only; it has no effect on what is spoken.
+        /*
+         * Interface language only; it has no effect on what is spoken.
+         *
+         * Left-aligned, and it stays that way. Aligned right, its position is
+         * measured from the widest row in the panel, so it moved every time the
+         * language did — and in a dock narrower than that row it left the panel
+         * entirely. The control that changes the language is the one control
+         * that must never become unreachable, or the way back is a preferences
+         * file.
+         */
         var languageRow = panel.add("group");
         languageRow.orientation = "row";
-        languageRow.alignment = ["right", "top"];
+        languageRow.alignment = ["left", "top"];
         var languageCodes = ["zh", "en", "ja"];
         var languagePicker = languageRow.add("dropdownlist", undefined,
             ["繁體中文", "English", "日本語"]);
-        languagePicker.helpTip = "Interface language. What is spoken does not change." +
-            "\n介面語言，不影響唸出來的內容。";
+        tip(languagePicker, "language");
         panel.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
         var textInput = panel.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });
         textInput.preferredSize = [390, 88];
         var selectedButton = panel.add("button", undefined,
             "Read selected layer / 讀取選取圖層");
-        selectedButton.helpTip = "Load the layer's text and, if Island Chatter is already on" +
-            " it, every voice setting back into this panel." +
-            "\n把圖層的文字讀進來；若已套用過 Island Chatter，連語音設定一起讀回面板。";
+        tip(selectedButton, "readLayer");
         selectedButton.onClick = function () {
             var comp = app.project ? app.project.activeItem : null;
             var layer = comp && comp instanceof CompItem ? selectedTextLayer(comp) : null;
             if (!layer) {
-                alert("Select a text layer. / 請選取文字圖層。");
+                alert(M("Select a text layer. / 請選取文字圖層。"));
                 return;
             }
             textInput.text = textFromLayer(layer);
@@ -2976,17 +3608,17 @@
             if (bound) { rigShared.value = true; }
             var effect = findNativeEffect(layer);
             if (!effect) {
-                status.text = "Read text only / 只讀到文字（此圖層尚未套用）";
+                status.text = M("Read text only / 只讀到文字（此圖層尚未套用）");
                 return;
             }
             applySettingsToUI(settingsFromEffect(effect));
-            status.text = "Read settings from / 已讀取設定：" + layer.name +
-                (bound ? "  (" + rigCharacterName(bound) + ")" : "");
+            status.text = M("Read settings from {0} / 已讀取設定：{0}",
+                layer.name + (bound ? "  (" + rigCharacterName(bound) + ")" : ""));
         };
         panel.add("statictext", undefined,
             "Pronunciation override (optional) / 讀音覆寫（可留空）");
         var pronunciationInput = panel.add("edittext", undefined, "", { multiline: false });
-        pronunciationInput.helpTip = "Examples: [重|chong2]新, ni3 hao3, ㄋㄧˇ ㄏㄠˇ";
+        tip(pronunciationInput, "pronunciation");
         var voice = panel.add("dropdownlist", undefined, [
             "Sunny / 明亮", "Tiny / 迷你", "Cozy / 溫厚", "Buzzy / 電子",
             "Chirpy / 活潑", "Whisper / 耳語", "Elder / 年長", "Droid / 機器"
@@ -3010,15 +3642,13 @@
         // Timbre. Every default reproduces 1.0.x, so nothing here changes an
         // existing layer until it is moved.
         var formant = addSlider(panel, "Formant / 共鳴", 0.25, 4.00, 1.00);
-        formant.helpTip = "Scales the vocal tract without touching the pitch." +
-            "\n縮放口腔大小，音高不變：往左變小動物，往右變巨人。";
+        tip(formant, "formant");
         var source = panel.add("dropdownlist", undefined, [
             "Voice / 人聲", "Reed / 簧片", "Chip / 電子", "Metallic / 金屬",
             "Granular / 破碎", "Growl / 低吼"
         ]);
         source.selection = 0;
-        source.helpTip = "What the vocal folds are replaced with." +
-            "\n換掉發聲源本身，不只是換共鳴。";
+        tip(source, "source");
         var vibrato = addSlider(panel, "Vibrato / 顫音", 0.00, 4.00, 1.00);
         var vibratoRate = addSlider(panel, "Vibrato Rate / 顫音速率", 0.00, 30.00, 9.20);
         var seed = addSlider(panel, "Seed / 種子", 0, 999999, 0);
@@ -3027,8 +3657,7 @@
         var tempoRow = panel.add("group");
         tempoRow.orientation = "row";
         var tempoOn = tempoRow.add("checkbox", undefined, "Tempo / 節拍");
-        tempoOn.helpTip = "Derive Speed from a tempo instead of setting it by hand." +
-            "\n用節拍速度推算語速，取代手動設定。";
+        tip(tempoOn, "tempo");
         tempoRow.add("statictext", undefined, "BPM");
         var bpmField = tempoRow.add("edittext", undefined, "120");
         bpmField.characters = 5;
@@ -3053,7 +3682,7 @@
         }
         function refreshTempo() {
             if (!tempoOn.value) {
-                tempoReadout.text = "Speed set manually / 語速為手動設定";
+                tempoReadout.text = M("Speed set manually / 語速為手動設定");
                 return;
             }
             var bpm = parseFloat(bpmField.text);
@@ -3066,9 +3695,12 @@
             writingSpeed = false;
             var perSyllable = 60.0 / clamp(bpm, 20, 400) / currentSyllablesPerBeat();
             var style = styleSpeedMultiplier(emotionIndex, sizeIndex);
-            tempoReadout.text = perSyllable.toFixed(3) + " s / 字   Speed " + derived.toFixed(3) +
-                (valuesDiffer(style, 1.0) ? "  (x" + style.toFixed(2) + " 角色補償)" : "") +
-                (derived > 10.0 || derived < 0.10 ? "   OUT OF RANGE / 超出範圍" : "");
+            tempoReadout.text =
+                M("{0} s/syllable   Speed {1} / {0} 秒／字   Speed {1}",
+                    perSyllable.toFixed(3), derived.toFixed(3)) +
+                (valuesDiffer(style, 1.0)
+                    ? M("  (x{0} character) / 　（x{0} 角色補償）", style.toFixed(2)) : "") +
+                (derived > 10.0 || derived < 0.10 ? M("   OUT OF RANGE / 　　超出範圍") : "");
         }
         // Loads a layer's stored settings back into the controls. A tempo-locked
         // layer only stores the resulting Speed, so the BPM is derived back from
@@ -3208,8 +3840,8 @@
 
         var savedPresets = refreshPresetList();
         saveButton.onClick = function () {
-            var name = prompt("Name this character / 幫這個角色取個名字",
-                "Character " + (savedPresets.length + 1));
+            var name = prompt(M("Name this character / 幫這個角色取個名字"),
+                M("Character {0} / 角色 {0}", savedPresets.length + 1));
             if (!name) { return; }
             name = trim(name).replace(/[|=,]/g, " ");
             if (!name) { return; }
@@ -3226,13 +3858,13 @@
             if (!replaced) { savedPresets.push({ name: name, values: values }); }
             writeSavedPresets(savedPresets);
             savedPresets = refreshPresetList();
-            status.text = "Saved / 已儲存: " + name;
+            status.text = M("Saved {0} / 已儲存：{0}", name);
         };
         var deleteButton = characterRow.add("button", undefined, "Delete / 刪除");
         deleteButton.onClick = function () {
             var at = (preset.selection ? preset.selection.index : 0) - builtInPresets.length;
             if (at < 0) {
-                alert("Select a saved character first. / 請先選取自訂角色。");
+                alert(M("Select a saved character first. / 請先選取自訂角色。"));
                 return;
             }
             savedPresets.splice(at, 1);
@@ -3244,26 +3876,24 @@
         markers.value = true;
         var fitDuration = workflowRow.add("checkbox", undefined, "Fit Duration / 配合長度");
         fitDuration.value = true;
+        /*
+         * Two rows of two rather than one row of four. A row is as wide as
+         * everything in it, and the panel is as wide as its widest row, so a
+         * four-checkbox row set the width of the whole panel: 439 px in
+         * Japanese against the 414 the text box asks for. Splitting costs one
+         * line of height and takes the row out of the running entirely.
+         */
         var animationRow = panel.add("group");
         var controllers = animationRow.add("checkbox", undefined, "Rig / 動畫控制");
         controllers.value = true;
         var typeOn = animationRow.add("checkbox", undefined, "Type-On / 逐字顯示");
         typeOn.value = false;
-        var chatterOn = animationRow.add("checkbox", undefined, "Chatter / 逐字開合");
-        chatterOn.helpTip = "Close the mouth on every syllable, the way every release up to" +
-            " 1.9.1 did." +
-            "\n每個字都把嘴巴閉一次，1.9.1 以前的作法。" +
-            "\n\n預設是關的：嘴巴只在真的有停頓的地方閉（標點、句尾），連著的字之間只換嘴型。" +
-            "\n一句十個字的台詞，舊作法會開合 19 次、嘴巴有 41% 的時間是閉的；" +
-            "\n新作法是 5 次、27%，而那 5 次都落在該閉的地方。" +
-            "\n\n勾起來就會回到舊的樣子。唱歌的句子不受這個勾選影響——" +
-            "\n那裡的短閉嘴比一個影格還短，是取樣問題不是風格。" +
-            "\n\n改了之後要按 Rebuild／重建（共用）或重新 Apply（每層）才會重寫關鍵影格。";
-        var typeOnCenter = animationRow.add("checkbox", undefined, "Center / 維持置中");
+        var animationRowTwo = panel.add("group");
+        var chatterOn = animationRowTwo.add("checkbox", undefined, "Chatter / 逐字開合");
+        tip(chatterOn, "chatter");
+        var typeOnCenter = animationRowTwo.add("checkbox", undefined, "Center / 維持置中");
         typeOnCenter.value = true;
-        typeOnCenter.helpTip = "Keep the revealed text centred as it types on, gliding into" +
-            " place instead of growing out of the left edge. For centre-justified text." +
-            "\n讓已顯示的文字保持置中並平滑滑動，而不是從左邊長出來。適用於置中對齊的文字。";
+        tip(typeOnCenter, "typeOnCenter");
 
         /*
          * Where the rig goes. Per layer is what every project before this did
@@ -3277,141 +3907,99 @@
         var rigPerLayer = rigScope.add("radiobutton", undefined, "Per layer / 每層");
         var rigShared = rigScope.add("radiobutton", undefined, "Shared / 共用角色");
         rigPerLayer.value = true;
-        rigPerLayer.helpTip = "Five sliders on each line, as before." +
-            "\n每一句自己長五根滑桿，跟以前一樣。";
-        rigShared.helpTip = "One set of sliders on a null, driven by whichever line is" +
-            " speaking. This is what lets a whole scene drive one character." +
-            "\n一整組滑桿放在一個空物件上，由「當下正在講話的那一句」驅動。" +
-            "\n一個角色的嘴巴就綁這一組，不管那句是第幾層。";
+        tip(rigPerLayer, "rigPerLayer");
+        tip(rigShared, "rigShared");
+        // Which character, on its own row: the two radio buttons and the three
+        // controls that act on a character came to 569 px in Japanese together.
+        var rigRowTwo = panel.add("group");
+        rigRowTwo.orientation = "row";
         // Character names are the user's own words, so they are never put
         // through the interface translator.
-        var characterList = rigRow.add("dropdownlist", undefined, []);
+        var characterList = rigRowTwo.add("dropdownlist", undefined, []);
         characterList.preferredSize.width = 110;
-        var newCharacterButton = rigRow.add("button", undefined, "New / 新增角色");
-        var rebuildButton = rigRow.add("button", undefined, "Rebuild / 重建");
-        rebuildButton.helpTip = "Re-merge the shared rig from its lines. Needed after moving" +
-            " a line in time, because the rig holds keyframes rather than a live link." +
-            "\n重新合併共用控制器。把台詞在時間上搬動之後按一下 —— " +
-            "\n控制器上是關鍵影格，不是即時連動，所以它不會自己知道。";
+        var newCharacterButton = rigRowTwo.add("button", undefined, "New / 新增角色");
+        var rebuildButton = rigRowTwo.add("button", undefined, "Rebuild / 重建");
+        tip(rebuildButton, "rebuild");
 
         var mouthRow = panel.add("group");
         mouthRow.orientation = "row";
         var mouthButton = mouthRow.add("button", undefined, "Mouth switch / 建立嘴型切換");
-        mouthButton.helpTip = "Wire selected layers to the chosen character's IC Mouth." +
-            "\n把選取的圖層接到所選角色的 IC Mouth 上。" +
-            "\n\nIC Mouth：0 閉嘴，1=a，2=i，3=u，4=e，5=o。" +
-            "\n選一個嘴型合成 → 用時間重映射，第 0 格閉嘴，之後依序 a i u e o。" +
-            "\n選多個圖層 → 用不透明度切換，由上而下依序是閉嘴、a、i、u、e、o。" +
-            "\n\n（IC Head Bounce 是 ±55，IC Blink 是 0／100，" +
-            "\nIC Speaking 講話中為 100，IC Line 是現在第幾句。）";
+        tip(mouthButton, "mouth");
 
         // One influence shapes both the reveal and the recentring glide; the
         // arriving side is always full, so motion settles rather than stopping
         // dead. Low leaves at full speed, which is the fast-to-slow default.
         var easeLeave = addSlider(panel, "Leave / 離開", MIN_INFLUENCE, MAX_INFLUENCE,
             DEFAULT_LEAVE_INFLUENCE);
-        easeLeave.valueField.helpTip = easeLeave.helpTip =
-            "How the reveal and the recentring leave each position. Low leaves at full" +
-            " speed and settles slowly; high draws the whole move out." +
-            "\n逐字顯示與置中滑動離開每個位置的方式。低值＝全速離開、慢慢停入；高值＝整段拉長。" +
-            "\n產生的是一般關鍵影格，之後仍可在圖表編輯器裡自由調整。";
+        tip(easeLeave, "leave");
         var smoothness = addSlider(panel, "Smoothness / 平滑", 0, 100, DEFAULT_SMOOTHNESS);
-        smoothness.valueField.helpTip = smoothness.helpTip =
-            "How softly each character crosses the reveal edge. 0 makes characters pop," +
-            " higher values fade them in." +
-            "\n每個字跨過顯示邊界的柔和程度。0 是直接彈出，越高越像淡入。";
+        tip(smoothness, "smoothness");
 
         var importRow = panel.add("group");
         importRow.orientation = "row";
         var importButton = importRow.add("button", undefined, "Import script / 匯入劇本");
-        importButton.helpTip = "Turn the text box above into one layer per line, laid end to" +
-            " end from the current time." +
-            "\n把上面的文字框一行變一層，從目前時間點依序排好。" +
-            "\n\n每一句都會套用目前的語音設定，長度自動配合語音（不管有沒有勾配合長度）。" +
-            "\n太長的句子會自動斷成兩層，斷在標點上，不會被截掉。" +
-            "\n合成不夠長時會自動延長到剛好放得下。";
+        tip(importButton, "import");
         importRow.add("statictext", undefined, "Gap / 間隔");
         var gapField = importRow.add("edittext", undefined, "1");
         gapField.characters = 4;
-        gapField.helpTip = "Beats between one line and the next, against the BPM above." +
-            "\n每一句之間空幾拍，用上面那個 BPM 換算。可以填小數。" +
-            "\n\n1 = 四分音符，0.5 = 八分音符，0.25 = 十六分音符，2 = 二分音符。" +
-            "\n格線會跟著這個數字變細：填 0.5 就對齊到八分音符上。" +
-            "\n\n下一句會落在「上一句結束後至少這麼多」的那個格線上，所以這是最小值、" +
-            "\n不是固定距離 —— 沒開節拍鎖定時每句長度不是整數拍，" +
-            "\n固定距離會讓第三句開始就飄出格線。" +
-            "\n填 0 就是完全不留白也不對齊，一句接著一句。";
+        tip(gapField, "gap");
         var gapReadout = importRow.add("statictext", undefined, "");
         gapReadout.preferredSize.width = 150;
-        var holdOn = importRow.add("checkbox", undefined, "Hold / 接到下一句");
-        holdOn.helpTip = "Keep each line on screen until the next one starts, instead of" +
-            " ending where its audio does." +
-            "\n每一句的字留到下一句開始才消失，而不是講完就不見。" +
-            "\n\n配合長度是照語音的長短切的，聲音對、字幕不對：兩句之間空一拍，畫面就空一拍。" +
-            "\n勾了之後只會延長、不會縮短——間隔填 0 或兩句本來就重疊的話不受影響，" +
-            "\n最後一句也維持自己的長度。" +
-            "\n\n聲音完全不變：語音結束之後那段是靜音。" +
-            "\n「重新排列」也會照這個設定重新接好。";
-        var speakersOn = importRow.add("checkbox", undefined, "Speakers / 含角色名");
-        speakersOn.helpTip = "Read \"Mimi: hello\" as a line spoken by Mimi: the name is" +
-            " stripped and the line joins that character's rig." +
-            "\n把「咪咪：你好」讀成咪咪講的話 —— 名字不會被唸出來，該句自動加入那個角色。" +
-            "\n全形和半形冒號都可以。" +
-            "\n\n預設關閉是故意的：「注意：這裡很危險」跟角色名長得一模一樣，" +
-            "\n自動判斷會生出一個叫「注意」的角色，還把那兩個字從台詞裡吃掉。";
+        // The two options that change what an import does, on their own row.
+        var importRowTwo = panel.add("group");
+        importRowTwo.orientation = "row";
+        var holdOn = importRowTwo.add("checkbox", undefined, "Hold / 接到下一句");
+        tip(holdOn, "hold");
+        var speakersOn = importRowTwo.add("checkbox", undefined, "Speakers / 含角色名");
+        tip(speakersOn, "speakers");
 
+        /*
+         * Singing, in three rows: pick the file, set how it is sung, then do it.
+         *
+         * These eleven controls were one row, and that row alone decided how
+         * wide the panel had to be: 762 px in Chinese, 817 in Japanese, against
+         * the 414 the text box asks for. It has been the widest thing in the
+         * panel since 1.7.0 — Japanese only made it obvious, adding 55 px to a
+         * row that was already 350 px too wide. No amount of shorter wording
+         * reaches 414 from 762, so the row is split instead.
+         */
         var singRow = panel.add("group");
         singRow.orientation = "row";
         var midiButton = singRow.add("button", undefined, "Choose MIDI / 選 MIDI");
-        midiButton.helpTip = "Pick a MIDI file and list the tracks in it. Nothing is created" +
-            " until Sing." +
-            "\n選一個 MIDI 檔，把裡面的軌道列出來。按了不會馬上建圖層。" +
-            "\n\n選好軌道之後再按「唱出來」。分成兩步是因為一個 MIDI 檔常常有好幾軌，" +
-            "\n猜錯會唱到伴奏。";
+        tip(midiButton, "chooseMidi");
         var trackList = singRow.add("dropdownlist", undefined, []);
         trackList.preferredSize.width = 150;
-        trackList.helpTip = "Which track carries the tune. / 哪一軌是旋律。" +
-            "\n預設選音符最多的那一軌。";
-        singRow.add("statictext", undefined, "Transpose / 移調");
-        var transposeField = singRow.add("edittext", undefined, "0");
+        tip(trackList, "track");
+
+        var singRowTwo = panel.add("group");
+        singRowTwo.orientation = "row";
+        singRowTwo.add("statictext", undefined, "Transpose / 移調");
+        var transposeField = singRowTwo.add("edittext", undefined, "0");
         transposeField.characters = 4;
-        transposeField.helpTip = "Semitones added to every note, for a tune written outside" +
-            " the character's comfortable range." +
-            "\n每個音都往上或往下移幾個半音。-12 是低八度，12 是高八度。" +
-            "\n\n聲線不會自己移調：MIDI 寫哪個音就唱哪個音，" +
-            "\n所以兩個角色合唱不會走音。角色的差別在共鳴和音色，不在音高。";
-        singRow.add("statictext", undefined, "Key / 唱名調");
-        var solfegeKey = singRow.add("dropdownlist", undefined,
+        tip(transposeField, "transpose");
+        singRowTwo.add("statictext", undefined, "Key / 唱名調");
+        var solfegeKey = singRowTwo.add("dropdownlist", undefined,
             ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]);
         solfegeKey.selection = 0;
         solfegeKey.preferredSize.width = 60;
-        solfegeKey.helpTip = "Which pitch is do, when the melody sings its own note names." +
-            "\n文字框空白時會唱唱名，這裡決定哪個音是 Do。" +
-            "\n\n留在 C 就是固定調（C 是 Do）。選 G 就是首調（G 是 Do），整組唱名跟著移。" +
-            "\n只影響唱出來的名字，不影響音高——音高永遠照 MIDI 寫的。" +
-            "\n黑鍵沿用下面那個白鍵的名字（升 Do 唱成 Do）。";
-        singRow.add("statictext", undefined, "Tone / 聲調");
-        var toneBlendField = singRow.add("edittext", undefined, "15");
+        tip(solfegeKey, "key");
+        singRowTwo.add("statictext", undefined, "Tone / 聲調");
+        var toneBlendField = singRowTwo.add("edittext", undefined, "15");
         toneBlendField.characters = 4;
-        toneBlendField.helpTip = "How much of the Mandarin tone contour survives, as a" +
-            " percentage." +
-            "\n中文四聲保留多少（百分比）。" +
-            "\n\n唱歌時音高由旋律決定，完整的四聲會跟旋律打架。" +
-            "\n這裡留下的部分變成每個音的起音方向 —— 四聲從上面滑下來，二聲從下面滑上來，" +
-            "\n聽起來還是中文咬字，但音準是旋律的。0 = 完全不要，100 = 全部保留。";
-        var singButton = singRow.add("button", undefined, "Sing / 唱出來");
-        singButton.helpTip = "Sing the lyrics in the text box to the chosen track." +
-            "\n把上面文字框裡的歌詞，照選定那一軌的旋律唱出來。" +
-            "\n\n一行歌詞一層，每一層放在該句第一個音符的時間上 —— 匯入 MIDI 不看間隔格線，" +
-            "\n歌要對在它自己的時間上。長度一律配合旋律。" +
-            "\n一個字配一個音，依序發下去；歌詞裡打一個 - 代表前一個字延續唱到下一個音。" +
-            "\n和弦只取最高音。音符和字數對不上時會在下面說，不會默默處理。";
-        var clearMelodyButton = singRow.add("button", undefined, "Speak / 改回講話");
-        clearMelodyButton.helpTip = "Take the melody off the selected lines so they speak again." +
-            "\n把選取圖層上的旋律拿掉，變回一般講話。" +
-            "\n\n聲音設定完全不動，長度會重新配合講話的長短。" +
-            "\nApply 是故意不會清掉旋律的（免得誤刪一整首歌），所以要清就按這個。";
-        var songReadout = singRow.add("statictext", undefined, "");
+        tip(toneBlendField, "toneBlend");
+
+        var singRowThree = panel.add("group");
+        singRowThree.orientation = "row";
+        var singButton = singRowThree.add("button", undefined, "Sing / 唱出來");
+        tip(singButton, "sing");
+        var clearMelodyButton = singRowThree.add("button", undefined, "Speak / 改回講話");
+        tip(clearMelodyButton, "speak");
+        // Empty until a MIDI file is chosen, and an empty statictext collapses:
+        // the width on the next line is silently ignored, so this measures as
+        // nothing until it has something to say and then sizes to its text.
+        // ae-language-verify.jsx fills it before measuring the row for that
+        // reason — with the readout's own text, not another readout's.
+        var songReadout = singRowThree.add("statictext", undefined, "");
         songReadout.preferredSize.width = 190;
 
         var applyButton = panel.add("button", undefined,
@@ -3421,32 +4009,16 @@
         var editRow = panel.add("group");
         editRow.orientation = "row";
         var resyncButton = editRow.add("button", undefined, "Re-sync / 重新同步");
-        resyncButton.helpTip = "Update the selected lines from their own Source Text, keeping" +
-            " each one's own voice exactly as it is." +
-            "\n用每一層自己的 Source Text 重新同步文字、長度、標記與動畫控制。" +
-            "\n\n和 Apply 的差別：**完全不碰聲音**。面板現在顯示什麼都不影響，" +
-            "\n每層維持它自己已經存著的聲音設定。" +
-            "\n改字的時候用這個，選再多層、跨再多角色都不會被蓋掉。" +
-            "\n\n只會更新這層本來就有的東西：沒有標記的不會被加上標記。長度一律重算。";
+        tip(resyncButton, "resync");
         var reflowButton = editRow.add("button", undefined, "Re-flow / 重新排列");
-        reflowButton.helpTip = "Lay the selected lines out again end to end, using the gap" +
-            " above and each line's real length." +
-            "\n把選取的台詞依現在的長度重新接起來排好，間隔用上面設定的拍數。" +
-            "\n沒有選取任何圖層時，會排整個合成裡的所有台詞。" +
-            "\n\n改了字、刪了一句之後用這個 —— 後面所有句子會自己讓位或補上。" +
-            "\n第一句留在原地（只會被拉到最近的拍點上），其餘跟著它排。" +
-            "\n轉成音訊過的聲音會跟著它的台詞一起移動。";
+        tip(reflowButton, "reflow");
 
         var toolRow = panel.add("group");
         toolRow.orientation = "row";
         var bakeButton = toolRow.add("button", undefined, "Bake / 轉成音訊");
-        bakeButton.helpTip = "Write the voice to " + BAKE_FOLDER_NAME + " beside the project" +
-            " file and bring it back as an audio layer. No render queue, no dialogs." +
-            "\n把語音寫進專案檔旁邊的「" + BAKE_FOLDER_NAME + "」資料夾並放回專案，不需要算圖佇列。";
+        tip(bakeButton, "bake", BAKE_FOLDER_NAME);
         var removeButton = toolRow.add("button", undefined, "Remove / 移除");
-        removeButton.helpTip = "Take Island Chatter off the selected layers: the effect, the" +
-            " Tone bootstrap, the rig sliders, the IC: markers and the Type-On animator." +
-            "\n把 Island Chatter 從選取圖層完全移除。";
+        tip(removeButton, "remove");
         var status = panel.add("statictext", undefined, "Edit text, then apply / 修改文字後按套用");
 
         function activeComp() {
@@ -3510,14 +4082,14 @@
             var beats = currentGapBeats();
             var seconds = beats * beatDuration(currentBpm());
             if (beats <= 0) {
-                gapReadout.text = "= 0s  無格線";
+                gapReadout.text = M("= 0s  no grid / = 0s　無格線");
                 return;
             }
             var note = "";
-            if (!valuesDiffer(beats, 0.25)) { note = "  十六分"; }
-            else if (!valuesDiffer(beats, 0.5)) { note = "  八分"; }
-            else if (!valuesDiffer(beats, 1)) { note = "  四分"; }
-            else if (!valuesDiffer(beats, 2)) { note = "  二分"; }
+            if (!valuesDiffer(beats, 0.25)) { note = M("  sixteenth / 　十六分"); }
+            else if (!valuesDiffer(beats, 0.5)) { note = M("  eighth / 　八分"); }
+            else if (!valuesDiffer(beats, 1)) { note = M("  quarter / 　四分"); }
+            else if (!valuesDiffer(beats, 2)) { note = M("  half / 　二分"); }
             gapReadout.text = "= " + seconds.toFixed(3) + "s" + note;
         }
 
@@ -3733,18 +4305,18 @@
             var loaded = rigLayer ? rigSettings(rigLayer) : null;
             if (loaded) {
                 applySettingsToUI(loaded);
-                status.text = "Character / 角色: " + chosenCharacter();
+                status.text = M("Now editing {0} / 目前角色：{0}", chosenCharacter());
             }
         };
 
         newCharacterButton.onClick = function () {
             var comp = activeComp();
             if (!comp) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
-            var name = prompt("Name this character / 幫這個角色取個名字",
-                "Character " + (characterList.items.length + 1));
+            var name = prompt(M("Name this character / 幫這個角色取個名字"),
+                M("Character {0} / 角色 {0}", characterList.items.length + 1));
             if (!name) { return; }
             name = trim(name);
             if (!name) { return; }
@@ -3755,9 +4327,9 @@
                 ensureRigLayer(comp, name);
                 rigShared.value = true;
                 refreshCharacters(name);
-                status.text = "Character / 角色: " + name;
+                status.text = M("Now editing {0} / 目前角色：{0}", name);
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -3767,7 +4339,7 @@
         rebuildButton.onClick = function () {
             var comp = activeComp();
             if (!comp) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
             // Whatever the selection points at, or every rig in the composition
@@ -3782,7 +4354,7 @@
             }
             if (!wanted.length) { wanted = rigLayers(comp); }
             if (!wanted.length) {
-                alert("There is no shared rig here. / 這個合成裡沒有共用控制器。");
+                alert(M("There is no shared rig here. / 這個合成裡沒有共用控制器。"));
                 return;
             }
             wanted = uniqueLayers(wanted);
@@ -3795,13 +4367,13 @@
                     lines += merged.lines;
                     overlaps = overlaps.concat(merged.overlaps);
                 }
-                status.text = "Rebuilt / 已重建 " + wanted.length + " rig(s), " +
-                    lines + " line(s)";
+                status.text = M("Rebuilt {0} rig(s), {1} line(s) / 已重建 {0} 組控制器、{1} 句",
+                    wanted.length, lines);
                 if (overlaps.length) {
-                    status.text = "Overlapping lines / 台詞重疊: " + overlaps.join(", ");
+                    status.text = M("Overlapping lines: {0} / 台詞重疊：{0}", overlaps.join(", "));
                 }
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -3811,12 +4383,12 @@
         mouthButton.onClick = function () {
             var comp = activeComp();
             if (!comp) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
             var rigLayer = chosenRigLayer(comp);
             if (!rigLayer) {
-                alert("Choose or create a character first. / 請先選擇或新增角色。");
+                alert(M("Choose or create a character first. / 請先選擇或新增角色。"));
                 return;
             }
             var targets = [];
@@ -3830,11 +4402,11 @@
             try {
                 var built = buildMouthSwitch(comp, rigLayer, targets);
                 status.text = built.kind === "remap"
-                    ? "Mouth on Time Remap / 嘴型已接上時間重映射"
-                    : "Mouth switch / 已接上嘴型 " + built.count + " 層 -> " +
-                        rigCharacterName(rigLayer);
+                    ? M("Mouth on Time Remap / 嘴型已接上時間重映射")
+                    : M("Mouth switch on {0} layer(s) -> {1} / 已接上嘴型 {0} 層 -> {1}",
+                        built.count, rigCharacterName(rigLayer));
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -3844,12 +4416,12 @@
         bakeButton.onClick = function () {
             var comp = app.project ? app.project.activeItem : null;
             if (!(comp && comp instanceof CompItem)) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
             var layers = selectedTextLayers(comp);
             if (!layers.length) {
-                alert("Select a text layer. / 請選取文字圖層。");
+                alert(M("Select a text layer. / 請選取文字圖層。"));
                 return;
             }
             var ready = [];
@@ -3858,7 +4430,7 @@
                 if (findNativeEffect(layers[pick])) { ready.push(layers[pick]); }
             }
             if (!ready.length) {
-                alert("Apply Island Chatter first, then bake. / 請先按 Apply 再轉成音訊。");
+                alert(M("Apply Island Chatter first, then bake. / 請先按 Apply 再轉成音訊。"));
                 return;
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Bake");
@@ -3870,9 +4442,10 @@
                     bakeToLayer(comp, ready[index], folder);
                     made += 1;
                 }
-                status.text = "Baked / 已轉成音訊 " + made + " -> " + BAKE_FOLDER_NAME;
+                status.text = M("Baked {0} layer(s) -> {1} / 已轉成音訊 {0} 層 -> {1}",
+                    made, BAKE_FOLDER_NAME);
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -3881,7 +4454,7 @@
         removeButton.onClick = function () {
             var comp = app.project ? app.project.activeItem : null;
             if (!(comp && comp instanceof CompItem)) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
             var layers = selectedTextLayers(comp);
@@ -3914,7 +4487,7 @@
                 if (!going) { survivors.push(affected[index]); }
             }
             if (!layers.length && !doomed.length) {
-                alert("Select a text layer. / 請選取文字圖層。");
+                alert(M("Select a text layer. / 請選取文字圖層。"));
                 return;
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Remove");
@@ -3930,10 +4503,10 @@
                     rebuildSharedRig(comp, survivors[index], null);
                 }
                 refreshCharacters(chosenCharacter());
-                status.text = "Removed / 已移除 " + removed + " item(s) from " +
-                    (layers.length + doomed.length) + " layer(s)";
+                status.text = M("Removed {0} item(s) from {1} layer(s) / 已移除 {1} 層上的 {0} 個項目",
+                    removed, layers.length + doomed.length);
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -3942,31 +4515,33 @@
         resyncButton.onClick = function () {
             var comp = activeComp();
             if (!comp) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
             var layers = selectedTextLayers(comp);
             if (!layers.length) {
-                alert("Select a text layer. / 請選取文字圖層。");
+                alert(M("Select a text layer. / 請選取文字圖層。"));
                 return;
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Re-sync");
             try {
                 var synced = resyncSelection(comp, layers, currentOptions());
-                status.text = "Re-synced / 已重新同步 " + synced.count + " layer(s)" +
-                    (synced.rigs ? "  rig x" + synced.rigs : "") +
-                    (synced.stale ? "  bake 過期 x" + synced.stale : "");
+                status.text = M("Re-synced {0} layer(s) / 已重新同步 {0} 層", synced.count) +
+                    (synced.rigs ? M("  rig x{0} / 　控制器 x{0}", synced.rigs) : "") +
+                    (synced.stale ? M("  stale bake x{0} / 　轉檔過期 x{0}", synced.stale) : "");
                 if (!synced.count) {
-                    status.text = "Apply Island Chatter to these layers first. / 這些圖層還沒套用過。";
+                    status.text =
+                        M("Apply Island Chatter to these layers first. / 這些圖層還沒套用過。");
                 }
                 if (synced.overlaps.length) {
-                    status.text = "Overlapping lines / 台詞重疊: " + synced.overlaps.join(", ");
+                    status.text = M("Overlapping lines: {0} / 台詞重疊：{0}", synced.overlaps.join(", "));
                 }
                 if (synced.truncated.length) {
-                    status.text = "Truncated / 已截斷: " + synced.truncated.join(", ");
+                    status.text = M("Truncated: {0} / 已截斷：{0}",
+                        synced.truncated.join(", "));
                 }
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -3976,7 +4551,7 @@
         reflowButton.onClick = function () {
             var comp = activeComp();
             if (!comp) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
             // Nothing selected means the whole scene, which is what you want
@@ -3991,24 +4566,29 @@
                 }
             }
             if (!layers.length) {
-                alert("There are no Island Chatter lines here. / 這個合成裡沒有台詞圖層。");
+                alert(M("There are no Island Chatter lines here. / 這個合成裡沒有台詞圖層。"));
                 return;
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Re-flow");
             try {
                 var laid = reflowLayers(comp, layers, currentGapBeats(), currentBpm(),
                     holdOn.value);
-                status.text = "Re-flowed / 已排列 " + laid.count + " layer(s) @ " +
-                    currentGapBeats() + " 拍" +
-                    (laid.held ? "  接到下一句 x" + laid.held : "") +
-                    (laid.sungSkipped ? "  (唱歌 " + laid.sungSkipped + " 層維持原位)" : "") +
-                    (laid.rigs ? "  rig x" + laid.rigs : "") +
-                    (laid.grew ? "  合成延長到 " + laid.grew.toFixed(2) + "s" : "");
+                status.text = M("Re-flowed {0} layer(s) @ {1} beat(s) / 已排列 {0} 層 @ {1} 拍",
+                    laid.count, currentGapBeats()) +
+                    (laid.held ? M("  held x{0} / 　接到下一句 x{0}", laid.held) : "") +
+                    (laid.sungSkipped
+                        ? M("  ({0} sung layer(s) left in place) / 　（唱歌 {0} 層維持原位）",
+                            laid.sungSkipped)
+                        : "") +
+                    (laid.rigs ? M("  rig x{0} / 　控制器 x{0}", laid.rigs) : "") +
+                    (laid.grew
+                        ? M("  comp grown to {0}s / 　合成延長到 {0}s", laid.grew.toFixed(2))
+                        : "");
                 if (laid.overlaps.length) {
-                    status.text = "Overlapping lines / 台詞重疊: " + laid.overlaps.join(", ");
+                    status.text = M("Overlapping lines: {0} / 台詞重疊：{0}", laid.overlaps.join(", "));
                 }
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -4018,7 +4598,7 @@
         importButton.onClick = function () {
             var script = trim(textInput.text);
             if (!script) {
-                alert("Paste a script into the text box first. / 請先把劇本貼進上面的文字框。");
+                alert(M("Paste a script into the text box first. / 請先把劇本貼進上面的文字框。"));
                 return;
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Import script");
@@ -4026,20 +4606,24 @@
                 var imported = importScript(script, currentSettings(), currentOptions(),
                     currentGapBeats(), currentBpm());
                 refreshCharacters(chosenCharacter());
-                status.text = "Imported / 已匯入 " + imported.count + " layer(s)" +
-                    (imported.split > 0 ? "  (+" + imported.split + " 斷句)" : "") +
-                    (imported.held ? "  接到下一句 x" + imported.held : "") +
-                    (imported.cast.length ? "  角色: " + imported.cast.join(", ") : "") +
-                    (imported.grew ? "  合成延長到 " + imported.grew.toFixed(2) + "s" : "");
+                status.text = M("Imported {0} layer(s) / 已匯入 {0} 層", imported.count) +
+                    (imported.split > 0
+                        ? M("  +{0} split / 　+{0} 斷句", imported.split) : "") +
+                    (imported.held ? M("  held x{0} / 　接到下一句 x{0}", imported.held) : "") +
+                    (imported.cast.length
+                        ? M("  cast: {0} / 　角色：{0}", imported.cast.join(", ")) : "") +
+                    (imported.grew
+                        ? M("  comp grown to {0}s / 　合成延長到 {0}s", imported.grew.toFixed(2))
+                        : "");
                 if (imported.overlaps.length) {
-                    status.text = "Overlapping lines / 台詞重疊: " + imported.overlaps.join(", ");
+                    status.text = M("Overlapping lines: {0} / 台詞重疊：{0}", imported.overlaps.join(", "));
                 }
                 if (imported.unmarkedKanji.length) {
-                    status.text = "Kanji read as Chinese / 漢字以中文讀音唸出: " +
-                        imported.unmarkedKanji.join(", ");
+                    status.text = M("Kanji read as Chinese: {0} / 漢字以中文讀音唸出：{0}",
+                        imported.unmarkedKanji.join(", "));
                 }
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -4053,7 +4637,7 @@
         var midiTrackInfo = [];
 
         midiButton.onClick = function () {
-            var picked = File.openDialog("Choose a MIDI file / 選一個 MIDI 檔",
+            var picked = File.openDialog(M("Choose a MIDI file / 選一個 MIDI 檔"),
                 "MIDI:*.mid;*.midi,All files:*.*");
             if (!picked) { return; }
             try {
@@ -4064,7 +4648,7 @@
                     if (listed.tracks[index].notes > 0) { usable.push(listed.tracks[index]); }
                 }
                 if (!usable.length) {
-                    status.text = "No notes in that file / 這個檔案裡沒有音符";
+                    status.text = M("No notes in that file / 這個檔案裡沒有音符");
                     return;
                 }
                 chosenMidi = picked;
@@ -4082,11 +4666,13 @@
                 trackList.selection = best;
                 bpmField.text = String(Math.round(listed.bpm));
                 refreshTempo();
-                songReadout.text = usable.length + " 軌・" + Math.round(listed.bpm) + " BPM";
-                status.text = "MIDI loaded / 已讀取 " + picked.name +
-                    "  —— 選好軌道後按「唱出來」";
+                songReadout.text = M("{0} track(s) · {1} BPM / {0} 軌・{1} BPM",
+                    usable.length, Math.round(listed.bpm));
+                status.text = M(
+                    "MIDI loaded: {0} — pick a track, then Sing / 已讀取 {0} —— 選好軌道後按「唱出來」",
+                    picked.name);
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             }
         };
@@ -4094,7 +4680,7 @@
         singButton.onClick = function () {
             var lyrics = trim(textInput.text);
             if (!chosenMidi) {
-                alert("Choose a MIDI file first. / 請先按「選 MIDI」挑一個檔案。");
+                alert(M("Choose a MIDI file first. / 請先按「選 MIDI」挑一個檔案。"));
                 return;
             }
             // An empty text box is a request, not a mistake: with no words the
@@ -4102,7 +4688,7 @@
             var which = trackList.selection ? trackList.selection.index : 0;
             var track = midiTrackInfo[which];
             if (!track) {
-                alert("Choose a track first. / 請先選一個軌道。");
+                alert(M("Choose a track first. / 請先選一個軌道。"));
                 return;
             }
             // A second import used to lay a whole extra copy of the song on top
@@ -4111,10 +4697,9 @@
             var already = (comp && comp instanceof CompItem) ? songLayers(comp) : [];
             var replacing = false;
             if (already.length) {
-                replacing = confirm("There are already " + already.length +
-                    " layer(s) here from an earlier MIDI import." +
-                    "\n這個合成裡已經有 " + already.length + " 層是之前匯入的。" +
-                    "\n\n要先移除它們嗎？按「否」就直接再加一份。");
+                replacing = confirm(M(
+                    "There are already {0} layer(s) here from an earlier MIDI import.\n\nRemove them first? No adds a second copy. / 這個合成裡已經有 {0} 層是之前匯入的。\n\n要先移除它們嗎？按「否」就直接再加一份。",
+                    already.length));
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Import MIDI");
             try {
@@ -4129,32 +4714,47 @@
                 var sung = importSong(chosenMidi, track.index, lyrics, sungSettings,
                     currentOptions(), currentSolfegeKey());
                 refreshCharacters(chosenCharacter());
-                songReadout.text = sung.count + " 句・" + Math.round(sung.bpm) + " BPM";
-                status.text = (lyrics ? "Sung / 已唱出 " : "Sung note names / 已唱唱名 ") +
-                    sung.count + " layer(s)" +
-                    (sung.grew ? "  合成延長到 " + sung.grew.toFixed(2) + "s" : "");
+                songReadout.text = M("{0} line(s) · {1} BPM / {0} 句・{1} BPM",
+                    sung.count, Math.round(sung.bpm));
+                status.text = (lyrics
+                    ? M("Sung {0} layer(s) / 已唱出 {0} 層", sung.count)
+                    : M("Sung note names on {0} layer(s) / 已唱唱名 {0} 層", sung.count)) +
+                    (sung.grew
+                        ? M("  comp grown to {0}s / 　合成延長到 {0}s", sung.grew.toFixed(2))
+                        : "");
                 // Everything that did not line up, said out loud. A lyric that
                 // does not fit its melody is the most likely thing to be wrong
                 // about an import, and only the user can decide what to do.
                 var trouble = [];
                 if (sung.extraSyllables) {
-                    trouble.push(sung.extraSyllables + " 個字沒有音符（用最後一個音唱完）");
+                    trouble.push(M(
+                        "{0} syllable(s) with no note / {0} 個字沒有音符（用最後一個音唱完）",
+                        sung.extraSyllables));
                 }
-                if (sung.extraNotes) { trouble.push(sung.extraNotes + " 個音符沒有字"); }
-                if (sung.dropped) { trouble.push("和弦捨去 " + sung.dropped + " 個音"); }
-                if (sung.split) { trouble.push("太長的句子拆成 " + sung.split + " 層"); }
+                if (sung.extraNotes) {
+                    trouble.push(M("{0} note(s) with no syllable / {0} 個音符沒有字",
+                        sung.extraNotes));
+                }
+                if (sung.dropped) {
+                    trouble.push(M("{0} note(s) dropped from chords / 和弦捨去 {0} 個音",
+                        sung.dropped));
+                }
+                if (sung.split) {
+                    trouble.push(M("{0} long line(s) split / 太長的句子拆成 {0} 層", sung.split));
+                }
                 if (sung.truncated.length) {
-                    trouble.push("被截斷: " + sung.truncated.join(", "));
+                    trouble.push(M("truncated: {0} / 被截斷：{0}", sung.truncated.join(", ")));
                 }
                 if (trouble.length) {
-                    status.text = "Sung / 已唱出 " + sung.count + " 句 —— " + trouble.join("，");
+                    status.text = M("Sung {0} line(s) — {1} / 已唱出 {0} 句 —— {1}",
+                        sung.count, trouble.join(UI_LANGUAGE === "en" ? ", " : "、"));
                 }
                 if (sung.unmarkedKanji.length) {
-                    status.text = "Kanji read as Chinese / 漢字以中文讀音唸出: " +
-                        sung.unmarkedKanji.join(", ");
+                    status.text = M("Kanji read as Chinese: {0} / 漢字以中文讀音唸出：{0}",
+                        sung.unmarkedKanji.join(", "));
                 }
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -4165,12 +4765,12 @@
         clearMelodyButton.onClick = function () {
             var comp = app.project ? app.project.activeItem : null;
             if (!(comp && comp instanceof CompItem)) {
-                alert("Open an active composition first. / 請先開啟合成。");
+                alert(M("Open an active composition first. / 請先開啟合成。"));
                 return;
             }
             var chosen = selectedTextLayers(comp);
             if (!chosen.length) {
-                alert("Select the lines to turn back into speech. / 請選取要改回講話的圖層。");
+                alert(M("Select the lines to turn back into speech. / 請選取要改回講話的圖層。"));
                 return;
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Clear melody");
@@ -4181,10 +4781,10 @@
                     if (clearMelody(comp, chosen[at])) { cleared += 1; }
                 }
                 status.text = cleared
-                    ? "Speaking again / 已改回講話 " + cleared + " 層"
-                    : "None of those were singing / 選取的圖層沒有旋律";
+                    ? M("Speaking again: {0} layer(s) / 已改回講話 {0} 層", cleared)
+                    : M("None of those were singing / 選取的圖層沒有旋律");
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -4198,7 +4798,7 @@
             // The text box only creates a layer when nothing is selected;
             // otherwise each layer's own Source Text is authoritative.
             if (!text && !hasSelection) {
-                alert("Select a text layer or enter text first. / 請選取文字圖層或先輸入文字。");
+                alert(M("Select a text layer or enter text first. / 請選取文字圖層或先輸入文字。"));
                 return;
             }
             app.beginUndoGroup(SCRIPT_NAME + " - Apply");
@@ -4206,30 +4806,30 @@
                 var applied = createOrUpdate(
                     text, trim(pronunciationInput.text), currentSettings(), currentOptions());
                 refreshCharacters(chosenCharacter());
-                status.text = "Applied to " + applied.count + " layer(s) / 已套用 " +
-                    applied.count + " 個圖層" +
-                    (applied.rigs ? "  rig x" + applied.rigs : "") +
-                    (applied.stale ? "  bake 過期 x" + applied.stale : "");
+                status.text = M("Applied to {0} layer(s) / 已套用 {0} 個圖層", applied.count) +
+                    (applied.rigs ? M("  rig x{0} / 　控制器 x{0}", applied.rigs) : "") +
+                    (applied.stale
+                        ? M("  stale bake x{0} / 　轉檔過期 x{0}", applied.stale) : "");
                 // Two lines of one character talking at once is nearly always a
                 // mistake. The rig is still built — the later line wins — but
                 // saying nothing would leave the user hunting for why a mouth
                 // stops halfway through a word.
                 if (applied.overlaps.length) {
-                    status.text = "Overlapping lines / 台詞重疊: " + applied.overlaps.join(", ");
+                    status.text = M("Overlapping lines: {0} / 台詞重疊：{0}", applied.overlaps.join(", "));
                 }
                 if (applied.unmarkedKanji.length) {
-                    status.text = "Kanji read as Chinese / 漢字以中文讀音唸出: " +
-                        applied.unmarkedKanji.join(", ");
+                    status.text = M("Kanji read as Chinese: {0} / 漢字以中文讀音唸出：{0}",
+                        applied.unmarkedKanji.join(", "));
                 }
                 if (applied.truncated.length) {
-                    status.text = "Truncated / 已截斷: " + applied.truncated.join(", ");
-                    alert("Only the first " + MAX_TEXT_UNITS +
-                        " UTF-16 units are spoken; the rest of the Source Text was cut:\n" +
-                        "只會唸出前 " + MAX_TEXT_UNITS + " 個 UTF-16 字元，超出的 Source Text 已截斷：\n\n" +
-                        applied.truncated.join("\n"));
+                    status.text = M("Truncated: {0} / 已截斷：{0}",
+                        applied.truncated.join(", "));
+                    alert(M(
+                        "Only the first {0} UTF-16 units are spoken; the rest of the Source Text was cut:\n\n{1} / 只會唸出前 {0} 個 UTF-16 字元，超出的 Source Text 已截斷：\n\n{1}",
+                        MAX_TEXT_UNITS, applied.truncated.join("\n")));
                 }
             } catch (error) {
-                status.text = "Error / 錯誤";
+                status.text = M("Error / 錯誤");
                 alert(error.toString());
             } finally {
                 app.endUndoGroup();
@@ -4287,6 +4887,7 @@
             }
         }
         localiseTree(panel);
+        relabelTips();
         // After the language pass, because the list holds the user's own
         // character names and must not go through it.
         refreshCharacters("");

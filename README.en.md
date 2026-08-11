@@ -20,7 +20,7 @@ pronunciation adjustable.
 - Japanese kana spoken directly: 拗音, 促音, 撥音, 長音 and the small vowels of loanwords, no dictionary needed
 - English syllabified a word at a time with stress: stressed syllables long, unstressed short and reduced
 - Up to 128 UTF-16 units per layer
-- Panel available in 繁體中文, English and 日本語
+- Panel available in 繁體中文, English and 日本語 — labels, status messages, alerts and tooltips, all three
 - 8 character voices, 7 emotions, 4 character sizes
 - A Formant slider independent of pitch, so the same pitch can belong to a completely different size of creature
 - 6 sound sources: Voice, Reed, Chip, Metallic, Granular, Growl

@@ -643,6 +643,201 @@ for (const bpm of [60, 90, 120, 174]) {
   }
 }
 
+/*
+ * What the panel says while it is running, as opposed to the labels it was
+ * built with. The check above only ever ran one way — every key in the table
+ * had to still be somewhere in the panel — so a *new* message simply never
+ * appeared in it and nothing noticed. That is exactly what happened: by 1.11.0
+ * forty status lines, twenty-five alerts and every tooltip were written
+ * straight into the control, and an English or Japanese panel showed Chinese.
+ *
+ * So this half runs the other way: every literal a message is built from must
+ * be in the table, and no message may be assembled by concatenation, which is
+ * how the untranslatable ones were written.
+ */
+{
+  const table = nativePanelSource.match(/var IC_JAPANESE_UI = \{([\s\S]*?)\n    \};/);
+  const keys = new Set(
+    [...table[1].matchAll(/^\s*"((?:[^"\\]|\\.)*)":/gm)].map((m) => m[1]));
+  const bodies = new Map(
+    [...table[1].matchAll(/^\s*"((?:[^"\\]|\\.)*)":\s*\n?\s*"((?:[^"\\]|\\.)*)"/gm)]
+      .map((m) => [m[1], m[2]]));
+  const outside = nativePanelSource.replace(table[0], "");
+
+  // Every key M() is called with.
+  const spoken = [...outside.matchAll(/\bM\(\s*\n?\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
+  if (spoken.length < 60) {
+    throw new Error(`Only ${spoken.length} messages go through M(); the panel says far more`);
+  }
+  for (const key of new Set(spoken)) {
+    if (!keys.has(key)) {
+      throw new Error(
+        `M("${key}") has no Japanese; a message added without one shows Chinese to every ` +
+        "reader who did not choose 繁體中文");
+    }
+  }
+
+  // A count that moves between languages has to be a placeholder, not a
+  // position. If one half carries {0} and the other does not, that half was
+  // written by hand and drops the number.
+  const holders = (text) => [...new Set(
+    [...text.matchAll(/\{(\d)\}/g)].map((m) => m[1]))].sort().join(",");
+  for (const [key, japanese] of bodies) {
+    const at = key.indexOf(" / ");
+    const english = holders(key.slice(0, at));
+    const chinese = holders(key.slice(at + 3));
+    if (english !== chinese || english !== holders(japanese)) {
+      throw new Error(
+        `"${key}" uses {0}.. inconsistently: English ${english || "none"}, ` +
+        `Chinese ${chinese || "none"}, Japanese ${holders(japanese) || "none"}`);
+    }
+  }
+
+  // Nothing the user reads may still be built the old way. A line that shows a
+  // message and carries an "English / 中文" literal outside M() is one of them.
+  const says = /status\.text\s*=|\balert\(|\bconfirm\(|\bprompt\(|openDialog\(|throw new Error\(/;
+  outside.split("\n").forEach((line, index) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line) || !says.test(line)) return;
+    const literals = [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
+    for (const literal of literals) {
+      if (literal.indexOf(" / ") > 0 && !line.includes("M(")) {
+        throw new Error(
+          `A message is still written straight into the panel, so it shows both languages ` +
+          `at once: ${line.trim().slice(0, 90)}`);
+      }
+    }
+  });
+
+  // And nothing may reach a readout as bare Chinese, which is how the counts
+  // ("已唱出 3 句") stayed Chinese in an English panel even after the fixed
+  // part of the message was translated.
+  const cjk = /[一-鿿぀-ゟ゠-ヿ]/;
+  const helpBlock = nativePanelSource.slice(
+    nativePanelSource.indexOf("var IC_HELP = {}"),
+    nativePanelSource.indexOf("function T(literal)"));
+  outside.replace(helpBlock, "").split("\n").forEach((line) => {
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+    if (!/status\.text\s*=|Readout\.text\s*=|trouble\.push\(/.test(line)) return;
+    if (line.includes("M(")) return;
+    if (cjk.test(line)) {
+      throw new Error(
+        `A message reaches a readout as bare Chinese: ${line.trim().slice(0, 90)}`);
+    }
+  });
+}
+
+/*
+ * The message and tooltip layer, run for real in all three languages.
+ *
+ * M() exists because a count sitting between two Chinese fragments has nowhere
+ * for a translation to go, and H() because a tooltip is a paragraph rather than
+ * a name — three of those will not fit in one "English / 中文" key.
+ */
+{
+  const speaker = { String };
+  vm.createContext(speaker);
+  vm.runInContext([
+    takeVariable("UI_LANGUAGE"),
+    nativePanelSource.slice(nativePanelSource.indexOf("var IC_JAPANESE_UI = {")).slice(
+      0, nativePanelSource.slice(nativePanelSource.indexOf("var IC_JAPANESE_UI = {"))
+        .indexOf("\n    };") + 7),
+    nativePanelSource.slice(
+      nativePanelSource.indexOf("var IC_HELP = {}"),
+      nativePanelSource.indexOf("function T(literal)")),
+    takeFunction("T"),
+    takeFunction("fill"),
+    takeFunction("M"),
+    takeFunction("H"),
+  ].join("\n"), speaker);
+
+  const ids = Object.keys(vm.runInContext("IC_HELP", speaker));
+  if (ids.length < 25) {
+    throw new Error(`Only ${ids.length} tooltips have bodies; the panel has far more controls`);
+  }
+  for (const id of ids) {
+    for (const language of ["en", "zh", "ja"]) {
+      const body = vm.runInContext(`IC_HELP[${JSON.stringify(id)}].${language}`, speaker);
+      if (typeof body !== "string" || body.length < 10) {
+        throw new Error(`The "${id}" tooltip has no ${language} body`);
+      }
+    }
+    /*
+     * An English tooltip that is one line while the Chinese one is a page is
+     * the shape the whole 1.x panel had, and it reads as an unfinished product.
+     *
+     * Measured in characters, because Chinese and Japanese carry far more
+     * meaning per character: across the 29 tooltips here the Chinese body runs
+     * 0.13 to 0.60 of the English one and the Japanese 0.20 to 0.68, so a body
+     * that is *longer* than its English counterpart means the English is
+     * missing something rather than that the translation is verbose. A ratio
+     * threshold instead of a length one is what lets the short tooltips be
+     * short.
+     */
+    const english = vm.runInContext(`IC_HELP[${JSON.stringify(id)}].en`, speaker);
+    for (const other of ["zh", "ja"]) {
+      const body = vm.runInContext(`IC_HELP[${JSON.stringify(id)}].${other}`, speaker);
+      if (body.length > english.length) {
+        throw new Error(
+          `The "${id}" tooltip explains itself in ${other} (${body.length} chars) and ` +
+          `barely at all in English (${english.length})`);
+      }
+    }
+  }
+  // Every body must be reachable, and every tip() must have one to reach.
+  for (const id of ids) {
+    if (!new RegExp(`tip\\([^,]+,\\s*"${id}"`).test(nativePanelSource)) {
+      throw new Error(`The "${id}" tooltip is written but no control shows it`);
+    }
+  }
+  for (const [, id] of nativePanelSource.matchAll(/\btip\([^,]+,\s*"([^"]+)"/g)) {
+    if (ids.indexOf(id) < 0) throw new Error(`tip(..., "${id}") has no body in IC_HELP`);
+  }
+
+  for (const [language, expected] of [
+    ["zh", "已套用 3 個圖層"],
+    ["en", "Applied to 3 layer(s)"],
+    ["ja", "3 レイヤーに適用しました"],
+  ]) {
+    speaker.UI_LANGUAGE = language;
+    const got = vm.runInContext(
+      'M("Applied to {0} layer(s) / 已套用 {0} 個圖層", 3)', speaker);
+    if (got !== expected) {
+      throw new Error(`M() in ${language} returned "${got}", expected "${expected}"`);
+    }
+  }
+  // A placeholder has to be substitutable more than once. No shipped message
+  // needs it today — the second {0} in these keys is in the other language's
+  // half, and T() has already thrown that half away by the time fill() runs —
+  // but a translation is free to name the same thing twice, and
+  // String.replace() with a string pattern changes only the first match.
+  if (vm.runInContext('fill("{0} and {0} again", ["x"])', speaker) !== "x and x again") {
+    throw new Error("fill() substitutes a placeholder only once");
+  }
+  speaker.UI_LANGUAGE = "zh";
+  if (vm.runInContext(
+    'M("Rebuilt {0} rig(s), {1} line(s) / 已重建 {0} 組控制器、{1} 句", 2, 9)',
+    speaker) !== "已重建 2 組控制器、9 句") {
+    throw new Error("M() does not substitute a second placeholder");
+  }
+  // A tooltip carries a folder name in one place, so H() takes a value too.
+  speaker.UI_LANGUAGE = "en";
+  if (vm.runInContext('H("bake", "Island Chatter Audio")', speaker).indexOf(
+    "Island Chatter Audio") < 0) {
+    throw new Error("H() does not fill in a tooltip's placeholder");
+  }
+  for (const [language, marker] of [["zh", "資料夾"], ["ja", "オーディオ"], ["en", "render queue"]]) {
+    speaker.UI_LANGUAGE = language;
+    if (vm.runInContext('H("bake", "x")', speaker).indexOf(marker) < 0) {
+      throw new Error(`H() in ${language} did not return the ${language} tooltip`);
+    }
+  }
+  // Nothing written: an id that does not exist must be empty rather than
+  // "undefined" in a tooltip.
+  if (vm.runInContext('H("nothing")', speaker) !== "") {
+    throw new Error("H() invents a tooltip for an id that has none");
+  }
+}
+
 // Decoding the engine's plan. The plan itself is covered against the real tool
 // in tests/bake-cli.test.js and against the engine in native/tests/dsp_tests.cpp;
 // what is checked here is that the panel reads it correctly, including the cases

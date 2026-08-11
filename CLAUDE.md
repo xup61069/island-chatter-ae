@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v1.11.0` (Windows x64).
+- Current public release: `v2.0.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -53,6 +53,7 @@ effect.
 | `native/src/synthesis_cache.cpp` | Bounded thread-safe single-flight cache for AE block rendering |
 | `native/generated/mandarin_readings.hpp` | Generated Unihan lookup table; do not hand-edit |
 | `native/tools/bake_cli.cpp` | `island_chatter_bake`: renders a WAV, and reports the timing plan with `--plan` |
+| `native/tests/ae-language-verify.jsx` | Host suite for the interface language: builds the panel and switches it through all three |
 | `native/tests/dsp_tests.cpp` | DSP, Mandarin, random-access, bounds, singing, segment seams, and cache concurrency tests |
 | `native/tests/midi_tests.cpp` | MIDI parsing, chord reduction, and every malformed file that must come back as a message rather than a crash |
 | `native/tests/song_tests.cpp` | Lyric-to-note assignment, slot encoding, and the rounding that must not accumulate |
@@ -185,6 +186,51 @@ effect.
    Labels stay written as `"English / 中文"` throughout and `localiseTree()` translates them
    in one pass after the panel is built, so `IC_JAPANESE_UI` is keyed by those literals and
    `npm test` fails when a renamed label strands its translation.
+
+   **A label is not the only thing the panel says.** Everything it says at *runtime* goes
+   through `M()`, which takes the same `"English / 中文"` key and fills `{0}`..`{2}`. The
+   placeholders are the point: written as `"已唱出 " + n + " 句"` the count sits between two
+   Chinese fragments and a translation has nowhere to go, which is why forty status lines,
+   twenty-five alerts, the confirm, both prompts and every readout still showed Chinese in an
+   English panel as late as 1.11.0. `H()` does the same for tooltips, from `IC_HELP` — a
+   paragraph per language keyed by a short id, because three explanations do not fit in one
+   bilingual literal, and `tip()` registers each one so a language switch reaches it.
+
+   The check that let this ship ran one way only: every key in the table had to still be
+   somewhere in the panel. A *new* message was therefore never in the table and never
+   checked. `npm test` now also runs the other way — every `M()` key must have a Japanese
+   entry, the placeholders must agree across all three languages, no message-bearing line may
+   carry a bilingual literal outside `M()`, no bare Chinese may reach a readout, and every
+   tooltip must have three bodies with the English no shorter than the other two. Do not add
+   a message by concatenation; the guard exists because that is how every broken one was
+   written.
+8z. **ScriptUI measures a control once, and the panel is as wide as its widest row.** Two
+   separate consequences, both of which shipped.
+
+   Writing a longer string into `.text` afterwards draws it into the old box and After
+   Effects renders the overflow as an ellipsis, so the first Japanese panel came back reading
+   `中央ぞ…` and `台本を読み…` *with empty space beside it*. Nothing was too narrow; every
+   label was still wearing the Chinese label's measurements. `relabelUI()` therefore resets
+   `preferredSize` to `[-1, height]` on everything it relabels, plus every group and every
+   dropdown whose items changed. The height is carried over because Apply is deliberately
+   34 px tall. `icFixedWidth` marks the slider titles, which are pinned to 110 so the sliders
+   share a column and must survive a language change.
+
+   Separately, a row is as wide as everything in it, and the sing row held eleven controls:
+   762 px in Chinese, 817 in Japanese, against the 414 the text box asks for. It had been the
+   widest thing in the panel since 1.7.0 and nothing measured it. Shortening the words was
+   never going to reach 414 from 762, so the wide rows are split instead — one line of height
+   each. `ae-language-verify.jsx` fails if any row needs more than 460 px in any language.
+
+   Two traps in measuring this. A row's own `preferredSize` reports the panel's width, not
+   its content, because `alignChildren` stretches it — sum the children instead. And
+   `preferredSize.width` on an **empty** `statictext` is silently ignored, so the readouts
+   measure as nothing until they have something to say; fill them with their own text before
+   measuring, not another readout's, which is a mistake that cost a spurious 493 px.
+
+   The language picker is left-aligned and must stay that way. Aligned right its position is
+   measured from the widest row, so it moved every time the language did and left the panel
+   entirely in a narrower dock — the one control that must never become unreachable.
 8j. **English is syllabified, not spelled out.** `english_syllables()` works a word at a time,
    because English spelling only means anything at that scale — though, through and tough
    share four letters and no sounds. It is deliberately a small rule set rather than the
@@ -467,9 +513,12 @@ exit, since the launcher returns immediately:
 | --- | --- |
 | `native/tests/ae-host-regression.jsx` | Effect-stack order, the 76-slot ABI round trip, Fit Duration against the plan, markers, rig, repeat Apply and handle invalidation, keyframed rig sliders, a Tone the user owns, cameras/lights/solids in the comp, batch apply, truncation reporting, the shared rig and the mouth switch |
 | `native/tests/ae-typeon-verify.jsx` | Type-On first/repeat apply, no duplicate animators, reveal actually animates, apply after the user keyframes Opacity and End |
+| `native/tests/ae-language-verify.jsx` | Builds the real panel and switches it through all three languages: every table entry and tooltip, `M()`'s placeholders, and that a switch rewrites labels *and* tooltips on live controls. `npm test` checks the same layer in Node, which is not the engine that runs it |
 | `native/tests/ae-audio-render.jsx` | Renders the effect to audio through the render queue |
 | `native/tests/ae-text-animator-probe.jsx` | Diagnostic for the text-animator placeholder behaviour in invariant 3b |
 | `native/tests/ae-rebake-probe.jsx` | Diagnostic for what releases an imported WAV, behind invariant 8f |
+| `native/tests/ae-width-probe.jsx` | Diagnostic for invariant 8z: prints what every row of the panel wants to be, in all three languages, control by control |
+| `native/tests/ae-close-probe.jsx` | Closes a leftover project without saving, so the next suite can start. Run it between suites |
 
 `ae-host-regression.jsx` and `ae-typeon-verify.jsx` load the real panel body with `eval`, so
 they exercise the shipped code rather than a copy. If the panel's outer function or its

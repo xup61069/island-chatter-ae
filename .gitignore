@@ -16,3 +16,6 @@ ae-host-regression-result.txt
 ae-audio-render-result.txt
 ae-audio-render-output.*
 ae-bake-test-result.txt
+ae-language-verify-result.txt
+ae-width-probe-result.txt
+ae-close-project.txt
