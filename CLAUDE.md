@@ -197,6 +197,23 @@ effect.
    paragraph per language keyed by a short id, because three explanations do not fit in one
    bilingual literal, and `tip()` registers each one so a language switch reaches it.
 
+   **简体中文 is computed, not written.** `simplify()` converts the Traditional half: terms
+   first, then characters. Duplicating 163 messages and 29 tooltips into a fourth table would
+   drift the first time one was reworded, and every future message would need two Chinese
+   versions or silently have none — this way a new message is Simplified for free. Traditional
+   to Simplified is the safe direction, being many-to-one.
+
+   The terms exist because a character map alone gives Simplified characters spelling *Taiwan*
+   terminology: 算圖佇列 becomes 算图伫列. Longest term first, so 專案檔 becomes 项目文件
+   before 專案 becomes 项目. The one context-dependent character is 著 — 着 as a particle,
+   which is every use here, but 著 in 著名; a message needing that sense needs a term entry.
+
+   What can rot is coverage, and it rots invisibly: an unmapped character reaches a Simplified
+   reader still Traditional and nothing looks broken enough to notice. So every Han character
+   the panel can show must be *classified* — in `IC_SIMPLIFIED_CHARS`, or in the
+   `identicalInBothScripts` list in `tests/validate-script.js`. A new character fails until
+   somebody says which.
+
    The check that let this ship ran one way only: every key in the table had to still be
    somewhere in the panel. A *new* message was therefore never in the table and never
    checked. `npm test` now also runs the other way — every `M()` key must have a Japanese

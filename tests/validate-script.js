@@ -621,12 +621,21 @@ for (const bpm of [60, 90, 120, 174]) {
     nativePanelSource.slice(nativePanelSource.indexOf("var IC_JAPANESE_UI = {")).slice(
       0, nativePanelSource.slice(nativePanelSource.indexOf("var IC_JAPANESE_UI = {"))
         .indexOf("\n    };") + 7),
+    takeVariable("IC_SIMPLIFIED_TERMS"),
+    takeVariable("IC_SIMPLIFIED_CHARS"),
+    takeFunction("simplify"),
     takeFunction("T"),
   ].join("\n"), localiser);
   for (const [language, literal, expected] of [
     ["zh", "Pitch / 音高", "音高"],
+    ["cn", "Pitch / 音高", "音高"],
     ["en", "Pitch / 音高", "Pitch"],
     ["ja", "Pitch / 音高", "ピッチ"],
+    // 简体中文 comes from the Chinese half, not from the Japanese table and not
+    // from English, even when a Japanese translation exists.
+    ["cn", "Rebuild / 重建", "重建"],
+    ["cn", "Import script / 匯入劇本", "导入剧本"],
+    ["cn", "IC Mouth", "IC Mouth"],
     // Not in the table: Japanese has to fall back rather than show nothing.
     ["ja", "Nonsense / 亂寫", "Nonsense"],
     // No separator at all: left alone in every language.
@@ -640,6 +649,166 @@ for (const bpm of [60, 90, 120, 174]) {
     const got = vm.runInContext(`T(${JSON.stringify(literal)})`, localiser);
     if (got !== expected) {
       throw new Error(`T("${literal}") in ${language} returned "${got}", expected "${expected}"`);
+    }
+  }
+}
+
+/*
+ * 简体中文 is derived from the Traditional half at runtime rather than kept as
+ * a fourth set of strings, so the thing that can rot is coverage: a message
+ * written with a character the map has never seen would reach a Simplified
+ * reader still in Traditional, and nothing on screen would look broken enough
+ * to notice.
+ *
+ * So every Han character the panel can show has to be *classified* — either it
+ * converts, or it is one of the many that are identical in both scripts. A new
+ * character fails here until somebody says which.
+ */
+{
+  const panelSimplifier = { String };
+  vm.createContext(panelSimplifier);
+  vm.runInContext([
+    takeVariable("IC_SIMPLIFIED_TERMS"),
+    takeVariable("IC_SIMPLIFIED_CHARS"),
+    takeFunction("simplify"),
+  ].join("\n"), panelSimplifier);
+
+  // Every Chinese string the panel can show: the Chinese half of each
+  // bilingual literal, and the zh body of each tooltip.
+  const chineseStrings = [];
+  const tableAt = nativePanelSource.indexOf("var IC_JAPANESE_UI = {");
+  const tableBody = nativePanelSource.slice(tableAt, nativePanelSource.indexOf("\n    };", tableAt) + 7);
+  for (const match of nativePanelSource.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+    let literal;
+    try { literal = JSON.parse(`"${match[1]}"`); } catch (error) { continue; }
+    const at = literal.indexOf(" / ");
+    if (at > 0) chineseStrings.push(literal.slice(at + 3));
+  }
+  const helpBlock = nativePanelSource.slice(
+    nativePanelSource.indexOf("var IC_HELP = {}"),
+    nativePanelSource.indexOf("function T(literal)"));
+  for (const match of helpBlock.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+    let literal;
+    try { literal = JSON.parse(`"${match[1]}"`); } catch (error) { continue; }
+    // The Chinese body, not the English or Japanese one.
+    if (/[一-鿿]/.test(literal) && !/[぀-ゟ゠-ヿ]/.test(literal)) {
+      chineseStrings.push(literal);
+    }
+  }
+  // A sanity bound on the scan itself, not on the panel: a regex that stopped
+  // matching would find nothing and this whole section would pass silently.
+  if (chineseStrings.length < 250) {
+    throw new Error(
+      `Only found ${chineseStrings.length} Chinese strings in the panel; the scan is broken`);
+  }
+
+  /*
+   * Han characters the panel uses that are written the same way in both
+   * scripts. Checked in rather than derived, because there is no table here to
+   * derive it from and "it looked fine" is not a check. Adding a character to
+   * this list is a decision: it says the Simplified form is identical.
+   */
+  const identicalInBothScripts = new Set(Array.from(
+    "一三上下不中之也了二五些亮人什介仍代以件任份伴但位低何作你例依保修候倦值停" +
+    "像元先免入全八六共其再冒出分切列判到制前剛加勾十升半危即厚原去取受口句只叫" +
+    "可台右吃合同名向否含吼和咪咬哪唱四回因固在地型填增多大太失奏套奶好始子字存" +
+    "它安完定害容射小少尚就尾左巨差己已巴常幕平年序度延建式弦形影往很律得心怕性" +
+    "意慢成或截所手才打找把拆拉拍拼拿持指按挑掉排接控推搬改放故效整文料新方旁旋" +
+    "明映是更最有期未本束板果架柔根格框案模次歌正此步段母每比永沿法注活消淡清源" +
+    "滑照熟片物猜率理生用由界留疑疲白百的目直看真知短破碎碰示秒移程空立符第算管" +
+    "簧置而耳腔自至般色若落表被覆角言超越距跟跨身近迷透逐速道那部都配重量金除隔" +
+    "需面音首高黑默嘴要器晰起行走西"));
+
+  const unclassified = new Set();
+  const mapped = vm.runInContext("IC_SIMPLIFIED_CHARS", panelSimplifier);
+  for (const text of chineseStrings) {
+    for (const character of text) {
+      if (!/[一-鿿]/.test(character)) continue;
+      if (Object.prototype.hasOwnProperty.call(mapped, character)) continue;
+      if (identicalInBothScripts.has(character)) continue;
+      unclassified.add(character);
+    }
+  }
+  if (unclassified.size) {
+    throw new Error(
+      `These Han characters are in the panel but not classified for 简体中文: ` +
+      `${[...unclassified].join("")}\n` +
+      "Add each to IC_SIMPLIFIED_CHARS in the panel if the Simplified form differs, " +
+      "or to identicalInBothScripts in this test if it does not.");
+  }
+
+  // The conversion itself, on the cases that would be wrong if it were only a
+  // character map. Terminology first is the whole reason the term table exists.
+  for (const [traditional, simplified] of [
+    // Two separate terms composing, which is why there is no 算圖佇列 entry:
+    // 算圖 and 佇列 already reach 渲染队列 between them.
+    ["算圖佇列", "渲染队列"],
+    ["專案檔旁邊的資料夾", "项目文件旁边的文件夹"],
+    ["關鍵影格", "关键帧"],
+    // Script and vocabulary, not grammar: a mainland writer would say 一帧
+    // rather than 一个帧, but rewording is a translator's job and this is a
+    // converter. Everything it produces has to be *correct*, not idiomatic.
+    ["一個影格", "一个帧"],
+    ["五根滑桿", "五根滑块"],
+    ["轉成音訊", "转成音频"],
+    ["匯入劇本", "导入剧本"],
+    ["請先儲存專案", "请先保存项目"],
+    ["套用到選取文字圖層", "应用到选中文本图层"],
+    ["建立嘴型切換", "创建口型切换"],
+    ["選取器沒有百分比控制項", "选择器没有百分比控制项"],
+    ["選一個 MIDI 檔", "选一个 MIDI 文件"],
+    ["空物件", "空对象"],
+    ["介面語言", "界面语言"],
+    ["UTF-16 字元", "UTF-16 字符"],
+    // Plain character conversion, including the particle sense of 著.
+    ["連著的字之間只換嘴型", "连着的字之间只换口型"],
+    ["這個合成裡沒有台詞圖層。", "这个合成里没有台词图层。"],
+    ["漢字以中文讀音唸出", "汉字以中文读音念出"],
+    // Nothing to convert: left exactly alone.
+    ["IC Mouth", "IC Mouth"],
+    ["120 BPM", "120 BPM"],
+  ]) {
+    const got = vm.runInContext(`simplify(${JSON.stringify(traditional)})`, panelSimplifier);
+    if (got !== simplified) {
+      throw new Error(`simplify("${traditional}") gave "${got}", expected "${simplified}"`);
+    }
+  }
+
+  /*
+   * The picker has to offer every language there is a code for. They are
+   * matched up by position, so a list that is one shorter does not fail — it
+   * quietly makes the last code unreachable and hands every code after the gap
+   * the wrong name.
+   */
+  {
+    const codes = nativePanelSource.match(/var languageCodes = (\[[^\]]*\]);/);
+    if (!codes) throw new Error("The panel has no languageCodes");
+    const names = nativePanelSource.match(
+      /languageRow\.add\("dropdownlist", undefined,\s*\n?\s*(\[[^\]]*\])\);/);
+    if (!names) throw new Error("The panel's language picker has no item list");
+    const codeCount = [...codes[1].matchAll(/"[^"]+"/g)].length;
+    const nameCount = [...names[1].matchAll(/"[^"]+"/g)].length;
+    if (codeCount !== nameCount) {
+      throw new Error(
+        `The language picker offers ${nameCount} names for ${codeCount} language codes; ` +
+        "they are matched by position, so the extra code can never be chosen");
+    }
+    for (const code of ["zh", "cn", "en", "ja"]) {
+      if (!codes[1].includes(`"${code}"`)) {
+        throw new Error(`The panel no longer offers the "${code}" interface language`);
+      }
+    }
+  }
+
+  // And nothing the panel can say may still contain a Traditional-only
+  // character after conversion — the end-to-end version of the check above.
+  for (const text of chineseStrings) {
+    const converted = vm.runInContext(`simplify(${JSON.stringify(text)})`, panelSimplifier);
+    for (const character of converted) {
+      if (Object.prototype.hasOwnProperty.call(mapped, character)) {
+        throw new Error(
+          `简体中文 still shows the Traditional "${character}" in: ${converted.slice(0, 60)}`);
+      }
     }
   }
 }
@@ -745,6 +914,9 @@ for (const bpm of [60, 90, 120, 174]) {
     nativePanelSource.slice(
       nativePanelSource.indexOf("var IC_HELP = {}"),
       nativePanelSource.indexOf("function T(literal)")),
+    takeVariable("IC_SIMPLIFIED_TERMS"),
+    takeVariable("IC_SIMPLIFIED_CHARS"),
+    takeFunction("simplify"),
     takeFunction("T"),
     takeFunction("fill"),
     takeFunction("M"),
@@ -756,11 +928,23 @@ for (const bpm of [60, 90, 120, 174]) {
     throw new Error(`Only ${ids.length} tooltips have bodies; the panel has far more controls`);
   }
   for (const id of ids) {
-    for (const language of ["en", "zh", "ja"]) {
-      const body = vm.runInContext(`IC_HELP[${JSON.stringify(id)}].${language}`, speaker);
+    // Through H() rather than off the table, because 简体中文 has no stored
+    // body — it is made from the Traditional one — and what matters is what
+    // the control ends up showing.
+    for (const language of ["en", "zh", "cn", "ja"]) {
+      speaker.UI_LANGUAGE = language;
+      const body = vm.runInContext(`H(${JSON.stringify(id)}, "x")`, speaker);
       if (typeof body !== "string" || body.length < 10) {
         throw new Error(`The "${id}" tooltip has no ${language} body`);
       }
+    }
+    speaker.UI_LANGUAGE = "cn";
+    const simplifiedTip = vm.runInContext(`H(${JSON.stringify(id)}, "x")`, speaker);
+    speaker.UI_LANGUAGE = "zh";
+    const traditionalTip = vm.runInContext(`H(${JSON.stringify(id)}, "x")`, speaker);
+    if (simplifiedTip === traditionalTip) {
+      throw new Error(
+        `The "${id}" tooltip is identical in 繁體 and 简体; it was not converted`);
     }
     /*
      * An English tooltip that is one line while the Chinese one is a page is
@@ -774,9 +958,11 @@ for (const bpm of [60, 90, 120, 174]) {
      * threshold instead of a length one is what lets the short tooltips be
      * short.
      */
-    const english = vm.runInContext(`IC_HELP[${JSON.stringify(id)}].en`, speaker);
-    for (const other of ["zh", "ja"]) {
-      const body = vm.runInContext(`IC_HELP[${JSON.stringify(id)}].${other}`, speaker);
+    speaker.UI_LANGUAGE = "en";
+    const english = vm.runInContext(`H(${JSON.stringify(id)}, "x")`, speaker);
+    for (const other of ["zh", "cn", "ja"]) {
+      speaker.UI_LANGUAGE = other;
+      const body = vm.runInContext(`H(${JSON.stringify(id)}, "x")`, speaker);
       if (body.length > english.length) {
         throw new Error(
           `The "${id}" tooltip explains itself in ${other} (${body.length} chars) and ` +
@@ -796,6 +982,7 @@ for (const bpm of [60, 90, 120, 174]) {
 
   for (const [language, expected] of [
     ["zh", "已套用 3 個圖層"],
+    ["cn", "已应用 3 个图层"],
     ["en", "Applied to 3 layer(s)"],
     ["ja", "3 レイヤーに適用しました"],
   ]) {
@@ -826,7 +1013,8 @@ for (const bpm of [60, 90, 120, 174]) {
     "Island Chatter Audio") < 0) {
     throw new Error("H() does not fill in a tooltip's placeholder");
   }
-  for (const [language, marker] of [["zh", "資料夾"], ["ja", "オーディオ"], ["en", "render queue"]]) {
+  for (const [language, marker] of [
+    ["zh", "資料夾"], ["cn", "文件夹"], ["ja", "オーディオ"], ["en", "render queue"]]) {
     speaker.UI_LANGUAGE = language;
     if (vm.runInContext('H("bake", "x")', speaker).indexOf(marker) < 0) {
       throw new Error(`H() in ${language} did not return the ${language} tooltip`);
@@ -1462,6 +1650,9 @@ const stepFor = (gapBeats, bpm) =>
   vm.runInContext([
     takeVariable("UI_LANGUAGE"),
     nativePanelSource.slice(tableAt, nativePanelSource.indexOf("\n    };", tableAt) + 7),
+    takeVariable("IC_SIMPLIFIED_TERMS"),
+    takeVariable("IC_SIMPLIFIED_CHARS"),
+    takeFunction("simplify"),
     takeFunction("T"),
   ].join("\n"), menuLocaliser);
   const menus = [...nativePanelSource.matchAll(
@@ -1472,7 +1663,7 @@ const stepFor = (gapBeats, bpm) =>
   for (const menu of menus) {
     const items = [...menu[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
     if (!items.length) continue;
-    for (const language of ["zh", "en", "ja"]) {
+    for (const language of ["zh", "cn", "en", "ja"]) {
       menuLocaliser.UI_LANGUAGE = language;
       const shown = items.map((item) =>
         vm.runInContext(`T(${JSON.stringify(item)})`, menuLocaliser));

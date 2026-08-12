@@ -5,10 +5,10 @@ first. It is written for you, and it is enough to answer almost every question a
 this product will ask. You should not need to read the source.**
 
 This is the single authoritative usage reference. `README.md` / `README.en.md` /
-`README.ja.md` are the same material written for people to browse in three languages;
+`README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 2.0.0**. Facts that changed recently are marked with the
+Everything below describes **version 2.1.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -146,7 +146,7 @@ animating Speed also moves every syllable. **Volume is exempt** and safe to anim
 
 ### 4.3 Buttons and checkboxes
 
-Grouped by what they are for. Exact strings in all three languages are in
+Grouped by what they are for. Exact strings in all four languages are in
 [section 4.4](#44-exact-labels-in-all-three-languages).
 
 **Getting text in and out**
@@ -191,97 +191,97 @@ Grouped by what they are for. Exact strings in all three languages are in
 - **Re-flow** — lay the selected lines out again end to end.
 - **Bake** — render the voice to a WAV beside the project and bring it back as an audio layer.
 
-### 4.4 Exact labels in all three languages
+### 4.4 Exact labels in all four languages
 
 Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
 - Controls and menu entries with a label: **78**
 - Distinct messages the panel can print: **65**
-- Languages: **3** (繁體中文, English, 日本語), switched by the dropdown at the top left
+- Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
 <!-- BEGIN LABELS -->
-| English | 繁體中文 | 日本語 |
-| --- | --- | --- |
-| 1 per beat | 每拍 1 字 | 1拍に1音 |
-| 2 per beat | 每拍 2 字 | 1拍に2音 |
-| 3 per beat | 每拍 3 字 | 1拍に3音 |
-| 4 per beat | 每拍 4 字 | 1拍に4音 |
-| Adult | 成熟 | おとな |
-| Angry | 生氣 | おこり |
-| Apply to selected text layers | 套用到選取文字圖層 | 選択したテキストレイヤーに適用 |
-| Bake | 轉成音訊 | 音声ファイルに書き出す |
-| Buzzy | 電子 | バジー |
-| Captain | 隊長 | たいちょう |
-| Center | 維持置中 | 中央ぞろえを保つ |
-| Chatter | 逐字開合 | 1 音ずつ開閉 |
-| Chip | 電子 | チップ |
-| Chirpy | 活潑 | チャーピー |
-| Choose MIDI | 選 MIDI | MIDI を選ぶ |
-| Clarity | 清晰度 | はっきりさ |
-| Consonant | 聲母 | しいん |
-| Cozy | 溫厚 | コージー |
-| Custom | 自訂 | カスタム |
-| Cuteness | 可愛度 | かわいさ |
-| Delete | 刪除 | 削除 |
-| Direct text-layer voice | 文字圖層直接發聲 | テキストレイヤーが直接しゃべる |
-| Droid | 機器 | ドロイド |
-| Edit text, then apply | 修改文字後按套用 | テキストを直したら適用を押す |
-| Elder | 年長 | エルダー |
-| Fit Duration | 配合長度 | 長さを合わせる |
-| Formant | 共鳴 | きょうめい |
-| Gap | 間隔 | あいだ |
-| Giant | 巨大 | きょだい |
-| Grandma | 奶奶 | おばあちゃん |
-| Granular | 破碎 | グラニュラー |
-| Growl | 低吼 | うなり |
-| Happy | 開心 | うれしい |
-| Hold | 接到下一句 | 次までのばす |
-| Import script | 匯入劇本 | 台本を読み込む |
-| Key | 唱名調 | 階名のド |
-| Leave | 離開 | 出るカーブ |
-| Markers | 逐字標記 | マーカー |
-| Metallic | 金屬 | メタリック |
-| Mimi | 咪咪 | ミミ |
-| Mouth switch | 建立嘴型切換 | 口パクをつなぐ |
-| Neutral | 中性 | ふつう |
-| New | 新增角色 | キャラを追加 |
-| Per layer | 每層 | レイヤーごと |
-| Pitch | 音高 | ピッチ |
-| Pronunciation override (optional) | 讀音覆寫（可留空） | 読み方の指定（省略可） |
-| Question | 疑問 | ぎもん |
-| Random | 隨機 | ランダム |
-| Re-flow | 重新排列 | 並べ直す |
-| Re-sync | 重新同步 | 文字だけ更新 |
-| Read selected layer | 讀取選取圖層 | 選択レイヤーを読み込む |
-| Rebuild | 重建 | 作り直す |
-| Reed | 簧片 | リード |
-| Remove | 移除 | 取り除く |
-| Rig | 動畫控制 | リグ |
-| Robot | 機器人 | ロボット |
-| Save | 儲存角色 | キャラを保存 |
-| Scared | 害怕 | こわがり |
-| Seed | 種子 | シード |
-| Shared | 共用角色 | キャラ共有 |
-| Sing | 唱出來 | 歌わせる |
-| Sleepy | 疲倦 | ねむい |
-| Smoothness | 平滑 | なめらかさ |
-| Speak | 改回講話 | しゃべりに戻す |
-| Speakers | 含角色名 | 話者名つき |
-| Speed | 速度 | はやさ |
-| Sunny | 明亮 | サニー |
-| Tempo | 節拍 | テンポ |
-| Tiny | 迷你 | タイニー |
-| Tone | 聲調 | 声調 |
-| Transpose | 移調 | 移調 |
-| Type-On | 逐字顯示 | 一文字ずつ表示 |
-| Vibrato | 顫音 | ビブラート |
-| Vibrato Rate | 顫音速率 | ビブラート速度 |
-| Voice | 人聲 | ボイス |
-| Volume | 音量 | おんりょう |
-| Whisper | 耳語 | ウィスパー |
-| Young | 少年 | こども |
+| English | 繁體中文 | 简体中文 | 日本語 |
+| --- | --- | --- | --- |
+| 1 per beat | 每拍 1 字 | 每拍 1 字 | 1拍に1音 |
+| 2 per beat | 每拍 2 字 | 每拍 2 字 | 1拍に2音 |
+| 3 per beat | 每拍 3 字 | 每拍 3 字 | 1拍に3音 |
+| 4 per beat | 每拍 4 字 | 每拍 4 字 | 1拍に4音 |
+| Adult | 成熟 | 成熟 | おとな |
+| Angry | 生氣 | 生气 | おこり |
+| Apply to selected text layers | 套用到選取文字圖層 | 应用到选中文本图层 | 選択したテキストレイヤーに適用 |
+| Bake | 轉成音訊 | 转成音频 | 音声ファイルに書き出す |
+| Buzzy | 電子 | 电子 | バジー |
+| Captain | 隊長 | 队长 | たいちょう |
+| Center | 維持置中 | 维持置中 | 中央ぞろえを保つ |
+| Chatter | 逐字開合 | 逐字开合 | 1 音ずつ開閉 |
+| Chip | 電子 | 电子 | チップ |
+| Chirpy | 活潑 | 活泼 | チャーピー |
+| Choose MIDI | 選 MIDI | 选 MIDI | MIDI を選ぶ |
+| Clarity | 清晰度 | 清晰度 | はっきりさ |
+| Consonant | 聲母 | 声母 | しいん |
+| Cozy | 溫厚 | 温厚 | コージー |
+| Custom | 自訂 | 自订 | カスタム |
+| Cuteness | 可愛度 | 可爱度 | かわいさ |
+| Delete | 刪除 | 删除 | 削除 |
+| Direct text-layer voice | 文字圖層直接發聲 | 文本图层直接发声 | テキストレイヤーが直接しゃべる |
+| Droid | 機器 | 机器 | ドロイド |
+| Edit text, then apply | 修改文字後按套用 | 修改文字后按应用 | テキストを直したら適用を押す |
+| Elder | 年長 | 年长 | エルダー |
+| Fit Duration | 配合長度 | 配合长度 | 長さを合わせる |
+| Formant | 共鳴 | 共鸣 | きょうめい |
+| Gap | 間隔 | 间隔 | あいだ |
+| Giant | 巨大 | 巨大 | きょだい |
+| Grandma | 奶奶 | 奶奶 | おばあちゃん |
+| Granular | 破碎 | 破碎 | グラニュラー |
+| Growl | 低吼 | 低吼 | うなり |
+| Happy | 開心 | 开心 | うれしい |
+| Hold | 接到下一句 | 接到下一句 | 次までのばす |
+| Import script | 匯入劇本 | 导入剧本 | 台本を読み込む |
+| Key | 唱名調 | 唱名调 | 階名のド |
+| Leave | 離開 | 离开 | 出るカーブ |
+| Markers | 逐字標記 | 逐字标记 | マーカー |
+| Metallic | 金屬 | 金属 | メタリック |
+| Mimi | 咪咪 | 咪咪 | ミミ |
+| Mouth switch | 建立嘴型切換 | 创建口型切换 | 口パクをつなぐ |
+| Neutral | 中性 | 中性 | ふつう |
+| New | 新增角色 | 新增角色 | キャラを追加 |
+| Per layer | 每層 | 每层 | レイヤーごと |
+| Pitch | 音高 | 音高 | ピッチ |
+| Pronunciation override (optional) | 讀音覆寫（可留空） | 读音覆写（可留空） | 読み方の指定（省略可） |
+| Question | 疑問 | 疑问 | ぎもん |
+| Random | 隨機 | 随机 | ランダム |
+| Re-flow | 重新排列 | 重新排列 | 並べ直す |
+| Re-sync | 重新同步 | 重新同步 | 文字だけ更新 |
+| Read selected layer | 讀取選取圖層 | 读取选中图层 | 選択レイヤーを読み込む |
+| Rebuild | 重建 | 重建 | 作り直す |
+| Reed | 簧片 | 簧片 | リード |
+| Remove | 移除 | 移除 | 取り除く |
+| Rig | 動畫控制 | 动画控制 | リグ |
+| Robot | 機器人 | 机器人 | ロボット |
+| Save | 儲存角色 | 保存角色 | キャラを保存 |
+| Scared | 害怕 | 害怕 | こわがり |
+| Seed | 種子 | 种子 | シード |
+| Shared | 共用角色 | 共用角色 | キャラ共有 |
+| Sing | 唱出來 | 唱出来 | 歌わせる |
+| Sleepy | 疲倦 | 疲倦 | ねむい |
+| Smoothness | 平滑 | 平滑 | なめらかさ |
+| Speak | 改回講話 | 改回讲话 | しゃべりに戻す |
+| Speakers | 含角色名 | 含角色名 | 話者名つき |
+| Speed | 速度 | 速度 | はやさ |
+| Sunny | 明亮 | 明亮 | サニー |
+| Tempo | 節拍 | 节拍 | テンポ |
+| Tiny | 迷你 | 迷你 | タイニー |
+| Tone | 聲調 | 声调 | 声調 |
+| Transpose | 移調 | 移调 | 移調 |
+| Type-On | 逐字顯示 | 逐字显示 | 一文字ずつ表示 |
+| Vibrato | 顫音 | 颤音 | ビブラート |
+| Vibrato Rate | 顫音速率 | 颤音速率 | ビブラート速度 |
+| Voice | 人聲 | 人声 | ボイス |
+| Volume | 音量 | 音量 | おんりょう |
+| Whisper | 耳語 | 耳语 | ウィスパー |
+| Young | 少年 | 少年 | こども |
 <!-- END LABELS -->
 
 ---
@@ -506,73 +506,73 @@ If a user quotes something the panel said, find it here. Generated from the pane
 complete and current. `{0}` and `{1}` are filled in with counts or names at runtime.
 
 <!-- BEGIN MESSAGES -->
-| English | 繁體中文 | 日本語 |
-| --- | --- | --- |
-|    OUT OF RANGE | 　　超出範圍 | 　　範囲外 |
-|   (x{0} character) | 　（x{0} 角色補償） | 　（x{0} キャラ補正） |
-|   ({0} sung layer(s) left in place) | 　（唱歌 {0} 層維持原位） | 　（歌の {0} レイヤーはそのまま） |
-|   +{0} split | 　+{0} 斷句 | 　+{0} 行に分割 |
-|   cast: {0} | 　角色：{0} | 　キャラ：{0} |
-|   comp grown to {0}s | 　合成延長到 {0}s | 　コンポを {0}s に延長 |
-|   eighth | 　八分 | 　8 分 |
-|   half | 　二分 | 　2 分 |
-|   held x{0} | 　接到下一句 x{0} | 　次までのばす x{0} |
-|   quarter | 　四分 | 　4 分 |
-|   rig x{0} | 　控制器 x{0} | 　リグ x{0} |
-|   sixteenth | 　十六分 | 　16 分 |
-|   stale bake x{0} | 　轉檔過期 x{0} | 　書き出し古い x{0} |
-| = 0s  no grid | = 0s　無格線 | = 0s　グリッドなし |
-| Applied to {0} layer(s) | 已套用 {0} 個圖層 | {0} レイヤーに適用しました |
-| Apply Island Chatter first, then bake. | 請先按 Apply 再轉成音訊。 | 先に適用してから書き出してください。 |
-| Apply Island Chatter to these layers first. | 這些圖層還沒套用過。 | これらのレイヤーにはまだ適用されていません。 |
-| Baked {0} layer(s) -> {1} | 已轉成音訊 {0} 層 -> {1} | {0} レイヤーを書き出しました -> {1} |
-| Character {0} | 角色 {0} | キャラ {0} |
-| Choose a MIDI file | 選一個 MIDI 檔 | MIDI ファイルを選ぶ |
-| Choose a MIDI file first. | 請先按「選 MIDI」挑一個檔案。 | 先に「MIDI を選ぶ」でファイルを選んでください。 |
-| Choose a track first. | 請先選一個軌道。 | 先にトラックを選んでください。 |
-| Choose or create a character first. | 請先選擇或新增角色。 | 先にキャラを選ぶか追加してください。 |
-| Error | 錯誤 | エラー |
-| Imported {0} layer(s) | 已匯入 {0} 層 | {0} レイヤーを読み込みました |
-| Kanji read as Chinese: {0} | 漢字以中文讀音唸出：{0} | 漢字は中国語読みです：{0} |
-| MIDI loaded: {0} — pick a track, then Sing | 已讀取 {0} —— 選好軌道後按「唱出來」 | MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」 |
-| Mouth on Time Remap | 嘴型已接上時間重映射 | 口パクをタイムリマップにつなぎました |
-| Mouth switch on {0} layer(s) -> {1} | 已接上嘴型 {0} 層 -> {1} | 口パクを {0} レイヤーにつなぎました -> {1} |
-| Name this character | 幫這個角色取個名字 | キャラの名前を入れてください |
-| No notes in that file | 這個檔案裡沒有音符 | このファイルに音符がありません |
-| None of those were singing | 選取的圖層沒有旋律 | 選んだレイヤーにメロディがありません |
-| Now editing {0} | 目前角色：{0} | 編集中のキャラ：{0} |
-| Only the first {0} UTF-16 units are spoken; the rest of the Source Text was cut: ⏎  ⏎ {1} | 只會唸出前 {0} 個 UTF-16 字元，超出的 Source Text 已截斷： ⏎  ⏎ {1} | しゃべるのは最初の {0} UTF-16 単位までです。残りのソーステキストは切りました： ⏎  ⏎ {1} |
-| Open an active composition first. | 請先開啟合成。 | 先にコンポジションを開いてください。 |
-| Overlapping lines: {0} | 台詞重疊：{0} | セリフが重なっています：{0} |
-| Paste a script into the text box first. | 請先把劇本貼進上面的文字框。 | 先に台本をテキスト欄に貼り付けてください。 |
-| Re-flowed {0} layer(s) @ {1} beat(s) | 已排列 {0} 層 @ {1} 拍 | {0} レイヤーを {1} 拍あけて並べ直しました |
-| Re-synced {0} layer(s) | 已重新同步 {0} 層 | {0} レイヤーを更新しました |
-| Read settings from {0} | 已讀取設定：{0} | {0} から設定を読み込みました |
-| Read text only | 只讀到文字（此圖層尚未套用） | テキストだけ読み込みました（未適用） |
-| Rebuilt {0} rig(s), {1} line(s) | 已重建 {0} 組控制器、{1} 句 | リグ {0} 組・{1} 行を作り直しました |
-| Removed {0} item(s) from {1} layer(s) | 已移除 {1} 層上的 {0} 個項目 | {1} レイヤーから {0} 項目を取り除きました |
-| Saved {0} | 已儲存：{0} | {0} を保存しました |
-| Select a saved character first. | 請先選取自訂角色。 | 先に保存したキャラを選んでください。 |
-| Select a text layer or enter text first. | 請選取文字圖層或先輸入文字。 | テキストレイヤーを選ぶか、文字を入力してください。 |
-| Select a text layer. | 請選取文字圖層。 | テキストレイヤーを選んでください。 |
-| Select the lines to turn back into speech. | 請選取要改回講話的圖層。 | しゃべりに戻すレイヤーを選んでください。 |
-| Speaking again: {0} layer(s) | 已改回講話 {0} 層 | {0} レイヤーをしゃべりに戻しました |
-| Speed set manually | 語速為手動設定 | はやさは手動設定です |
-| Sung note names on {0} layer(s) | 已唱唱名 {0} 層 | 階名で {0} レイヤーを歌わせました |
-| Sung {0} layer(s) | 已唱出 {0} 層 | {0} レイヤーを歌わせました |
-| Sung {0} line(s) — {1} | 已唱出 {0} 句 —— {1} | {0} 行を歌わせました —— {1} |
-| There are already {0} layer(s) here from an earlier MIDI import. ⏎  ⏎ Remove them first? No adds a second copy. | 這個合成裡已經有 {0} 層是之前匯入的。 ⏎  ⏎ 要先移除它們嗎？按「否」就直接再加一份。 | このコンポには前回の MIDI 読み込みで作られたレイヤーが {0} 枚あります。 ⏎  ⏎ 先に取り除きますか？「いいえ」でもう一組追加します。 |
-| There are no Island Chatter lines here. | 這個合成裡沒有台詞圖層。 | このコンポにセリフのレイヤーがありません。 |
-| There is no shared rig here. | 這個合成裡沒有共用控制器。 | このコンポには共有リグがありません。 |
-| Truncated: {0} | 已截斷：{0} | 文字が切れました：{0} |
-| truncated: {0} | 被截斷：{0} | 切れました：{0} |
-| {0} line(s) · {1} BPM | {0} 句・{1} BPM | {0} 行・{1} BPM |
-| {0} long line(s) split | 太長的句子拆成 {0} 層 | 長い行を {0} レイヤーに分けました |
-| {0} note(s) dropped from chords | 和弦捨去 {0} 個音 | 和音から {0} 音を省きました |
-| {0} note(s) with no syllable | {0} 個音符沒有字 | {0} 音に歌詞がありません |
-| {0} s/syllable   Speed {1} | {0} 秒／字   Speed {1} | {0} 秒／音   Speed {1} |
-| {0} syllable(s) with no note | {0} 個字沒有音符（用最後一個音唱完） | {0} 文字に音符がありません（最後の音でのばします） |
-| {0} track(s) · {1} BPM | {0} 軌・{1} BPM | {0} トラック・{1} BPM |
+| English | 繁體中文 | 简体中文 | 日本語 |
+| --- | --- | --- | --- |
+|    OUT OF RANGE | 　　超出範圍 | 　　超出范围 | 　　範囲外 |
+|   (x{0} character) | 　（x{0} 角色補償） | 　（x{0} 角色补偿） | 　（x{0} キャラ補正） |
+|   ({0} sung layer(s) left in place) | 　（唱歌 {0} 層維持原位） | 　（唱歌 {0} 层维持原位） | 　（歌の {0} レイヤーはそのまま） |
+|   +{0} split | 　+{0} 斷句 | 　+{0} 断句 | 　+{0} 行に分割 |
+|   cast: {0} | 　角色：{0} | 　角色：{0} | 　キャラ：{0} |
+|   comp grown to {0}s | 　合成延長到 {0}s | 　合成延长到 {0}s | 　コンポを {0}s に延長 |
+|   eighth | 　八分 | 　八分 | 　8 分 |
+|   half | 　二分 | 　二分 | 　2 分 |
+|   held x{0} | 　接到下一句 x{0} | 　接到下一句 x{0} | 　次までのばす x{0} |
+|   quarter | 　四分 | 　四分 | 　4 分 |
+|   rig x{0} | 　控制器 x{0} | 　控制器 x{0} | 　リグ x{0} |
+|   sixteenth | 　十六分 | 　十六分 | 　16 分 |
+|   stale bake x{0} | 　轉檔過期 x{0} | 　导出过期 x{0} | 　書き出し古い x{0} |
+| = 0s  no grid | = 0s　無格線 | = 0s　无格线 | = 0s　グリッドなし |
+| Applied to {0} layer(s) | 已套用 {0} 個圖層 | 已应用 {0} 个图层 | {0} レイヤーに適用しました |
+| Apply Island Chatter first, then bake. | 請先按 Apply 再轉成音訊。 | 请先按 Apply 再转成音频。 | 先に適用してから書き出してください。 |
+| Apply Island Chatter to these layers first. | 這些圖層還沒套用過。 | 这些图层还没应用过。 | これらのレイヤーにはまだ適用されていません。 |
+| Baked {0} layer(s) -> {1} | 已轉成音訊 {0} 層 -> {1} | 已转成音频 {0} 层 -> {1} | {0} レイヤーを書き出しました -> {1} |
+| Character {0} | 角色 {0} | 角色 {0} | キャラ {0} |
+| Choose a MIDI file | 選一個 MIDI 檔 | 选一个 MIDI 文件 | MIDI ファイルを選ぶ |
+| Choose a MIDI file first. | 請先按「選 MIDI」挑一個檔案。 | 请先按「选 MIDI」挑一个文件。 | 先に「MIDI を選ぶ」でファイルを選んでください。 |
+| Choose a track first. | 請先選一個軌道。 | 请先选一个轨道。 | 先にトラックを選んでください。 |
+| Choose or create a character first. | 請先選擇或新增角色。 | 请先选择或新增角色。 | 先にキャラを選ぶか追加してください。 |
+| Error | 錯誤 | 错误 | エラー |
+| Imported {0} layer(s) | 已匯入 {0} 層 | 已导入 {0} 层 | {0} レイヤーを読み込みました |
+| Kanji read as Chinese: {0} | 漢字以中文讀音唸出：{0} | 汉字以中文读音念出：{0} | 漢字は中国語読みです：{0} |
+| MIDI loaded: {0} — pick a track, then Sing | 已讀取 {0} —— 選好軌道後按「唱出來」 | 已读取 {0} —— 选好轨道后按「唱出来」 | MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」 |
+| Mouth on Time Remap | 嘴型已接上時間重映射 | 口型已接上时间重映射 | 口パクをタイムリマップにつなぎました |
+| Mouth switch on {0} layer(s) -> {1} | 已接上嘴型 {0} 層 -> {1} | 已接上口型 {0} 层 -> {1} | 口パクを {0} レイヤーにつなぎました -> {1} |
+| Name this character | 幫這個角色取個名字 | 帮这个角色取个名字 | キャラの名前を入れてください |
+| No notes in that file | 這個檔案裡沒有音符 | 这个文件里没有音符 | このファイルに音符がありません |
+| None of those were singing | 選取的圖層沒有旋律 | 选中的图层没有旋律 | 選んだレイヤーにメロディがありません |
+| Now editing {0} | 目前角色：{0} | 目前角色：{0} | 編集中のキャラ：{0} |
+| Only the first {0} UTF-16 units are spoken; the rest of the Source Text was cut: ⏎  ⏎ {1} | 只會唸出前 {0} 個 UTF-16 字元，超出的 Source Text 已截斷： ⏎  ⏎ {1} | 只会念出前 {0} 个 UTF-16 字符，超出的 Source Text 已截断： ⏎  ⏎ {1} | しゃべるのは最初の {0} UTF-16 単位までです。残りのソーステキストは切りました： ⏎  ⏎ {1} |
+| Open an active composition first. | 請先開啟合成。 | 请先开启合成。 | 先にコンポジションを開いてください。 |
+| Overlapping lines: {0} | 台詞重疊：{0} | 台词重叠：{0} | セリフが重なっています：{0} |
+| Paste a script into the text box first. | 請先把劇本貼進上面的文字框。 | 请先把剧本粘贴到上面的文本框。 | 先に台本をテキスト欄に貼り付けてください。 |
+| Re-flowed {0} layer(s) @ {1} beat(s) | 已排列 {0} 層 @ {1} 拍 | 已排列 {0} 层 @ {1} 拍 | {0} レイヤーを {1} 拍あけて並べ直しました |
+| Re-synced {0} layer(s) | 已重新同步 {0} 層 | 已重新同步 {0} 层 | {0} レイヤーを更新しました |
+| Read settings from {0} | 已讀取設定：{0} | 已读取设置：{0} | {0} から設定を読み込みました |
+| Read text only | 只讀到文字（此圖層尚未套用） | 只读到文字（此图层尚未应用） | テキストだけ読み込みました（未適用） |
+| Rebuilt {0} rig(s), {1} line(s) | 已重建 {0} 組控制器、{1} 句 | 已重建 {0} 组控制器、{1} 句 | リグ {0} 組・{1} 行を作り直しました |
+| Removed {0} item(s) from {1} layer(s) | 已移除 {1} 層上的 {0} 個項目 | 已移除 {1} 层上的 {0} 个项目 | {1} レイヤーから {0} 項目を取り除きました |
+| Saved {0} | 已儲存：{0} | 已保存：{0} | {0} を保存しました |
+| Select a saved character first. | 請先選取自訂角色。 | 请先选中自订角色。 | 先に保存したキャラを選んでください。 |
+| Select a text layer or enter text first. | 請選取文字圖層或先輸入文字。 | 请选中文本图层或先输入文字。 | テキストレイヤーを選ぶか、文字を入力してください。 |
+| Select a text layer. | 請選取文字圖層。 | 请选中文本图层。 | テキストレイヤーを選んでください。 |
+| Select the lines to turn back into speech. | 請選取要改回講話的圖層。 | 请选中要改回讲话的图层。 | しゃべりに戻すレイヤーを選んでください。 |
+| Speaking again: {0} layer(s) | 已改回講話 {0} 層 | 已改回讲话 {0} 层 | {0} レイヤーをしゃべりに戻しました |
+| Speed set manually | 語速為手動設定 | 语速为手动设置 | はやさは手動設定です |
+| Sung note names on {0} layer(s) | 已唱唱名 {0} 層 | 已唱唱名 {0} 层 | 階名で {0} レイヤーを歌わせました |
+| Sung {0} layer(s) | 已唱出 {0} 層 | 已唱出 {0} 层 | {0} レイヤーを歌わせました |
+| Sung {0} line(s) — {1} | 已唱出 {0} 句 —— {1} | 已唱出 {0} 句 —— {1} | {0} 行を歌わせました —— {1} |
+| There are already {0} layer(s) here from an earlier MIDI import. ⏎  ⏎ Remove them first? No adds a second copy. | 這個合成裡已經有 {0} 層是之前匯入的。 ⏎  ⏎ 要先移除它們嗎？按「否」就直接再加一份。 | 这个合成里已经有 {0} 层是之前导入的。 ⏎  ⏎ 要先移除它们吗？按「否」就直接再加一份。 | このコンポには前回の MIDI 読み込みで作られたレイヤーが {0} 枚あります。 ⏎  ⏎ 先に取り除きますか？「いいえ」でもう一組追加します。 |
+| There are no Island Chatter lines here. | 這個合成裡沒有台詞圖層。 | 这个合成里没有台词图层。 | このコンポにセリフのレイヤーがありません。 |
+| There is no shared rig here. | 這個合成裡沒有共用控制器。 | 这个合成里没有共用控制器。 | このコンポには共有リグがありません。 |
+| Truncated: {0} | 已截斷：{0} | 已截断：{0} | 文字が切れました：{0} |
+| truncated: {0} | 被截斷：{0} | 被截断：{0} | 切れました：{0} |
+| {0} line(s) · {1} BPM | {0} 句・{1} BPM | {0} 句・{1} BPM | {0} 行・{1} BPM |
+| {0} long line(s) split | 太長的句子拆成 {0} 層 | 太长的句子拆成 {0} 层 | 長い行を {0} レイヤーに分けました |
+| {0} note(s) dropped from chords | 和弦捨去 {0} 個音 | 和弦舍去 {0} 个音 | 和音から {0} 音を省きました |
+| {0} note(s) with no syllable | {0} 個音符沒有字 | {0} 个音符没有字 | {0} 音に歌詞がありません |
+| {0} s/syllable   Speed {1} | {0} 秒／字   Speed {1} | {0} 秒／字   Speed {1} | {0} 秒／音   Speed {1} |
+| {0} syllable(s) with no note | {0} 個字沒有音符（用最後一個音唱完） | {0} 个字没有音符（用最后一个音唱完） | {0} 文字に音符がありません（最後の音でのばします） |
+| {0} track(s) · {1} BPM | {0} 軌・{1} BPM | {0} 轨・{1} BPM | {0} トラック・{1} BPM |
 <!-- END MESSAGES -->
 
 ---
@@ -660,7 +660,7 @@ Explaining *why* is usually more useful than saying no. These are decisions, not
 
 Some guidance specific to this product:
 
-- **Ask which language the panel is in, or give all three labels.** Users run this in
+- **Ask which language the panel is in, or give all four labels.** Users run this in
   Traditional Chinese, English or Japanese. The tables in
   [4.4](#44-exact-labels-in-all-three-languages) and [8](#8-every-message-the-panel-can-show)
   let you name a control in whichever one they are using.
@@ -682,13 +682,13 @@ Some guidance specific to this product:
 | Path | What is there |
 | --- | --- |
 | `AI-GUIDE.md` | This file. Usage, complete. |
-| `README.md` / `.en.md` / `.ja.md` | The same material for people, in three languages |
+| `README.md` / `.en.md` / `.ja.md` | The same material for people, in three languages (the panel adds 简体中文) |
 | `CHANGELOG.md` | Full version history, Traditional Chinese, written for users |
 | `CLAUDE.md` | Maintainer guide and design invariants. Not a usage reference |
 | `native/panel/IslandChatterNativePanel.jsx` | The panel — every label and message |
 | `native/src/dsp.cpp` | The synthesis engine, Mandarin readings, kana, English syllables |
 | `native/plugin/params.hpp` | The 279-parameter layout |
-| `docs/gumroad-listing.md` | Storefront copy in three languages |
+| `docs/gumroad-listing.md` | Storefront copy |
 | `LICENSE` | Source-available terms |
 
 ---

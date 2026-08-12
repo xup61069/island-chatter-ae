@@ -6,7 +6,7 @@
  * ExtendScript: this panel is ES3, and the whole of 2.0 is the message layer,
  * so the one place it has to be right is the only engine that will ever run it.
  *
- * It builds the real panel, switches it through all three languages, and reads
+ * It builds the real panel, switches it through all four languages, and reads
  * the labels and tooltips back off the live controls. A translation that only
  * works in a sandbox is not a translation.
  *
@@ -73,7 +73,7 @@
     }
     check(keys.length > 150, "the interface table has " + keys.length + " entries");
 
-    var languages = ["zh", "en", "ja"];
+    var languages = ["zh", "cn", "en", "ja"];
     var bothLanguages = [];
     var empty = [];
     var placeholderLeft = [];
@@ -104,6 +104,31 @@
     check(placeholderLeft.length === 0,
         "M() fills every placeholder" +
         (placeholderLeft.length ? " (" + placeholderLeft[0] + ")" : ""));
+
+    // 简体中文 is neither the table nor a plain split: it is made from the
+    // Traditional half, so a character that was never mapped would arrive here
+    // still Traditional and look almost right.
+    UI_LANGUAGE = "cn";
+    check(M("Applied to {0} layer(s) / 已套用 {0} 個圖層", 4) === "已应用 4 个图层",
+        "a counted message reads as Simplified (" +
+        M("Applied to {0} layer(s) / 已套用 {0} 個圖層", 4) + ")");
+    check(M("Import script / 匯入劇本") === "导入剧本",
+        "terminology is converted, not just the script (" +
+        M("Import script / 匯入劇本") + ")");
+    var stillTraditional = [];
+    for (index = 0; index < keys.length; index += 1) {
+        var simplified = T(keys[index]);
+        var scan;
+        for (scan = 0; scan < simplified.length; scan += 1) {
+            if (typeof IC_SIMPLIFIED_CHARS[simplified.charAt(scan)] === "string") {
+                stillTraditional.push(simplified);
+                break;
+            }
+        }
+    }
+    check(stillTraditional.length === 0,
+        "nothing in 简体中文 is still Traditional" +
+        (stillTraditional.length ? " (" + stillTraditional[0] + ")" : ""));
 
     // Japanese is a table lookup rather than a split, so check it took it.
     UI_LANGUAGE = "ja";
@@ -197,7 +222,7 @@
                     distinct += 1;
                 }
             }
-            check(distinct === 3,
+            check(distinct === languages.length,
                 "switching the language rewrites the tooltip (" + distinct + " distinct bodies)");
         }
 
@@ -214,18 +239,23 @@
         }
         check(applyButton !== null, "the Apply button is registered for translation");
         if (applyButton) {
-            UI_LANGUAGE = "en";
-            relabelUI();
-            var english = applyButton.text;
-            UI_LANGUAGE = "ja";
-            relabelUI();
-            var japanese = applyButton.text;
-            UI_LANGUAGE = "zh";
-            relabelUI();
-            var chinese = applyButton.text;
-            note("Apply reads: en=" + english + " | ja=" + japanese + " | zh=" + chinese);
-            check(english !== japanese && japanese !== chinese && english !== chinese,
-                "the Apply button says something different in each language");
+            var said = [];
+            var saidSeen = {};
+            var saidDistinct = 0;
+            var lang;
+            for (lang = 0; lang < languages.length; lang += 1) {
+                UI_LANGUAGE = languages[lang];
+                relabelUI();
+                said.push(languages[lang] + "=" + applyButton.text);
+                if (!saidSeen[applyButton.text]) {
+                    saidSeen[applyButton.text] = true;
+                    saidDistinct += 1;
+                }
+            }
+            note("Apply reads: " + said.join(" | "));
+            check(saidDistinct === languages.length,
+                "the Apply button says something different in each language (" +
+                saidDistinct + " distinct)");
         }
         check(localisedTips.length >= 25,
             "tip() registered " + localisedTips.length + " tooltips for translation");

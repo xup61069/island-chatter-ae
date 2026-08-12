@@ -3014,6 +3014,89 @@
     };
 
     /*
+     * 简体中文, derived from the Traditional half rather than written out again.
+     *
+     * 163 messages and 29 tooltips duplicated by hand would drift the first
+     * time one of them was reworded, and every future message would need two
+     * Chinese versions or silently have none. The difference is mechanical, so
+     * it is done mechanically — and `npm test` fails if a new string uses a
+     * character this has never seen.
+     *
+     * Two passes, and the order matters. Converting character by character
+     * alone gives Simplified characters spelling *Taiwan* terminology: 算圖佇列
+     * comes out as 算图伫列, which nobody in mainland China says. The terms go
+     * first and fix the vocabulary; the characters then fix the script.
+     *
+     * Longest term first, because 專案檔 has to become 项目文件 before 專案
+     * becomes 项目 and before the bare 檔 becomes 文件.
+     */
+    var IC_SIMPLIFIED_TERMS = [
+        ["關鍵影格", "关键帧"], ["文字圖層", "文本图层"],
+        ["專案檔", "项目文件"], ["資料夾", "文件夹"], ["空物件", "空对象"],
+        ["選取器", "选择器"], ["文字框", "文本框"], ["轉檔", "导出"],
+        ["影格", "帧"], ["佇列", "队列"], ["算圖", "渲染"], ["專案", "项目"],
+        ["檔案", "文件"], ["滑桿", "滑块"], ["音訊", "音频"], ["匯入", "导入"],
+        ["貼進", "粘贴到"], ["字元", "字符"], ["介面", "界面"], ["選取", "选中"],
+        ["設定", "设置"], ["預設", "默认"], ["儲存", "保存"], ["套用", "应用"],
+        ["嘴型", "口型"], ["建立", "创建"], ["檔", "文件"]
+    ];
+
+    /*
+     * Every Han character the panel's Chinese text uses whose Simplified form
+     * differs. Traditional to Simplified is the safe direction: it is
+     * many-to-one, so 發 and 髮 both give 发 and no choice has to be made.
+     *
+     * The one character here that is genuinely context-dependent is 著: it is
+     * 着 as a particle (連著, 跟著, 接著, which is every use in this panel) and
+     * stays 著 in 著名 and 顯著. If a message ever needs that second sense, it
+     * needs a term-table entry rather than this map.
+     */
+    var IC_SIMPLIFIED_CHARS = {
+        "並": "并", "併": "并", "佇": "伫", "來": "来", "個": "个", "們": "们",
+        "償": "偿", "儲": "储", "內": "内", "兩": "两", "刪": "删", "別": "别",
+        "剛": "刚", "劃": "划", "劇": "剧", "動": "动", "匯": "汇", "問": "问",
+        "啟": "启", "嗎": "吗", "唸": "念", "圍": "围", "圖": "图", "夠": "够",
+        "夾": "夹", "專": "专", "對": "对", "層": "层", "屬": "属", "幫": "帮",
+        "幾": "几", "張": "张", "彈": "弹", "後": "后", "從": "从", "愛": "爱",
+        "捨": "舍", "換": "换", "擇": "择", "敗": "败", "數": "数", "斷": "断",
+        "於": "于", "時": "时", "會": "会", "東": "东", "桿": "杆", "標": "标",
+        "樣": "样", "機": "机", "檔": "档", "氣": "气", "決": "决", "沒": "没",
+        "準": "准", "溫": "温", "漢": "汉", "潑": "泼", "為": "为", "無": "无",
+        "現": "现", "產": "产", "畫": "画", "當": "当", "疊": "叠", "發": "发",
+        "種": "种", "節": "节", "範": "范", "細": "细", "組": "组", "結": "结",
+        "綁": "绑", "經": "经", "維": "维", "線": "线", "編": "编", "縮": "缩",
+        "續": "续", "聲": "声", "聽": "听", "與": "与", "舊": "旧", "著": "着",
+        "蓋": "盖", "處": "处", "號": "号", "補": "补", "裝": "装", "裡": "里",
+        "見": "见", "規": "规", "訂": "订", "訊": "讯", "記": "记", "設": "设",
+        "詞": "词", "話": "话", "該": "该", "語": "语", "誤": "误", "說": "说",
+        "調": "调", "請": "请", "講": "讲", "讀": "读", "變": "变", "讓": "让",
+        "貼": "贴", "資": "资", "軌": "轨", "輯": "辑", "輸": "输", "轉": "转",
+        "這": "这", "連": "连", "進": "进", "過": "过", "遠": "远", "適": "适",
+        "選": "选", "還": "还", "邊": "边", "錯": "错", "鍵": "键", "鎖": "锁",
+        "長": "长", "閉": "闭", "開": "开", "間": "间", "關": "关", "隊": "队",
+        "隨": "随", "險": "险", "離": "离", "電": "电", "靜": "静", "響": "响",
+        "項": "项", "預": "预", "頓": "顿", "題": "题", "顫": "颤", "顯": "显",
+        "風": "风", "飄": "飘", "餘": "余", "馬": "马", "驅": "驱", "鳴": "鸣",
+        "麼": "么", "點": "点", "齊": "齐", "寫": "写"
+    };
+
+    function simplify(text) {
+        var index;
+        for (index = 0; index < IC_SIMPLIFIED_TERMS.length; index += 1) {
+            text = text.split(IC_SIMPLIFIED_TERMS[index][0])
+                .join(IC_SIMPLIFIED_TERMS[index][1]);
+        }
+        var out = "";
+        for (index = 0; index < text.length; index += 1) {
+            var character = text.charAt(index);
+            var mapped = IC_SIMPLIFIED_CHARS[character];
+            // typeof, because every object inherits names like "constructor".
+            out += (typeof mapped === "string") ? mapped : character;
+        }
+        return out;
+    }
+
+    /*
      * Tooltips. Not "English / 中文" pairs like every label, because these are
      * paragraphs rather than names: the Chinese ones explain why a control
      * exists and what it costs, and squeezing three of those into one key
@@ -3413,11 +3496,17 @@
             if (typeof translated === "string") { return translated; }
         }
         var split = text.indexOf(" / ");
-        if (split < 0) { return text; }
+        // Nothing to split: a bare name like "IC Mouth" is the same in every
+        // language, and simplify() leaves anything without Han characters alone.
+        if (split < 0) { return UI_LANGUAGE === "cn" ? simplify(text) : text; }
+        if (UI_LANGUAGE === "zh") { return text.substring(split + 3); }
+        // "cn" is 简体中文, made from the same Chinese half rather than kept as
+        // a fourth set of strings. "zh" means Traditional throughout this file.
+        if (UI_LANGUAGE === "cn") { return simplify(text.substring(split + 3)); }
         // Japanese falls back to the English half rather than the Chinese one:
         // a reader who chose 日本語 is more likely to get something from
         // "Formant" than from "共鳴".
-        return UI_LANGUAGE === "zh" ? text.substring(split + 3) : text.substring(0, split);
+        return text.substring(0, split);
     }
 
     /*
@@ -3457,6 +3546,7 @@
         if (!entry || typeof entry.en !== "string") { return ""; }
         var body = entry.en;
         if (UI_LANGUAGE === "zh" && entry.zh) { body = entry.zh; }
+        if (UI_LANGUAGE === "cn" && entry.zh) { body = simplify(entry.zh); }
         if (UI_LANGUAGE === "ja" && entry.ja) { body = entry.ja; }
         return fill(body, [first]);
     }
@@ -3583,9 +3673,11 @@
         var languageRow = panel.add("group");
         languageRow.orientation = "row";
         languageRow.alignment = ["left", "top"];
-        var languageCodes = ["zh", "en", "ja"];
+        // Stored by code, never by index, so adding one here does not disturb
+        // anybody's saved preference.
+        var languageCodes = ["zh", "cn", "en", "ja"];
         var languagePicker = languageRow.add("dropdownlist", undefined,
-            ["繁體中文", "English", "日本語"]);
+            ["繁體中文", "简体中文", "English", "日本語"]);
         tip(languagePicker, "language");
         panel.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
         var textInput = panel.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });

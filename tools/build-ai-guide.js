@@ -44,16 +44,27 @@ const tableStart = source.indexOf("var IC_JAPANESE_UI = {");
 const tableEnd = source.indexOf("\n    };", tableStart) + 7;
 const context = { String };
 vm.createContext(context);
+function takeVariable(name) {
+  const start = source.indexOf(`var ${name} =`);
+  if (start < 0) throw new Error(`The panel has no ${name}`);
+  return source.slice(start, source.indexOf(";\n", start) + 1);
+}
+
 vm.runInContext([
   'var UI_LANGUAGE = "zh";',
   source.slice(tableStart, tableEnd),
+  takeVariable("IC_SIMPLIFIED_TERMS"),
+  takeVariable("IC_SIMPLIFIED_CHARS"),
+  takeFunction("simplify"),
   takeFunction("T"),
   takeFunction("fill"),
   takeFunction("M"),
 ].join("\n"), context);
 
+const LANGUAGES = ["en", "zh", "cn", "ja"];
+
 function inEveryLanguage(literal) {
-  return ["en", "zh", "ja"].map((language) => {
+  return LANGUAGES.map((language) => {
     context.UI_LANGUAGE = language;
     return vm.runInContext(`T(${JSON.stringify(literal)})`, context);
   });
@@ -107,8 +118,12 @@ function cell(text) {
 function table(literals) {
   const rows = literals.map(inEveryLanguage)
     .sort((first, second) => (first[0] < second[0] ? -1 : first[0] > second[0] ? 1 : 0))
-    .map((three) => `| ${cell(three[0])} | ${cell(three[1])} | ${cell(three[2])} |`);
-  return ["| English | 繁體中文 | 日本語 |", "| --- | --- | --- |", ...rows].join("\n");
+    .map((shown) => `| ${shown.map(cell).join(" | ")} |`);
+  return [
+    "| English | 繁體中文 | 简体中文 | 日本語 |",
+    "| --- | --- | --- | --- |",
+    ...rows,
+  ].join("\n");
 }
 
 const blocks = {
@@ -117,7 +132,8 @@ const blocks = {
   COUNTS: [
     `- Controls and menu entries with a label: **${labels.length}**`,
     `- Distinct messages the panel can print: **${messages.length}**`,
-    "- Languages: **3** (繁體中文, English, 日本語), switched by the dropdown at the top left",
+    `- Languages: **${LANGUAGES.length}** (繁體中文, 简体中文, English, 日本語), ` +
+      "switched by the dropdown at the top left",
   ].join("\n"),
 };
 

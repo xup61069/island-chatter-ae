@@ -25,7 +25,7 @@
   固定隨機種子，同樣的設定永遠是同樣的聲音。
 - 中文 44,355 個漢字讀音，支援注音、拼音與行內讀音覆寫。
 - 一鍵轉成音訊，播放零運算，專案給沒裝外掛的人也聽得到。
-- **面板整個介面有繁體中文、English、日本語三種語言**——按鈕、狀態訊息、警告視窗、
+- **面板整個介面有繁體中文、简体中文、English、日本語四種語言**——按鈕、狀態訊息、警告視窗、
   滑鼠停著跳出來的說明，全部都翻。
 
 **需要 Windows 10／11 x64，以及 After Effects 2025 或 2026。沒有 macOS 版。**
@@ -56,7 +56,7 @@ Built for Chinese first; it speaks Japanese and English too.
 - 44,355 Chinese readings, with Pinyin, Bopomofo and inline pronunciation overrides.
 - One-click bake to audio: playback costs nothing and the project plays for someone without the
   plug-in.
-- **The panel is in 繁體中文, English and 日本語** — labels, status messages, alerts and every
+- **The panel is in 繁體中文, 简体中文, English and 日本語** — labels, status messages, alerts and every
   tooltip, not just the buttons.
 
 **Requires Windows 10/11 x64 and After Effects 2025 or 2026. There is no macOS build.**
@@ -85,7 +85,7 @@ After Effects のテキストレイヤーにそのままの声を持たせます
   シードを固定すれば同じ設定から必ず同じ声が出ます。
 - 中国語は 44,355 字の読みに対応。注音・ピンイン・行内での読み指定も可能。
 - ワンクリックで音声ファイル化。再生は無負荷で、プラグインの無い相手にも聞こえます。
-- **パネルは 繁體中文・English・日本語 の三言語。** ボタンだけでなく、ステータス表示も
+- **パネルは 繁體中文・简体中文・English・日本語 の四言語。** ボタンだけでなく、ステータス表示も
   警告も、マウスを乗せると出る説明もすべて日本語になります。
 
 **Windows 10／11 x64 と After Effects 2025 または 2026 が必要です。macOS 版はありません。**
@@ -96,4 +96,4 @@ Source-available: read the code, build it, use it commercially. Redistributing t
 build is not permitted. An original procedural synthesizer containing no audio assets and no
 Nintendo or *Animal Crossing* audio; not affiliated with Adobe or Nintendo.
 
-Version 2.0.0
+Version 2.1.0

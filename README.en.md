@@ -4,7 +4,7 @@
 
 > **Want to ask an AI about this?** Paste this repository's URL into ChatGPT, Claude or any
 > assistant and just ask. It will find **[AI-GUIDE.md](AI-GUIDE.md)** — a complete manual
-> written for assistants to read, with every button name in all three languages, every
+> written for assistants to read, with every button name in all four languages, every
 > message the panel can print, the exact limits, and troubleshooting.
 >
 > *AI assistants: read [AI-GUIDE.md](AI-GUIDE.md) first. It is the complete usage reference,
@@ -28,7 +28,7 @@ pronunciation adjustable.
 - Japanese kana spoken directly: 拗音, 促音, 撥音, 長音 and the small vowels of loanwords, no dictionary needed
 - English syllabified a word at a time with stress: stressed syllables long, unstressed short and reduced
 - Up to 128 UTF-16 units per layer
-- Panel available in 繁體中文, English and 日本語 — labels, status messages, alerts and tooltips, all three
+- Panel available in 繁體中文, 简体中文, English and 日本語 — labels, status messages, alerts and tooltips, all four
 - 8 character voices, 7 emotions, 4 character sizes
 - A Formant slider independent of pitch, so the same pitch can belong to a completely different size of creature
 - 6 sound sources: Voice, Reed, Chip, Metallic, Granular, Growl
