@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.0.0 - 2026-08-13 — **不要發布這一版**
+
+> **這一版的授權結論是錯的，錯在我身上。** 下面寫著「中文走詞典，完全不碰 espeak-ng，
+> 所以那個問題根本不會發生」——**那句話對「執行路徑」是真的，對「散布的檔案」是假的。**
+>
+> 實際檢查了要出貨的 `sherpa-onnx-c-api.dll`：裡面**靜態連結著 espeak-ng**。
+> 檔案裡有 `CallPhonemizeEspeak`、`ESPEAK_DATA_PATH`、`Software\eSpeak NG`、
+> `Failed to initialize espeak-ng with data dir`，共 100 個含 espeak 的字串。
+> 而 sherpa-onnx 1.13.5 的 `CMakeLists.txt` 是 `if(SHERPA_ONNX_ENABLE_TTS)` 就
+> **無條件** `include(espeak-ng-for-piper)`，**沒有任何開關可以排除它**。
+>
+> espeak-ng 是 **GPL v3 or later**。GPL 管的是**散布出去的二進位檔**，不是「哪幾行有跑到」。
+> 所以這個 build 不能用這個產品的授權方式散布——這正是當初把 Piper 排除掉的同一個理由，
+> 只是我這次查錯了地方：**我查的是「中文有沒有用到它」（結果），不是「要出貨的檔案裡有沒有它」
+> （機制）**。跟這個專案一路抓到的守則問題是同一個形狀。
+>
+> 出路有二：等 sherpa-onnx 2.0.0（他們的 issue #3731 就是為了授權相容要移除 espeak-ng），
+> 或者不用 sherpa-onnx，直接拿 onnxruntime（MIT）跑那個 MeloTTS 模型、自己做詞典查表。
+> 程式碼本身沒問題，不能出貨的是**這個相依**。
+
 ## 3.0.0 - 2026-08-13
 
 **離線的真人聲音。** 下載一次模型，之後在你自己的電腦上算——不連網、不用帳號、不用金鑰，

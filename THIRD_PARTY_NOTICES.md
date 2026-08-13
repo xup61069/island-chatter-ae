@@ -92,7 +92,28 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 Source: https://github.com/myshell-ai/MeloTTS
 Model: https://huggingface.co/myshell-ai/MeloTTS-Chinese
 
-**Not eSpeak NG, and not Piper.** Piper moved to GPL-3.0 in October 2025 and its
-earlier releases linked eSpeak NG, which is GPL v3 or later. Either would place
-this product under the GPL. The Chinese pipeline used here is lexicon-based and
-links neither.
+## eSpeak NG — **this is why the 3.0.0 build must not be published**
+
+An earlier version of this file claimed the offline voice links neither Piper
+nor eSpeak NG. **That was wrong**, and the error is worth writing down because
+it is a classic one: it was checked against what the Chinese pipeline *executes*
+rather than against what the shipped file *contains*.
+
+`sherpa-onnx-c-api.dll` as published by the sherpa-onnx project statically links
+eSpeak NG. The evidence is in the binary — `CallPhonemizeEspeak`,
+`ESPEAK_DATA_PATH`, `Software\eSpeak NG`, `Failed to initialize espeak-ng with
+data dir`, a hundred eSpeak-bearing strings in all — and in the upstream build,
+where `if(SHERPA_ONNX_ENABLE_TTS)` unconditionally pulls in espeak-ng with no
+option to exclude it.
+
+eSpeak NG is **GPL v3 or later**. The GPL attaches to the binary that is
+distributed, not to the code paths that happen to run, so shipping that DLL in a
+product whose compiled builds are sold and may not be redistributed is not
+possible. This is the same reason Piper was rejected; it was simply missed one
+level down.
+
+Two ways out, neither taken yet: wait for sherpa-onnx 2.0.0, which removes
+espeak-ng specifically to restore Apache-2.0 compatibility (their issue #3731),
+or drop sherpa-onnx and drive the MeloTTS model directly with ONNX Runtime
+(MIT), doing the lexicon lookup in this project's own code. The offline voice's
+own source carries no GPL; the dependency does.
