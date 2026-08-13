@@ -16,6 +16,12 @@
   的 API 金鑰，按一次「雲端語音」，那一句的文字會送到你選的那家、回傳一個音檔。
   **文字會離開這台電腦，帳單也是你的。** 按下去之前會先跳出「這次會送出幾句、幾個字、
   送去哪裡」讓你確認；沒按就什麼都不會送。同樣的文字和設定不會重送第二次。
+- **也可以下載一個神經模型，在自己的電腦上跑。** 按一次「下載模型」抓 177 MB，之後那個聲音
+  不連網、不用帳號、不用金鑰，打的字一個都不會離開這台機器。它讀的是**跟內建聲音同一套**
+  中文讀音——詞組、變調、注音、`[重|chong2]` 這種發音覆寫都算數。
+  **要先知道：那是大陸口音的普通話女聲。** 可商用授權的中文模型只有這一個，台灣國語的離線模型
+  不存在。要台灣國語請用內建的聲音，或雲端 Azure 的 zh-TW 音色。
+- **試聽不用先套到圖層上。** 調完音色按一下就聽得到，專案不會多出任何東西。
 - **音檔可以直接轉成口型。** 真人配音、自己錄的、雲端回來的都一樣：引擎讀出裡面的音節，
   寫出跟講話的句子一模一樣的控制器，嘴型切換、逐字標記、頭部晃動全部照舊。
 - **匯入 MIDI，角色就會唱歌。** 貼歌詞、選一軌，一個字一個音，落在 MIDI 自己的時間上。
@@ -55,6 +61,15 @@ you hear. Built for Chinese first; it speaks Japanese and English too.
   bill is yours.** Before anything is sent you are shown how many lines, how many characters
   and which provider; nothing goes anywhere until you confirm. The same text with the same
   settings is never paid for twice.
+- **Or download a neural model and run it on your own machine.** One press fetches 177 MB;
+  after that the voice needs no network, no account and no key, and nothing you type leaves the
+  computer. It reads Chinese with **the same reader the built-in voice uses**, so phrases, tone
+  sandhi, Zhuyin and inline `[重|chong2]` pronunciation overrides all count.
+  **Know before you fetch it: it is a woman speaking Mandarin with a mainland accent.** It is
+  the only Chinese model with a licence that allows this, and no Taiwanese-accented offline
+  model exists. For Taiwan Mandarin, use the built-in voice or Azure's zh-TW voice.
+- **Hear a voice before you apply it.** Preview plays the line straight from the panel and
+  leaves nothing behind in the project.
 - **Any recording can drive the mouth.** A real voice actor, something you recorded yourself,
   or the file a cloud model just sent back — the engine finds the syllables in it and writes
   exactly the controls a spoken line writes, so mouth shapes, per-syllable markers and the head
@@ -107,6 +122,13 @@ After Effects のテキストレイヤーにそのままの声を持たせます
   1 文字が 1 音を取り、MIDI 自身の時間に並びます。長い音は伸び、声調はメロディーに譲り、
   ビブラートがふくらみます。歌詞の `-` で同じ音節を次の音まで伸ばせます。
   歌詞を与えなければ階名（ドレミ）で歌います。ベロシティも反映されます。
+- **ニューラルモデルをダウンロードして、自分のパソコンで動かすこともできます。** 一度 177 MB を
+  取得すれば、以後はネットワークもアカウントもキーも不要で、入力した文字がこのパソコンの外に
+  出ることはありません。中国語の読みは**内蔵音声とまったく同じ**仕組みで、熟語・声調変化・
+  注音・`[重|chong2]` の読み指定がそのまま効きます。
+  **取得前にご確認を：声は大陸なまりの標準中国語を話す女性です。** 商用利用できるライセンスの
+  中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。
+- **適用する前に試聴できます。** パネルからそのまま再生され、プロジェクトには何も残りません。
 - **台本をまるごと貼れば 1 行が 1 レイヤー**になり、声が乗って順番に並びます。
   「ミミ：おはよう」と書けば名前は読まれず、その行がそのキャラに割り当てられます。
 - **間隔は音符の長さで指定。** 1 が 4 分音符、0.5 が 8 分音符。どの行も拍に乗ります。
@@ -132,4 +154,4 @@ build is not permitted. An original procedural synthesizer containing no audio a
 Nintendo or *Animal Crossing* audio; not affiliated with Adobe, Nintendo, OpenAI, ElevenLabs
 or Microsoft.
 
-Version 2.5.0
+Version 3.1.0

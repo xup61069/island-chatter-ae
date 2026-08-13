@@ -109,6 +109,17 @@ for (const [label, filePath, pattern] of [
     new RegExp(`\\$IslandChatterVersion = "${version.replace(/\./g, "\\.")}"`)],
   ["CHANGELOG.md", path.join(root, "CHANGELOG.md"),
     new RegExp(`^## ${version.replace(/\./g, "\\.")} `, "m")],
+  /*
+   * CLAUDE.md's product baseline, which was stale from the moment 2.5.0
+   * shipped.
+   *
+   * It is not a build input, which is exactly why it was missed: nothing broke,
+   * and the one file a maintainer or an assistant reads first spent a release
+   * naming the wrong version. It is on this list now for the same reason
+   * everything else is.
+   */
+  ["CLAUDE.md", path.join(root, "CLAUDE.md"),
+    new RegExp(`^- Current public release: \`v${version.replace(/\./g, "\\.")}\``, "m")],
 ]) {
   if (!pattern.test(fs.readFileSync(filePath, "utf8"))) {
     throw new Error(`${label} is not synchronized with package.json version ${version}`);
@@ -888,6 +899,7 @@ for (const bpm of [60, 90, 120, 174]) {
    */
   const identicalInBothScripts = new Set(Array.from(
     "一三上下不中之也了二五些亮人什介仍代以件任份伴但位低何作你例依保修候倦值停" +
+    "普女授播特" +
     "像元先免入全八六共其再冒出分切列判到制前剛加勾十升半危即厚原去取受口句只叫" +
     "可台右吃合同名向否含吼和咪咬哪唱四回因固在地型填增多大太失奏套奶好始子字存" +
     "它安完定害容射小少尚就尾左巨差己已巴常幕平年序度延建式弦形影往很律得心怕性" +
@@ -1932,10 +1944,225 @@ const stepFor = (gapBeats, bpm) =>
   // Remove has to take the pointers with it, or the line stays a member of a rig
   // it no longer speaks for — and, since 2.4.0, keeps claiming its plan comes
   // from a recording that has just been deleted.
-  if (!/RIG_TRACK_NAMES\.concat\(\s*\[RIG_TARGET_NAME, BAKE_POINTER_NAME, CLOUD_VOICE_NAME\]\)/
+  if (!/RIG_TRACK_NAMES\.concat\(\s*\[RIG_TARGET_NAME, BAKE_POINTER_NAME, CLOUD_VOICE_NAME,\s*ORIGINAL_LENGTH_NAME\]\)/
     .test(takeFunction("removeFromLayer"))) {
     throw new Error(
       "removeFromLayer() must strip the shared-rig, bake and cloud-voice pointers as well");
+  }
+  /*
+   * Remove puts the length back, and that only works while one function fits a
+   * line to its plan.
+   *
+   * The record is written by fitLayerToPlan() the first time it changes an out
+   * point. A second place that assigns `outPoint` for a fit is a line whose
+   * original length was never written down, and the failure is invisible until
+   * somebody presses Remove weeks later and the layer stays at the engine's
+   * length with nothing on it to say why. So this counts the assignments rather
+   * than looking for a name: two are expected, and both are named here.
+   *
+   * `stripLiterals()` first, for the reason invariant 2 gives — the panel
+   * contains the word outPoint inside comments and inside a generated
+   * expression, and a raw count reads those too.
+   */
+  {
+    const code = stripLiterals(nativePanelSource);
+    const assignments = (code.match(/\.outPoint\s*=[^=]/g) || []).length;
+    if (assignments !== 3) {
+      throw new Error(
+        `The panel assigns .outPoint ${assignments} times; exactly three are expected — ` +
+        "fitLayerToPlan(), which records the length it is about to overwrite; " +
+        "removeFromLayer(), which puts that length back; and the rig layer being grown to " +
+        "cover its members. A fourth means a line can be fitted without its original " +
+        "length being written down, and Remove cannot put it back");
+    }
+    const fitting = takeFunction("fitLayerToPlan");
+    if (!/ensureSlider\(layer, ORIGINAL_LENGTH_NAME, layer\.outPoint - layer\.inPoint\)/
+      .test(fitting)) {
+      throw new Error(
+        "fitLayerToPlan() must record outPoint - inPoint before it overwrites the out point. " +
+        "An absolute out point restored after a Re-flow puts the layer back where it was, " +
+        "not back to the length it was");
+    }
+    if (!/if \(!findNamedEffect\(layer, ORIGINAL_LENGTH_NAME\)\)/.test(fitting)) {
+      throw new Error(
+        "fitLayerToPlan() must write the record only when there is none: recording it on " +
+        "every Apply saves the length the previous Apply left, which is the engine's, not " +
+        "the user's");
+    }
+    const removing = takeFunction("removeFromLayer");
+    if (!/originalLengthOf\(layer\)/.test(removing) ||
+      !/layer\.outPoint = Math\.min\(comp\.duration,/.test(removing)) {
+      throw new Error("removeFromLayer() must put the recorded length back");
+    }
+    if (removing.indexOf("originalLengthOf(layer)") > removing.indexOf("effect.remove()")) {
+      throw new Error(
+        "removeFromLayer() reads the recorded length after removing effects, and AE has " +
+        "invalidated that handle by then (invariant 3)");
+    }
+  }
+  /*
+   * A line records which character it was given, and the record outlives the rig.
+   *
+   * Three things can go wrong here and none of them is visible in a screenshot.
+   *
+   * The rig's name has to win when there is a rig, or a line bound to 咪咪 gets
+   * labelled with whatever timbre the panel was showing. The name has to be
+   * written on every Apply — including as an empty string — or a line that has
+   * been moved off a character keeps claiming to be it. And the built-in
+   * characters have to be stored by their English half: `"Mimi / 咪咪"` written
+   * as whichever side the panel is showing makes one line read as two different
+   * characters depending on the interface language, which is invariant 8i's
+   * lesson applied to something that outlives the session.
+   */
+  {
+    const applying = takeFunction("applyToTextLayer");
+    if (!/var character = rigLayer \? rigCharacterName\(rigLayer\) : trim\(settings\.character/
+      .test(applying)) {
+      throw new Error(
+        "applyToTextLayer() must label the line with the rig's character when it has one, " +
+        "and fall back to the panel's only when it does not");
+    }
+    /*
+     * Unconditional, and checked as unconditional.
+     *
+     * Written as a search for the assignment, this passed with the assignment
+     * wrapped in `if (character)` — which is exactly the bug it is for, because
+     * that leaves the previous character's name on a line that no longer has
+     * one. So the check is the *brace depth* the statement sits at: one, the
+     * function's own body, and anything deeper is inside something conditional.
+     * Literals are stripped first, or a brace inside a string counts.
+     */
+    const applyingCode = stripLiterals(applying);
+    const assignedAt = applyingCode.indexOf("effect.name = effectDisplayName(character, trim(");
+    if (assignedAt < 0) {
+      throw new Error(
+        "applyToTextLayer() must write the character on every Apply, including an empty " +
+        "one: a stale label is believed");
+    }
+    const upToAssignment = applyingCode.slice(0, assignedAt);
+    const openBraces = (upToAssignment.match(/{/g) || []).length;
+    const closeBraces = (upToAssignment.match(/}/g) || []).length;
+    if (openBraces - closeBraces !== 1) {
+      throw new Error(
+        "applyToTextLayer() writes the character inside a conditional. It has to be written " +
+        "on every Apply, including as an empty string, or a line that has been moved off a " +
+        "character keeps claiming to be it");
+    }
+    const naming = takeFunction("currentCharacterName");
+    if (!/Math\.abs\(values\[index\] - now\[index\]\) > 0\.0005/.test(naming)) {
+      throw new Error(
+        "currentCharacterName() must compare the sliders against the character it is about " +
+        "to name; a line labelled with a character it no longer sounds like is worse than " +
+        "an unlabelled one");
+    }
+    if (!/label\.substring\(0, split\)/.test(naming)) {
+      throw new Error(
+        "currentCharacterName() must store the English half of a built-in character's " +
+        "bilingual label, or the same line reads as a different character in another " +
+        "interface language");
+    }
+    // The round trip, on the two functions that are pure enough to run here.
+    const speaker = vm.createContext({ trim: (value) => String(value).replace(/^\s+|\s+$/g, "") });
+    vm.runInContext([
+      takeVariable("DISPLAY_NAME"), takeVariable("CHARACTER_MARK"),
+      takeVariable("OVERRIDE_MARK"),
+      takeFunction("effectDisplayName"), takeFunction("characterOfEffect"),
+    ].join("\n"), speaker);
+    const roundTrip = (character, override) => vm.runInContext(
+      `characterOfEffect({ name: effectDisplayName(${JSON.stringify(character)}, ${override}) })`,
+      speaker);
+    for (const [character, override] of [["Mimi", false], ["Mimi", true], ["", false],
+      ["", true], ["咪咪 · 二號", false], ["Captain [Override]", true]]) {
+      if (roundTrip(character, override) !== character) {
+        throw new Error(
+          `A character named "${character}" does not survive the effect name` +
+          (override ? " with a pronunciation override" : "") +
+          `; it came back as "${roundTrip(character, override)}"`);
+      }
+    }
+  }
+
+  /*
+   * Preview writes nothing, and the voice it plays is the voice a layer gets.
+   *
+   * Two separate promises, both easy to lose by accident.
+   *
+   * The first is the whole feature: trying eight timbres must not leave eight
+   * layers, eight imports and eight undo steps behind. So the render path is
+   * checked for the calls that would touch the project — an import is the one
+   * that matters most, because invariant 8g says releasing an imported file
+   * costs the undo history.
+   *
+   * The second is that `voiceArguments()` stays the only builder. If Preview
+   * ever grows its own copy, the panel plays one voice and the layer renders
+   * another, and nothing on screen says which is which.
+   */
+  {
+    const previewing = takeFunction("previewVoice");
+    for (const forbidden of ["importFile", "layers.add", "beginUndoGroup", "setValue",
+      "app.project", "app.purge"]) {
+      if (previewing.includes(forbidden)) {
+        throw new Error(
+          `Preview calls ${forbidden}. It must touch nothing in the project: that is the ` +
+          "difference between it and Bake");
+      }
+    }
+    if (!/voiceArguments\(settings\)/.test(previewing)) {
+      throw new Error("previewVoice() must build its command with voiceArguments()");
+    }
+    if (!/voiceArguments\(settingsFromEffect\(effect\)\)/
+      .test(takeFunction("engineVoiceArguments"))) {
+      throw new Error(
+        "engineVoiceArguments() must go through voiceArguments() too, or a layer and a " +
+        "preview can render different voices from the same settings");
+    }
+    /*
+     * The engine tool plays it, and the path goes over as hex.
+     *
+     * The first version of this asked PowerShell, which works from a prompt and
+     * does nothing at all from inside After Effects: every command returns an
+     * empty string in about 130 ms, having run nothing and written nothing.
+     * `native/tests/ae-preview-probe.jsx` is that measurement. Doing it in the
+     * tool also puts the path back on the hex route every other path takes
+     * (invariant 8e).
+     */
+    if (!/" --play"/.test(previewing)) {
+      throw new Error(
+        "previewVoice() must ask the engine tool to play the file. PowerShell does not run " +
+        "from inside After Effects, whatever it does from a prompt");
+    }
+    if (!/hexUtf8\(target\.fsName\)/.test(previewing)) {
+      throw new Error(
+        "previewVoice() must hand the path over as hex, or a user folder that is not ASCII " +
+        "arrives as ????? and the render fails");
+    }
+    // The comparison with both its sides, not the word "PLAYED": that word is
+    // also in the tool's own reply and in the paragraph above it, so a search
+    // for it matches happily with the check deleted. This one was written the
+    // wrong way first and caught by breaking it, which is the only reason it is
+    // written the right way now.
+    if (!/reply\.indexOf\("PLAYED"\) < 0/.test(previewing)) {
+      throw new Error(
+        "previewVoice() must check that playback actually happened: callSystem() reports no " +
+        "exit status, so a failure is indistinguishable from silence");
+    }
+    // And the tool has to be able to do it at all.
+    {
+      const baker = fs.readFileSync(
+        path.join(root, "native", "tools", "bake_cli.cpp"), "utf8");
+      if (!/PlaySoundW\(wide\.c_str\(\), nullptr,\s*SND_FILENAME \| SND_SYNC \| SND_NODEFAULT\)/
+        .test(baker)) {
+        throw new Error(
+          "island_chatter_bake --play must call PlaySound synchronously with SND_NODEFAULT; " +
+          "without it Windows substitutes its own ding for a file it cannot play, which " +
+          "reads as success");
+      }
+      if (!/file\.close\(\);\s*\n\s*std::cout << play_file\(output\)/.test(baker)) {
+        throw new Error(
+          "island_chatter_bake must close the WAV before playing it: PlaySound opens the " +
+          "file itself and cannot open one this process still holds open for writing");
+      }
+    }
   }
   // Removing effects invalidates every Property handle taken before it, so the
   // native effect must not be touched again after the rig block.
@@ -2037,7 +2264,10 @@ const stepFor = (gapBeats, bpm) =>
     throw new Error("retimeToPlan() clamps the refitted line to the composition instead of growing it");
   }
   const grewAt = retime.indexOf("comp.duration = layer.inPoint + plan.duration");
-  const fitAt = retime.indexOf("layer.outPoint =");
+  // The fit goes through fitLayerToPlan() now, and its last argument is what
+  // says whether the composition clamps this one. False here, and the check
+  // above is what proves the clamp did not come back by another route.
+  const fitAt = retime.indexOf("fitLayerToPlan(comp, layer, plan.duration, false)");
   if (grewAt < 0 || fitAt < 0 || grewAt > fitAt) {
     throw new Error("retimeToPlan() must make room before it refits the line");
   }
@@ -2250,35 +2480,48 @@ for (const releaseFile of [
 {
   const required = installerSource.match(/\$requiredFiles = @\(([\s\S]*?)\)/);
   if (!required) throw new Error("Install-IslandChatter.ps1 has no $requiredFiles list");
-  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe"]) {
+  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe",
+    "island_chatter_local.exe", "onnxruntime.dll"]) {
     if (!required[1].includes(tool)) {
       throw new Error(`Install-IslandChatter.ps1 does not require ${tool} to be present`);
     }
   }
   const uninstallerSource = fs.readFileSync(
     path.join(root, "installer", "Uninstall-IslandChatter.ps1"), "utf8");
-  // The uninstaller still removes the offline files: an earlier build may have
-  // installed them, and leaving 21 MB behind is not acceptable just because the
-  // current package no longer ships them.
+  // sherpa-onnx-c-api.dll is on this list although nothing installs it any more:
+  // a machine that ran a 3.0.0 development build has one, and 4 MB of somebody
+  // else's GPL-linked binary is exactly the file an uninstaller should take.
   for (const leftover of ["island_chatter_voice.exe", "island_chatter_local.exe",
     "sherpa-onnx-c-api.dll", "onnxruntime.dll"]) {
     if (!uninstallerSource.includes(leftover)) {
       throw new Error(`Uninstall-IslandChatter.ps1 leaves ${leftover} behind`);
     }
   }
-  // Apache-2.0 and MIT both require the notice to travel with the binary, and
-  // the model the user downloads carries its own. Naming them here means a
-  // dependency cannot be added to the package without the notice.
+  // MIT requires the notice to travel with the binary, and the model the user
+  // downloads carries its own. Naming them here means a dependency cannot be
+  // added to the package without the notice.
   const notices = fs.readFileSync(path.join(root, "THIRD_PARTY_NOTICES.md"), "utf8");
   for (const [what, marker] of [
-    ["sherpa-onnx (Apache-2.0)", "Apache License, Version 2.0"],
     ["ONNX Runtime", "Copyright (c) Microsoft Corporation"],
     ["the MeloTTS weights", "Copyright (c) 2024 MyShell.ai"],
-    ["why the offline voice is held back", "statically links eSpeak NG"],
+    ["why sherpa-onnx is not used", "eSpeak NG is **GPL v3 or later**"],
   ]) {
     if (!notices.includes(marker)) {
       throw new Error(`THIRD_PARTY_NOTICES.md does not carry the notice for ${what}`);
     }
+  }
+  /*
+   * And the notice for a library that is gone has to go with it.
+   *
+   * A stale Apache-2.0 notice for sherpa-onnx would say this package contains
+   * something it does not, which is its own kind of false statement about
+   * licensing — and it is the sentence somebody would read to decide whether
+   * the espeak-ng problem still applies here.
+   */
+  if (/^## sherpa-onnx$/m.test(notices)) {
+    throw new Error(
+      "THIRD_PARTY_NOTICES.md still carries a notice for sherpa-onnx, which this " +
+      "package no longer links");
   }
 }
 
@@ -2302,23 +2545,65 @@ for (const releaseFile of [
       "tools/package-release.ps1 must refuse to package without island_chatter_voice.exe, " +
       "the way it already refuses without the bake tool");
   }
-  // island_chatter_local only builds when ISLAND_CHATTER_SHERPA_ROOT is set, so
   /*
-   * The offline voice must NOT be packaged, which is the opposite of the rule
-   * above and needs saying out loud rather than being an absence.
+   * The offline voice ships, and the library that stopped it shipping must not.
    *
-   * island_chatter_local.exe links sherpa-onnx-c-api.dll, which statically
-   * links espeak-ng (GPL v3 or later). The GPL attaches to the file that is
-   * shipped, not to the code paths that run, so putting either in the ZIP would
-   * place a product that sells compiled builds under the GPL. The tool still
-   * builds when ISLAND_CHATTER_SHERPA_ROOT is set, for whoever picks this up
-   * when sherpa-onnx removes espeak-ng. It simply does not ship.
+   * `sherpa-onnx-c-api.dll` statically links espeak-ng (GPL v3 or later), with
+   * no build switch to exclude it, and the GPL attaches to the file that is
+   * distributed rather than to the code paths that run. Putting it in the ZIP
+   * would place a product that sells compiled builds under the GPL. That is
+   * what held 3.0.0 back; the way out was to drop the dependency, not to keep
+   * the file out of one package by hand.
+   *
+   * This is a *name* check, and a name check is the weak kind (see "Writing a
+   * guard"). It is here anyway because the failure it guards is somebody adding
+   * a staging line back, which is exactly what a name check does see. The real
+   * protection is that nothing links it any more, which
+   * `native/CMakeLists.txt` pins below.
    */
-  for (const gpl of ["island_chatter_local.exe", "sherpa-onnx-c-api.dll"]) {
-    if (new RegExp(`Join-Path \\$resources "${gpl.replace(/\./g, "\\.")}"`).test(packager)) {
+  if (/Join-Path \$resources "sherpa-onnx-c-api\.dll"/.test(packager)) {
+    throw new Error(
+      "tools/package-release.ps1 stages sherpa-onnx-c-api.dll, which hands the user a " +
+      "binary linking espeak-ng (GPL v3+). See THIRD_PARTY_NOTICES.md.");
+  }
+  {
+    const cmake = fs.readFileSync(path.join(root, "native", "CMakeLists.txt"), "utf8");
+    // Comments stripped first, because the comment beside the target is where
+    // the reason lives and deleting it to satisfy a search would take the
+    // explanation with it. What must not come back is a build line.
+    const cmakeBuild = cmake.split(/\r?\n/).filter((line) => !/^\s*#/.test(line)).join("\n");
+    if (/sherpa/i.test(cmakeBuild)) {
       throw new Error(
-        `tools/package-release.ps1 stages ${gpl}, which hands the user a binary linking ` +
-        "espeak-ng (GPL v3+). See THIRD_PARTY_NOTICES.md.");
+        "native/CMakeLists.txt still mentions sherpa-onnx. The offline voice runs on ONNX " +
+        "Runtime alone; anything that links sherpa again brings espeak-ng back into the ZIP");
+    }
+    if (!/target_link_libraries\(island_chatter_local[\s\S]{0,400}onnxruntime\.lib/.test(cmake)) {
+      throw new Error(
+        "native/CMakeLists.txt must link island_chatter_local against onnxruntime.lib");
+    }
+  }
+  /*
+   * And the packager has to look inside the binaries, not at their names.
+   *
+   * 3.0.0 was built, packaged and installed before anybody read the DLL it
+   * shipped; every check up to that point had been about what the code calls.
+   * The staged files are searched for the marker now, which is the only check
+   * that would have caught it — so this pins the search itself, with the
+   * property being read rather than the word "espeak", which also appears in
+   * the paragraph explaining it.
+   */
+  if (!/\[Text\.Encoding\]::ASCII\.GetString\(\[IO\.File\]::ReadAllBytes\(\$binary\.FullName\)\)/
+    .test(packager) || !/\$text\.Contains\(\$marker\)/.test(packager)) {
+    throw new Error(
+      "tools/package-release.ps1 must search the staged binaries for espeak-ng before it " +
+      "zips them. Reading about a dependency is what let 3.0.0 be built");
+  }
+  // And the offline tool has to be *in* the package, with the one DLL it needs
+  // beside it. A plug-in whose local voice appears in the menu and then cannot
+  // start is worse than one that never offers it.
+  for (const shipped of ["island_chatter_local.exe", "onnxruntime.dll"]) {
+    if (!new RegExp(`Join-Path \\$resources "${shipped.replace(/\./g, "\\.")}"`).test(packager)) {
+      throw new Error(`tools/package-release.ps1 does not stage ${shipped}`);
     }
   }
   // Both tools have to come out of the same build directory as the .aex, or a

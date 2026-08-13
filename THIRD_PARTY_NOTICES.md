@@ -20,28 +20,11 @@ Source: https://www.unicode.org/Public/18.0.0/ucd/Unihan.zip
 
 License: https://www.unicode.org/license.txt
 
-## sherpa-onnx
-
-`island_chatter_local.exe` links `sherpa-onnx-c-api.dll`, which ships beside it.
-It is used only by the optional offline voice; nothing else in the product
-depends on it, and it never runs unless that voice is chosen.
-
-Copyright (c) 2022-2025 Xiaomi Corporation
-
-Licensed under the Apache License, Version 2.0. You may obtain a copy of the
-License at http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software distributed
-under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied. See the License for the
-specific language governing permissions and limitations under the License.
-
-Source: https://github.com/k2-fsa/sherpa-onnx
-
 ## ONNX Runtime
 
-`onnxruntime.dll` ships beside `island_chatter_local.exe` and is what actually
-evaluates the offline voice model.
+`onnxruntime.dll` ships beside `island_chatter_local.exe` and is what evaluates
+the offline voice model. It is the only library the offline voice links, and it
+never runs unless that voice is chosen.
 
 Copyright (c) Microsoft Corporation
 
@@ -92,15 +75,18 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 Source: https://github.com/myshell-ai/MeloTTS
 Model: https://huggingface.co/myshell-ai/MeloTTS-Chinese
 
-## eSpeak NG — **this is why the 3.0.0 build must not be published**
+## eSpeak NG — **why sherpa-onnx is not used, and is not in this package**
 
-An earlier version of this file claimed the offline voice links neither Piper
-nor eSpeak NG. **That was wrong**, and the error is worth writing down because
-it is a classic one: it was checked against what the Chinese pipeline *executes*
-rather than against what the shipped file *contains*.
+This is a record of a mistake, kept because the shape of it is more useful than
+the conclusion.
 
-`sherpa-onnx-c-api.dll` as published by the sherpa-onnx project statically links eSpeak NG.
-It is therefore not in this package, and neither is `island_chatter_local.exe`. The evidence is in the binary — `CallPhonemizeEspeak`,
+The offline voice was written against sherpa-onnx (Apache-2.0) and this file
+once said the licence chain was clean, on the grounds that the Chinese pipeline
+uses a lexicon and never calls eSpeak NG. **That was wrong.** It checked what
+the code *executes* instead of what the shipped file *contains*.
+
+`sherpa-onnx-c-api.dll` as published by the sherpa-onnx project statically links
+eSpeak NG. The evidence is in the binary — `CallPhonemizeEspeak`,
 `ESPEAK_DATA_PATH`, `Software\eSpeak NG`, `Failed to initialize espeak-ng with
 data dir`, a hundred eSpeak-bearing strings in all — and in the upstream build,
 where `if(SHERPA_ONNX_ENABLE_TTS)` unconditionally pulls in espeak-ng with no
@@ -110,10 +96,9 @@ eSpeak NG is **GPL v3 or later**. The GPL attaches to the binary that is
 distributed, not to the code paths that happen to run, so shipping that DLL in a
 product whose compiled builds are sold and may not be redistributed is not
 possible. This is the same reason Piper was rejected; it was simply missed one
-level down.
+level down. That is what stopped 3.0.0 being published.
 
-Two ways out, neither taken yet: wait for sherpa-onnx 2.0.0, which removes
-espeak-ng specifically to restore Apache-2.0 compatibility (their issue #3731),
-or drop sherpa-onnx and drive the MeloTTS model directly with ONNX Runtime
-(MIT), doing the lexicon lookup in this project's own code. The offline voice's
-own source carries no GPL; the dependency does.
+The fix was to drop the dependency rather than to keep one file out of one ZIP:
+`island_chatter_local.exe` now drives the same MeloTTS model with ONNX Runtime
+(MIT) directly, and reads the text with this product's own engine. Nothing in
+this package links sherpa-onnx, and `npm test` fails if anything starts to.

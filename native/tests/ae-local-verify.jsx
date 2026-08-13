@@ -60,20 +60,20 @@
         say("panel body evaluated");
 
         /*
-         * The tool being absent is the normal state, not a failure.
+         * The tool ships now, so its absence is a real finding — but not a
+         * failure this suite can distinguish from "you are running against a
+         * development build". It is reported as a SKIP that says which, rather
+         * than as a FAIL that might be about the wrong thing.
          *
-         * The offline voice is finished but held back — the sherpa-onnx build
-         * links espeak-ng (GPL v3+) and the only permissively licensed Chinese
-         * model is mainland-accented — so released packages do not carry it.
-         * This suite is for whoever configures with ISLAND_CHATTER_SHERPA_ROOT
-         * and installs the result. Reporting FAIL when it is simply not there
-         * would cry wolf on every ordinary run.
+         * The model is a separate matter: it is 177 MB the user fetches, so a
+         * machine that has never pressed Get model has the tool and no model,
+         * and that is the state the second SKIP below covers.
          */
         var local = toolFile("island_chatter_local.exe");
         if (!local) {
-            say("SKIP  island_chatter_local.exe is not installed, which is expected:");
-            say("      the offline voice is built only with ISLAND_CHATTER_SHERPA_ROOT set");
-            say("      and is not shipped. See CHANGELOG.md for the two reasons.");
+            say("SKIP  island_chatter_local.exe is not beside the plug-in.");
+            say("      A released package installs it. A development tree needs");
+            say("      -DISLAND_CHATTER_ONNXRUNTIME_ROOT set, then a reinstall.");
             skipped = true;
             return;
         }

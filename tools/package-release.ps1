@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Version = "2.5.0",
+    [string]$Version = "3.1.0",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = ""
 )
@@ -70,22 +70,36 @@ $resolvedVoice = Join-Path $buildRelease "island_chatter_voice.exe"
 if (-not (Test-Path -LiteralPath $resolvedVoice -PathType Leaf)) {
     throw "Build island_chatter_voice first. Missing: $resolvedVoice"
 }
-# The offline voice is deliberately NOT packaged, and this is the note that
-# stops somebody putting it back without reading why.
+# The offline voice, and the one DLL it needs.
 #
-# island_chatter_local.exe links sherpa-onnx-c-api.dll, and that DLL statically
-# links espeak-ng, which is GPL v3 or later. The GPL attaches to the file that
-# is shipped, not to the code paths that run, so putting it in this ZIP would
-# place the whole product under the GPL — which is incompatible with selling
-# compiled builds and forbidding their redistribution. The second reason is
-# not legal at all: the only permissively licensed Chinese model available is
-# mainland-accented, and this is a Traditional Chinese product.
+# It only builds when ISLAND_CHATTER_ONNXRUNTIME_ROOT is set, so refusing here
+# is also what stops a release being cut from a tree that was never configured
+# for it — the same reason the bake and voice tools are required rather than
+# copied if present.
 #
-# The tool still builds when ISLAND_CHATTER_SHERPA_ROOT is set, for whoever
-# picks this up when sherpa-onnx 2.0.0 removes espeak-ng. It just does not ship.
+# sherpa-onnx is deliberately absent, and this is the note that stops somebody
+# adding it back: the DLL it publishes statically links espeak-ng (GPL v3 or
+# later) with no switch to exclude it, and the GPL attaches to the file that is
+# distributed rather than to the code paths that run. That is what held 3.0.0
+# back. ONNX Runtime is MIT and runs the same model.
+$resolvedLocal = Join-Path $buildRelease "island_chatter_local.exe"
+if (-not (Test-Path -LiteralPath $resolvedLocal -PathType Leaf)) {
+    throw ("Build island_chatter_local first. Missing: $resolvedLocal`n" +
+        "  Configure with -DISLAND_CHATTER_ONNXRUNTIME_ROOT=<unpacked onnxruntime-win-x64>")
+}
+$resolvedRuntime = Join-Path $buildRelease "onnxruntime.dll"
+if (-not (Test-Path -LiteralPath $resolvedRuntime -PathType Leaf)) {
+    throw "Build island_chatter_local first; onnxruntime.dll is copied beside it. Missing: $resolvedRuntime"
+}
+$strandedSherpa = Join-Path $buildRelease "sherpa-onnx-c-api.dll"
+if (Test-Path -LiteralPath $strandedSherpa -PathType Leaf) {
+    throw ("$strandedSherpa is in the build directory. It statically links espeak-ng " +
+        "(GPL v3+) and must not reach a package; delete it and rebuild.")
+}
 Write-Host "Packaging plug-in: $resolvedAex ($aexTime)"
 Write-Host "Packaging bake tool: $resolvedBake"
 Write-Host "Packaging voice tool: $resolvedVoice"
+Write-Host "Packaging offline voice: $resolvedLocal"
 
 $distRoot = Join-Path $repoRoot "dist"
 $stageRoot = Join-Path $distRoot "Island-Chatter-AE-$Version-Windows-x64"
@@ -111,6 +125,8 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $
 Copy-Item -LiteralPath $resolvedAex -Destination (Join-Path $resources "IslandChatterNative.aex")
 Copy-Item -LiteralPath $resolvedBake -Destination (Join-Path $resources "island_chatter_bake.exe")
 Copy-Item -LiteralPath $resolvedVoice -Destination (Join-Path $resources "island_chatter_voice.exe")
+Copy-Item -LiteralPath $resolvedLocal -Destination (Join-Path $resources "island_chatter_local.exe")
+Copy-Item -LiteralPath $resolvedRuntime -Destination (Join-Path $resources "onnxruntime.dll")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterNativePanel.jsx") `
     -Destination (Join-Path $resources "IslandChatterNativePanel.jsx")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install-IslandChatter.ps1") `
@@ -119,6 +135,30 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Uninstall-IslandChatter.p
     -Destination (Join-Path $resources "Uninstall-IslandChatter.ps1")
 Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD_PARTY_NOTICES.md") `
     -Destination (Join-Path $resources "THIRD_PARTY_NOTICES.md")
+
+# The check 3.0.0 did not do.
+#
+# That release was held back because a dependency turned out to statically link
+# espeak-ng (GPL v3+), and the reason it got as far as a built package is that
+# the licence was checked by *reading about* the library instead of by looking
+# inside the file. So this looks inside the file: every binary about to be
+# zipped is searched for the marker, and a hit stops the release.
+#
+# It is a byte search over an ASCII view of the whole file, which is what finds
+# a statically linked library that no header mentions. `strings` would do, but
+# it is not on every Windows machine and a guard that silently does not run is
+# the shape of failure this project keeps a section of CLAUDE.md about.
+foreach ($binary in (Get-ChildItem -LiteralPath $resources -File |
+        Where-Object { $_.Extension -in ".exe", ".dll", ".aex" })) {
+    $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($binary.FullName))
+    foreach ($marker in @("espeak", "eSpeak")) {
+        if ($text.Contains($marker)) {
+            throw ("$($binary.Name) contains '$marker'. eSpeak NG is GPL v3 or later and the " +
+                "GPL attaches to the file that is distributed, not to the code paths that " +
+                "run. This is what held 3.0.0 back. See THIRD_PARTY_NOTICES.md.")
+        }
+    }
+}
 
 Compress-Archive -LiteralPath $stageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 $hash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256

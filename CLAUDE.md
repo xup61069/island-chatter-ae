@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v2.4.0` (Windows x64).
+- Current public release: `v3.1.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -56,7 +56,10 @@ effect.
 | `native/generated/mandarin_readings.hpp` | Generated Unihan lookup table; do not hand-edit |
 | `native/tools/bake_cli.cpp` | `island_chatter_bake`: renders a WAV, and reports the timing plan with `--plan` |
 | `native/tools/voice_cli.cpp` | `island_chatter_voice`: the WinHTTP transport and nothing else. Windows-only by necessity rather than by choice — this is the TLS stack ExtendScript does not have |
-| `native/tools/local_cli.cpp` | `island_chatter_local`: 3.0.0 groundwork. Speaks a line with a neural model on this machine, opening no socket, and prints the same protocol the panel already parses. Built only when `ISLAND_CHATTER_SHERPA_ROOT` points at an unpacked sherpa-onnx Windows release — referenced by path, never vendored, exactly as the AE SDK is. **The licence chain is the reason this file exists and is not Piper:** Piper went GPL-3.0 in October 2025 and its MIT-era releases still linked espeak-ng (GPL v3+), either of which would force this product open; sherpa-onnx is Apache-2.0, the MeloTTS weights ship a verbatim MIT licence and onnxruntime is MIT. **But the 3.0.0 build must not be published:** the published `sherpa-onnx-c-api.dll` statically links espeak-ng anyway — `if(SHERPA_ONNX_ENABLE_TTS)` pulls it in unconditionally, with no option to exclude — and the GPL attaches to the file that is distributed, not to the code paths that run. The check that missed it asked whether the *Chinese pipeline uses* espeak-ng (a consequence) instead of whether the *shipped binary contains* it (the mechanism). Wait for sherpa-onnx 2.0.0, which removes it, or drive the model with ONNX Runtime directly |
+| `native/tools/local_cli.cpp` | `island_chatter_local`: speaks a line with a neural model on this machine, opening no socket, and prints the protocol the panel already parses. Links ONNX Runtime (MIT) and nothing else; built when `ISLAND_CHATTER_ONNXRUNTIME_ROOT` points at an unpacked `onnxruntime-win-x64` release — referenced by path, never vendored, exactly as the AE SDK is. **The licence chain is the reason this file is not Piper and no longer sherpa-onnx:** Piper went GPL-3.0 in October 2025 and its MIT-era releases still linked espeak-ng (GPL v3+); sherpa-onnx is Apache-2.0 but the `sherpa-onnx-c-api.dll` it publishes *statically links espeak-ng anyway* — `if(SHERPA_ONNX_ENABLE_TTS)` pulls it in unconditionally, with no option to exclude — and the GPL attaches to the file that is distributed, not to the code paths that run. That is what stopped 3.0.0 shipping. The check that missed it asked whether the *Chinese pipeline uses* espeak-ng (a consequence) instead of whether the *shipped binary contains* it (the mechanism), which is one `strings` away |
+| `native/src/melo.cpp` | The offline voice's front end: text to the two integer sequences the model wants. Chinese is read by the *engine* (invariant 8ac), the model's lexicon supplies English, digits are spelled out here because dropping sherpa-onnx dropped its OpenFST normalisers. Pure, so `melo_tests.cpp` covers all of it without the 177 MB model |
+| `native/generated/melo_phonemes.hpp` | Generated pinyin-to-phone table; do not hand-edit. `native/tools/generate-melo-phonemes.js` derives it by joining the model's own single-character lexicon entries against Unihan readings and letting 20,888 characters vote |
+| `native/tests/melo_tests.cpp` | The generated table against the model's real token list, the number spelling, the bracket rule, punctuation folding, and that 銀行 still comes out `hang2` — which only the engine knows |
 | `native/tests/ae-language-verify.jsx` | Host suite for the interface language: builds the panel and switches it through all three |
 | `native/tests/dsp_tests.cpp` | DSP, Mandarin, random-access, bounds, singing, segment seams, and cache concurrency tests |
 | `native/tests/analysis_tests.cpp` | The WAV/AIFF reader against every malformed file it must survive, formants against synthesised vowels, and the analyser scored against the engine's own plan |
@@ -64,6 +67,7 @@ effect.
 | `native/tests/midi_tests.cpp` | MIDI parsing, chord reduction, and every malformed file that must come back as a message rather than a crash |
 | `native/tests/song_tests.cpp` | Lyric-to-note assignment, slot encoding, and the rounding that must not accumulate |
 | `native/tests/ae-lipsync-verify.jsx` | Host suite for audio lip-sync: bakes its own WAV, imports it, analyses it, and checks the rig, the trim, and both refusals |
+| `native/tests/ae-local-verify.jsx` | Host suite for the offline voice: the merged source list, which tool serves each row, that a local source is asked for no key, and a real render through ONNX Runtime when the model is installed |
 | `native/tests/ae-cloud-verify.jsx` | Host suite for the cloud voice, run entirely on a cache hit so it opens no socket and bills nobody: seeds the path `--cache-path` names with a bake, then checks the import, the muted effect, the plan coming out of the recording, the stale rule putting it back on the engine, and that Apply re-fetches nothing |
 | `native/tests/ae-smoke-test.jsx` | Destructive temporary-project host smoke test; writes a report, closes the project, and quits AE |
 | `native/tests/ae-panel-reapply-setup.jsx` | Manual host setup for applying the actual panel twice to a selected Chinese text layer |
@@ -221,6 +225,41 @@ effect.
    all. The storefront page is checked too: it may not still claim nothing is exported, it must
    tell readers in all three languages that their text leaves, and its version must match
    `package.json` — it had been stale since 2.1.0 because nothing was looking.
+
+8ac. **The offline voice reads with the engine, and the model only sings the notes it is
+   given.**
+   A neural model needs two integer sequences: a phone per position and a tone per position.
+   Producing them means deciding how the text is read, and this product already has something
+   that decides that. `melo::plan()` therefore hands the Chinese to `dsp::Utterance` — the same
+   reader the built-in voice uses — and translates the pinyin it gets back.
+
+   **The model's own lexicon cannot do it, and the reason is not quality.** Its 195,828 keys are
+   Simplified words, so `銀行` is not in it at all and Traditional text degrades to
+   character-by-character lookup: `yin2 xing2`, silently. It knows nothing about `[重|chong2]`,
+   Zhuyin, or tone-number pinyin either. Reading with the engine is what makes the same line
+   come out the same way whichever voice speaks it, which is invariant 8b's argument applied to
+   a second renderer rather than to a second planner. `melo_tests.cpp` pins `銀行` at `hang2`
+   precisely because that is the assertion a lexicon-based reader cannot pass.
+
+   **The pinyin-to-phone table is derived, not written.** MeloTTS spells finals its own way —
+   `ye` is `y E`, `yan` is `y En`, `ya` is `y a`, `weng` is `w eng`, `i` is `ir` after zh/ch/sh/r
+   and `i0` after z/c/s — and six of those would have been wrong from memory, which is what
+   invariant 8j says about reproducing somebody else's tables. So
+   `generate-melo-phonemes.js` joins the model's 20,888 single-character entries against Unihan
+   and lets them vote: 378 syllables carry five or more characters, the remaining 36 are
+   rebuilt from those, and the rebuilding rule reproduces all 378 exactly. Four syllables have
+   no phones — the syllabic nasals — and the test pins that list so it cannot grow quietly.
+
+   **Digits are spelled out here because the FSTs went with sherpa-onnx.** Four OpenFST rule
+   files did number, date, phone and heteronym normalisation, and reading them needs OpenFST.
+   Without a replacement `2026年` reaches the engine as `年`: the digits produce no syllable and
+   vanish. `normalise_numbers()` is that replacement, and it must leave `[...]` alone —
+   `[重|chong2]` normalised as a number becomes `[重|chong二]`, which is not a reading of
+   anything.
+
+   **What cannot be said is said out loud.** Kana, an emoji, a syllable with no phones: the tool
+   prints `WARN` after its `OK` and the panel reports it once. The analyser reads the file, not
+   the script, so this is the only place the difference can surface.
 
 8b. **The panel asks the engine for the plan; it must never compute one.** Markers, the
    rig, Type-On and Fit Duration all need to know where each syllable falls.
@@ -532,6 +571,65 @@ effect.
     of the composition, so a line that no longer fits is squashed to whatever room was left
     rather than reported. Putting a voice on a layer is not a request to change how long the
     film is, which is why Apply keeps the clamp.
+8ad. **One function fits a line to its plan, and it writes down what it overwrote.**
+    Fit Duration changes `outPoint`, and until 3.1.0 nothing recorded the previous value — so
+    Remove stripped everything else off a layer and left it at the engine's length, with no way
+    back once the session closed. `fitLayerToPlan()` is now the only place that fits a line, and
+    it records `outPoint - inPoint` in an `IC Original Length` control the first time it touches
+    a layer; `removeFromLayer()` puts it back and takes the control with it.
+
+    A **length**, not an out point: Re-flow moves lines by shifting `startTime`, and an absolute
+    out point restored after a move puts the layer back where it used to be rather than back to
+    the length it used to have. Written only when there is no record, or the value saved is
+    whatever the previous Apply left, which is the engine's number and not the user's. Read
+    *before* the effect-removal loop, because AE invalidates the handle (invariant 3).
+
+    `clampToComp` is the argument that keeps 8o's distinction: Apply clamps to the composition,
+    the operations that lay out time grow it first. `npm test` counts the `.outPoint =`
+    assignments in the panel and expects exactly three — the fit, the restore, and the rig layer
+    being grown to cover its members. A fourth is a line that can be fitted without its length
+    being recorded.
+
+8ae. **A line records which character it was given, on the line.**
+    A character used to exist only as a shared rig, so a line that was unbound — or that drove
+    its own sliders — had eight numbers and no name. The name now goes in the native effect's
+    *display name*: `Island Chatter Voice · 咪咪`. Not a new control, because the layer's
+    `comment` is the user's, a marker would sit among the timing markers and a slider cannot
+    hold a string; `findEffect()` matches `matchName` first, so a renamed effect is still found.
+
+    The rig's name wins when there is one — the pointer is what disappears, and that is exactly
+    when somebody wants to know who was speaking. Without a rig it falls back to the panel's
+    character, and **only when the sliders still match it**: a name on a line that no longer
+    sounds like that character is worse than no name, because it is believed. A built-in is
+    stored by the English half of its `"Mimi / 咪咪"` label, or the same line reads as two
+    different characters in two interface languages (invariant 8i, on a record that outlives the
+    session). It is written on every Apply, including as an empty string, and `npm test` checks
+    the brace depth of that assignment rather than its presence — wrapped in `if (character)` it
+    still matched a search, and that is precisely the bug.
+
+8af. **Preview touches nothing.** It renders with `island_chatter_bake` to one fixed file in the
+    temp folder and asks Windows to play it: no layer, no import, no undo step, and therefore
+    none of invariant 8g's purge. `voiceArguments()` is the only command builder, shared with
+    the layer path through `settingsFromEffect()`, so the voice previewed is the voice applied.
+
+    **PowerShell does not run from inside After Effects, and that is measured rather than
+    assumed.** The obvious playback is a `Media.SoundPlayer` one-liner handed to
+    `system.callSystem()`, and it works from a PowerShell prompt. Inside After Effects *every*
+    PowerShell command returns an empty string in about 130 ms, having run nothing and written
+    nothing — including `powershell -NoProfile -Command "'ALIVE'"`, and including the full path
+    to `powershell.exe` — while `cmd /c echo` returns its output normally.
+    `native/tests/ae-preview-probe.jsx` is that measurement; re-run it before believing any
+    fix that reaches for a shell.
+
+    So the engine tool plays it: `island_chatter_bake --play` calls `PlaySound` with `SND_SYNC`
+    and `SND_NODEFAULT` — without the second flag Windows substitutes its own ding for a file it
+    cannot play, which reads as success. It **closes the WAV first**, because PlaySound opens
+    the file itself and cannot open one this process still holds open for writing; that failure
+    looks exactly like "Windows cannot play this file". Doing it in the tool also puts the path
+    back on the hex route every other path takes (invariant 8e), so a user folder with Chinese
+    in it works. The reply is checked for `PLAYED`: `callSystem()` reports no exit status, so a
+    failure otherwise looks exactly like successful silence.
+
 8p. **The gap between lines is a minimum note value, not a distance.** `nextLineStart()` adds
     the gap and then snaps forward. Converting beats to seconds and adding them would put
     nothing on the grid: a line is only a whole number of beats long under Tempo Lock, which is
@@ -700,6 +798,25 @@ cmake --build native/build --config Release
 ctest --test-dir native/build -C Release --output-on-failure
 ```
 
+The offline voice needs one more thing, referenced by path rather than vendored, exactly as the
+AE SDK is. Unpack a Microsoft `onnxruntime-win-x64-X.Y.Z` release and configure with it, or
+`island_chatter_local` simply does not appear — and `tools/package-release.ps1` refuses to cut a
+release without it, which is also what stops a version being packaged from a tree that was never
+configured for one:
+
+```powershell
+cmake -S native -B native/build -DISLAND_CHATTER_ONNXRUNTIME_ROOT="<unpacked onnxruntime-win-x64>"
+```
+
+Regenerating `native/generated/melo_phonemes.hpp` additionally needs the model itself, which is
+not in the repository and is not downloaded by the build:
+
+```powershell
+node native/tools/generate-melo-phonemes.js `
+    "$env:LOCALAPPDATA\Island Chatter\models\vits-melo-tts-zh_en\lexicon.txt" `
+    native/generated/mandarin_readings.hpp native/generated/melo_phonemes.hpp
+```
+
 The `.aex` build requires the official After Effects SDK and is documented in `native/README.md`.
 Do not vendor Adobe headers or PiPL tools.
 
@@ -735,6 +852,7 @@ exit, since the launcher returns immediately:
 | `native/tests/ae-rebake-probe.jsx` | Diagnostic for what releases an imported WAV, behind invariant 8f |
 | `native/tests/ae-size-probe.jsx` | Diagnostic for invariant 8z: walks the panel and prints what every row and every column wants to be, wide and tall, in all three languages, control by control |
 | `native/tests/ae-close-probe.jsx` | Closes a leftover project without saving, so the next suite can start. Run it between suites |
+| `native/tests/ae-preview-probe.jsx` | Diagnostic behind invariant 8af: what `system.callSystem()` can and cannot run from inside After Effects. It is the measurement that says PowerShell returns an empty string in ~130 ms having done nothing, while `cmd /c echo` works — re-run it before believing any fix that reaches for a shell |
 
 `ae-host-regression.jsx` and `ae-typeon-verify.jsx` load the real panel body with `eval`, so
 they exercise the shipped code rather than a copy. If the panel's outer function or its

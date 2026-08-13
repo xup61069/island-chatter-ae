@@ -13,6 +13,11 @@
 #include "island_chatter/midi.hpp"
 #include "island_chatter/song.hpp"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <mmsystem.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -232,9 +237,47 @@ void print_song(const island_chatter::song::Assignment& assignment) {
     std::cout << "END " << assignment.lines.size() << "\n";
 }
 
+/*
+ * Play the file that was just written, and say whether it played.
+ *
+ * The panel's Preview needs a sound out of a speaker, and ExtendScript has no
+ * way to make one. The obvious answer — hand a PowerShell one-liner to
+ * `system.callSystem()` — does not work: inside After Effects **every**
+ * PowerShell command returns an empty string in about 130 ms, including
+ * `powershell -NoProfile -Command "'ALIVE'"`, with nothing run and no file
+ * written, while `cmd /c echo` comes back fine. `native/tests/ae-preview-probe.jsx`
+ * is that measurement. So the product plays its own audio, through the tool it
+ * already ships beside the plug-in.
+ *
+ * PlaySound with SND_SYNC blocks until the sound finishes, which is what a
+ * preview button wants — press, listen, get the panel back. SND_NODEFAULT stops
+ * Windows substituting the system "ding" for a file it cannot play, which would
+ * otherwise be indistinguishable from success.
+ *
+ * The path never crosses a command line as text: it arrives as hex like every
+ * other path this tool takes (invariant 8e), so a user folder with Chinese in
+ * it works.
+ */
+std::string play_file(const std::string& path) {
+#ifdef _WIN32
+    const int wide_length =
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+    if (wide_length <= 0) { return "PLAY-FAILED the path could not be read"; }
+    std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wide.data(), wide_length);
+    const bool played = PlaySoundW(wide.c_str(), nullptr,
+                                   SND_FILENAME | SND_SYNC | SND_NODEFAULT) != FALSE;
+    return played ? "PLAYED" : "PLAY-FAILED Windows would not play the file";
+#else
+    (void)path;
+    return "PLAY-FAILED playback is Windows-only";
+#endif
+}
+
 [[noreturn]] void usage() {
     std::cerr <<
         "island_chatter_bake --out <file.wav> | --out-hex <hex-utf8-path> | --plan\n"
+        "                    [--play]\n"
         "                    --text <hex-utf8>\n"
         "  [--voice N] [--emotion N] [--size N] [--seed N] [--rate N]\n"
         "  [--pitch F] [--speed F] [--volume F] [--consonant F]\n"
@@ -272,6 +315,7 @@ int main(int argc, char** argv) {
         bool plan_only = false;
         bool list_tracks = false;
         bool dump_song = false;
+        bool play = false;
         std::string analyse_path;
         double sensitivity = 0.5;
         bool identify_vowels = true;
@@ -281,6 +325,8 @@ int main(int argc, char** argv) {
             // The flags that take no value, handled before the loop reaches for
             // one.
             if (flag == "--plan") { plan_only = true; continue; }
+            // Renders and then plays it, for the panel's Preview.
+            if (flag == "--play") { play = true; continue; }
             if (flag == "--list-tracks") { list_tracks = true; continue; }
             if (flag == "--dump-song") { dump_song = true; continue; }
             if (index + 1 >= argc) usage();
@@ -400,6 +446,15 @@ int main(int argc, char** argv) {
         // The panel parses this line to confirm the render really happened.
         std::cout << "OK " << frames << " " << settings.sample_rate << " "
                   << rendered.diagnostics.duration_seconds << "\n";
+        if (play) {
+            // Closed first, and this is not tidiness: PlaySound opens the file
+            // itself, and a file still held open for writing by this process is
+            // one it cannot open. That failure costs nothing to fix and looks
+            // exactly like "Windows cannot play this WAV" — it was diagnosed by
+            // noticing the same file plays from outside the tool.
+            file.close();
+            std::cout << play_file(output) << "\n";
+        }
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "ERROR " << error.what() << "\n";

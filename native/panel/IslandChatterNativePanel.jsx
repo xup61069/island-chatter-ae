@@ -122,6 +122,63 @@
         return findEffect(layer, EFFECT_NAME, DISPLAY_NAME);
     }
 
+    /*
+     * Which character a line was given, written where the line can carry it.
+     *
+     * Until 3.1.0 a line only knew this while it pointed at a shared rig: the
+     * rig layer's comment holds the voice (invariant 8l), so unbinding a line —
+     * or never binding it, which is what the per-layer rig is — left nothing
+     * anywhere saying who was speaking. The numbers were on the effect, but
+     * eight sliders are not a name, and "is this still 咪咪?" could only be
+     * answered by comparing them by hand.
+     *
+     * It goes in the effect's *display name* rather than in a new control. The
+     * layer's own `comment` belongs to the user, a marker would sit among the
+     * timing markers, and a slider cannot hold a string; the effect name is
+     * already something this panel writes — `[Override]` has lived there since
+     * 1.0.2 — and `findEffect()` matches on `matchName` first, so a renamed
+     * effect is still found. It also puts the answer where somebody would look
+     * for it: the Effect Controls panel now reads `Island Chatter Voice · 咪咪`.
+     *
+     * The identity stored is language-independent. A built-in character's label
+     * is `"Mimi / 咪咪"`, and writing whichever half the panel happens to be
+     * showing would make the same line read as a different character after a
+     * language switch — invariant 8i's lesson, in a place that outlives the
+     * session. So the English half is stored and the panel translates it back
+     * for display.
+     *
+     * Nothing behavioural hangs on it: a user who renames the effect loses the
+     * label and nothing else. It is a record, not a pointer.
+     */
+    var CHARACTER_MARK = " · ";
+    var OVERRIDE_MARK = " [Override]";
+
+    var BUILT_IN_CHARACTERS = ["Custom / 自訂", "Mimi / 咪咪", "Captain / 隊長",
+        "Grandma / 奶奶", "Robot / 機器人"];
+
+    function effectDisplayName(character, hasOverride) {
+        return DISPLAY_NAME +
+            (character ? CHARACTER_MARK + character : "") +
+            (hasOverride ? OVERRIDE_MARK : "");
+    }
+
+    function characterOfEffect(effect) {
+        if (!effect) { return ""; }
+        var name = String(effect.name);
+        var at = name.indexOf(CHARACTER_MARK);
+        if (at < 0) { return ""; }
+        var found = name.substring(at + CHARACTER_MARK.length);
+        if (found.length > OVERRIDE_MARK.length &&
+                found.substring(found.length - OVERRIDE_MARK.length) === OVERRIDE_MARK) {
+            found = found.substring(0, found.length - OVERRIDE_MARK.length);
+        }
+        return trim(found);
+    }
+
+    function characterOfLayer(layer) {
+        return characterOfEffect(findNativeEffect(layer));
+    }
+
     // A settings object does not always carry every field: a rig comment holds
     // only the voice, and a preset written by an older version holds fewer
     // still. Writing undefined would land as zero, which for Tone Blend or
@@ -466,25 +523,39 @@
             " --vibrato-delay " + effect.property(PARAM_VIBRATO_DELAY).value;
     }
 
+    /*
+     * A voice, as the engine's command line spells it.
+     *
+     * One builder, taking the settings object both sides already speak: a layer
+     * goes through `settingsFromEffect()` first, and Preview hands over what
+     * the panel is holding. Two builders would have been the shorter change and
+     * would have drifted the first time a control was added — the panel would
+     * preview a voice the layer will not render, which is the same class of
+     * mistake invariant 8b names for timing and 8ab for provider tables.
+     */
+    function voiceArguments(settings) {
+        return " --voice " + settings.voice +
+            " --emotion " + settings.emotion +
+            " --size " + settings.characterSize +
+            " --seed " + settings.seed +
+            " --rate " + ENGINE_SAMPLE_RATE +
+            " --pitch " + settings.pitch +
+            " --speed " + settings.speed +
+            " --volume " + settings.volume +
+            " --consonant " + settings.consonant +
+            " --clarity " + settings.clarity +
+            " --cuteness " + settings.cuteness +
+            " --tempo-lock " + (settings.tempoLock ? 1 : 0) +
+            " --formant " + settings.formant +
+            " --source " + settings.source +
+            " --vibrato " + settings.vibrato +
+            " --vibrato-rate " + settings.vibratoRate;
+    }
+
     function engineVoiceArguments(effect) {
         return melodyArguments(effect) +
             " --text " + hexUtf8(textFromEffect(effect)) +
-            " --voice " + (Math.round(effect.property(PARAM_VOICE).value) - 1) +
-            " --emotion " + (Math.round(effect.property(PARAM_EMOTION).value) - 1) +
-            " --size " + (Math.round(effect.property(PARAM_CHARACTER_SIZE).value) - 1) +
-            " --seed " + Math.round(effect.property(PARAM_SEED).value) +
-            " --rate " + ENGINE_SAMPLE_RATE +
-            " --pitch " + effect.property(PARAM_PITCH).value +
-            " --speed " + effect.property(PARAM_SPEED).value +
-            " --volume " + (effect.property(PARAM_VOLUME).value / 100) +
-            " --consonant " + effect.property(PARAM_CONSONANT).value +
-            " --clarity " + (effect.property(PARAM_CLARITY).value / 100) +
-            " --cuteness " + (effect.property(PARAM_CUTENESS).value / 100) +
-            " --tempo-lock " + (Math.round(effect.property(PARAM_TEMPO_LOCK).value) ? 1 : 0) +
-            " --formant " + (effect.property(PARAM_FORMANT).value / 100) +
-            " --source " + (Math.round(effect.property(PARAM_SOURCE).value) - 1) +
-            " --vibrato " + (effect.property(PARAM_VIBRATO).value / 100) +
-            " --vibrato-rate " + effect.property(PARAM_VIBRATO_RATE).value;
+            voiceArguments(settingsFromEffect(effect));
     }
 
     function requireEngineTool() {
@@ -1144,6 +1215,56 @@
     var AUDIO_LINE_NAME = "IC Audio Line";
     var AUDIO_VOWELS_NAME = "IC Audio Vowels";
 
+    /*
+     * How long the line was before Island Chatter made it fit.
+     *
+     * Fit Duration overwrites the out point, and until 3.1.0 nothing recorded
+     * what it overwrote — so Remove took the effects, the markers, the rig and
+     * the recording off a layer and left it sitting at the length the engine
+     * had decided, with nothing on it to say why. There is no undo for that
+     * once the session is closed.
+     *
+     * A *duration*, not an out point. Re-flow moves lines by shifting
+     * `startTime`, and an absolute out point restored after a move would put
+     * the layer back where it used to be rather than back to the length it used
+     * to have. The difference shows up only after a Re-flow, which is exactly
+     * the case nobody tests by hand.
+     *
+     * Written once, by `fitLayerToPlan()`, and only the first time: the value
+     * has to be what the layer had before *any* of this, not what the previous
+     * Apply left. Everything else about it is the `IC Rig Target` idiom —
+     * a named control on the layer, not a parameter slot, so no published ABI
+     * index moves (invariant 1).
+     */
+    var ORIGINAL_LENGTH_NAME = "IC Original Length";
+
+    /*
+     * The one place a line is fitted to its plan.
+     *
+     * `clampToComp` is a real distinction and not a tidy-up: Apply keeps the
+     * clamp because putting a voice on a layer is not a request to change how
+     * long the film is (invariant 8o), while Import, Re-flow and Re-sync grow
+     * the composition first and then fit into the room they made.
+     */
+    function fitLayerToPlan(comp, layer, seconds, clampToComp) {
+        if (!findNamedEffect(layer, ORIGINAL_LENGTH_NAME)) {
+            ensureSlider(layer, ORIGINAL_LENGTH_NAME, layer.outPoint - layer.inPoint);
+        }
+        var wanted = Math.max(layer.inPoint + comp.frameDuration, layer.inPoint + seconds);
+        layer.outPoint = clampToComp ? Math.min(comp.duration, wanted) : wanted;
+    }
+
+    // Null when this line was never fitted, which is what a layer with Fit
+    // Duration switched off looks like: there is nothing to put back.
+    function originalLengthOf(layer) {
+        var effect = findNamedEffect(layer, ORIGINAL_LENGTH_NAME);
+        if (!effect) { return null; }
+        try {
+            var seconds = effect.property(1).value;
+            return seconds > 0 ? seconds : null;
+        } catch (unreadable) { return null; }
+    }
+
     function isAudioLine(layer) {
         return findNamedEffect(layer, AUDIO_LINE_NAME) !== null;
     }
@@ -1717,7 +1838,26 @@
         ensureToneBootstrap(textLayer);
         var effect = findNativeEffect(textLayer);
         if (!effect) { effect = addNativeEffect(textLayer); }
-        effect.name = trim(pronunciation) ? DISPLAY_NAME + " [Override]" : DISPLAY_NAME;
+        /*
+         * Who this line is, recorded on the line itself.
+         *
+         * A shared rig's name wins, because that is the product's own idea of a
+         * character and it is what the user typed. It is recorded even though
+         * the rig pointer already implies it — the pointer is what goes away
+         * when the line is unbound or the rig is deleted, and that is precisely
+         * when somebody wants to know who used to be speaking.
+         *
+         * Without a rig it falls back to the timbre the panel is holding, and
+         * only when the sliders still match it: a character name on a line that
+         * no longer sounds like that character is worse than no name, because
+         * it is believed.
+         *
+         * Written on every Apply, including as an empty string, so a re-Apply
+         * with the sliders moved off a character clears the old label rather
+         * than leaving it to be read months later.
+         */
+        var character = rigLayer ? rigCharacterName(rigLayer) : trim(settings.character || "");
+        effect.name = effectDisplayName(character, trim(pronunciation));
 
         // addProperty() invalidates previously obtained Property references in
         // AE scripting. Reacquire both effects before inspecting their order.
@@ -1736,8 +1876,7 @@
         // panel's own planner used to account for.
         var plan = planFromEngine(effect);
         if (options.fitDuration) {
-            textLayer.outPoint = Math.min(comp.duration,
-                Math.max(textLayer.inPoint + comp.frameDuration, textLayer.inPoint + plan.duration));
+            fitLayerToPlan(comp, textLayer, plan.duration, true);
         }
         if (options.markers) { updateTimingMarkers(textLayer, plan); }
         // A line drives either its own sliders or a shared rig, never both: two
@@ -1821,8 +1960,21 @@
         // CLOUD_VOICE_NAME is on this list because it is on the text layer; the
         // two sliders that record how the recording was read are on the audio
         // layer, which the block above has already taken away whole.
+        /*
+         * The length goes back before the control that remembers it is taken.
+         *
+         * Reading it after the loop would read a property off an effect that
+         * has just been removed, which is invariant 3's hazard in its simplest
+         * form. A layer that was never fitted has no record and is left exactly
+         * as it is — Remove is not an excuse to change a length nobody set.
+         */
+        var wasLong = originalLengthOf(layer);
+        if (wasLong !== null) {
+            layer.outPoint = Math.min(comp.duration,
+                Math.max(layer.inPoint + comp.frameDuration, layer.inPoint + wasLong));
+        }
         var names = RIG_TRACK_NAMES.concat(
-            [RIG_TARGET_NAME, BAKE_POINTER_NAME, CLOUD_VOICE_NAME]);
+            [RIG_TARGET_NAME, BAKE_POINTER_NAME, CLOUD_VOICE_NAME, ORIGINAL_LENGTH_NAME]);
         var effects = layer.property("ADBE Effect Parade");
         var index;
         // Downward: removing an effect renumbers everything above it.
@@ -1937,6 +2089,70 @@
             }
         }
         return hex;
+    }
+
+    /*
+     * Preview: hear a line without putting it anywhere.
+     *
+     * Until 3.1.0 the only way to hear a voice was to apply it to a layer and
+     * RAM-preview the composition, which means every timbre you try leaves a
+     * layer, an effect stack and an undo step behind. This touches the project
+     * not at all: the engine renders to a WAV in the temp folder and Windows
+     * plays it. Nothing is imported, so invariant 8g's purge never comes into
+     * it, and there is no bake to go stale.
+     *
+     * The file has one fixed name and is overwritten, so previewing forty times
+     * leaves one file rather than forty. It is not deleted afterwards on
+     * purpose: PlaySync has just finished with it, deleting it would be one
+     * more thing to fail, and it is in the folder Windows empties anyway.
+     */
+    var PREVIEW_FILE_NAME = "island-chatter-preview.wav";
+
+    function previewFile() {
+        return new File(Folder.temp.fsName.replace(/\\/g, "/") + "/" + PREVIEW_FILE_NAME);
+    }
+
+    /*
+     * Renders with the panel's own settings, not a layer's — the whole point is
+     * to hear a voice before anything is committed to one — and the engine tool
+     * plays it too.
+     *
+     * **Playback is the tool's job because PowerShell is not available here.**
+     * The obvious spelling is a one-line `Media.SoundPlayer` handed to
+     * `system.callSystem()`, and it works from a PowerShell prompt. Inside
+     * After Effects it does not work at all: *every* PowerShell command comes
+     * back as an empty string in about 130 ms, having run nothing and written
+     * nothing — including `powershell -NoProfile -Command "'ALIVE'"` — while
+     * `cmd /c echo` returns its output normally. `native/tests/ae-preview-probe.jsx`
+     * is that measurement, and it is the reason `--play` exists.
+     *
+     * With the tool doing it, the path travels as hex like every other path
+     * (invariant 8e), so a user folder with Chinese in it works, and the reply
+     * is ours to define. `PlaySound` blocks until the sound ends, which is what
+     * a preview button wants; After Effects does not repaint meanwhile and the
+     * tooltip says so.
+     *
+     * Both halves of the reply are checked. `callSystem()` reports no exit
+     * status, so a render that failed and a playback that failed would each
+     * otherwise look exactly like a short, silent success.
+     */
+    function previewVoice(text, settings) {
+        var tool = requireEngineTool();
+        var target = previewFile();
+        if (target.exists) { target.remove(); }
+        var reply = String(system.callSystem(quoted(tool.fsName) +
+            " --out-hex " + hexUtf8(target.fsName) +
+            " --play" +
+            " --text " + hexUtf8(text) +
+            voiceArguments(settings)));
+        if (reply.indexOf("OK ") !== 0 || !target.exists) {
+            throw new Error(M("Could not render the preview. / 無法算出試聽的聲音。") +
+                "\n\n" + reply);
+        }
+        if (reply.indexOf("PLAYED") < 0) {
+            throw new Error(M("Windows could not play the preview. / Windows 無法播放試聽的聲音。") +
+                "\n\n" + reply);
+        }
     }
 
     // Beside the .aep, so baked audio travels with the project.
@@ -2202,7 +2418,7 @@
     var MAX_CLOUD_CHARACTERS = 2000;
     // What the offline model costs to fetch. Stated to the user before the
     // download starts; the tool has the authoritative per-file sizes.
-    var LOCAL_MODEL_MEGABYTES = 178;
+    var LOCAL_MODEL_MEGABYTES = 177;
     /*
      * Which source a panel with no remembered choice starts on.
      *
@@ -2235,7 +2451,7 @@
                 M("Island Chatter could not run the cloud voice tool. / Island Chatter 無法執行雲端語音工具。") +
                 "\n\n" + reply);
         }
-        var answer = { providers: [], path: "", bytes: 0, cached: false };
+        var answer = { providers: [], path: "", bytes: 0, cached: false, unspoken: "" };
         var index;
         for (index = 1; index < lines.length; index += 1) {
             var fields = lines[index].split(" ");
@@ -2262,6 +2478,17 @@
                 answer.path = utf8FromHex(fields[1]);
                 answer.bytes = parseInt(fields[2], 10);
                 answer.cached = fields[3] === "1";
+            } else if (fields[0] === "WARN") {
+                /*
+                 * The offline model spoke the line but not all of it.
+                 *
+                 * Only the local tool sends this, and only for characters it has
+                 * no sound for — kana, an emoji, one of the four syllabic
+                 * nasals. It is a warning rather than an error because the rest
+                 * of the line is fine and the file is real; what must not happen
+                 * is that a render comes back a word short and nothing says so.
+                 */
+                answer.unspoken = utf8FromHex(fields[1]);
             }
         }
         return answer;
@@ -2446,7 +2673,7 @@
             throw new Error(M("The cloud voice reported success but wrote no file. / 雲端語音回報成功卻沒有寫出檔案。") +
                 "\n\n" + answer.path);
         }
-        return { file: file, cached: answer.cached };
+        return { file: file, cached: answer.cached, unspoken: answer.unspoken };
     }
 
     /*
@@ -2510,7 +2737,7 @@
         if (effect) { effect.enabled = false; }
         var tone = findToneBootstrap(layer);
         if (tone) { tone.enabled = false; }
-        return { audioLayer: audioLayer, cached: spoken.cached };
+        return { audioLayer: audioLayer, cached: spoken.cached, unspoken: spoken.unspoken };
     }
 
     /*
@@ -2526,7 +2753,8 @@
         var made = cloudVoiceToLayer(comp, layer, settings);
         var plan = planForLayer(comp, layer, findNativeEffect(layer));
         retimeToPlan(comp, layer, plan, options);
-        return { plan: plan, cached: made.cached, audioLayer: made.audioLayer };
+        return { plan: plan, cached: made.cached, audioLayer: made.audioLayer,
+            unspoken: made.unspoken };
     }
 
     function createOrUpdate(text, pronunciation, settings, options) {
@@ -3000,8 +3228,7 @@
         setEffectParameters(effect, textFromLayer(layer), voice, comp.time);
         effect = findNativeEffect(layer);
         var plan = planFromEngine(effect);
-        layer.outPoint = Math.min(comp.duration,
-            Math.max(layer.inPoint + comp.frameDuration, layer.inPoint + plan.duration));
+        fitLayerToPlan(comp, layer, plan.duration, true);
         if (hasTimingMarkers(layer)) { updateTimingMarkers(layer, plan); }
         markBakeStale(comp, layer);
         return true;
@@ -3162,8 +3389,7 @@
         if (comp.duration < layer.inPoint + plan.duration) {
             comp.duration = layer.inPoint + plan.duration;
         }
-        layer.outPoint = Math.max(layer.inPoint + comp.frameDuration,
-            layer.inPoint + plan.duration);
+        fitLayerToPlan(comp, layer, plan.duration, false);
         if (hadMarkers) { updateTimingMarkers(layer, plan); }
         if (hadOwnRig) { updateAnimationControls(comp, layer, plan); }
         if (hadTypeOn) {
@@ -3296,8 +3522,7 @@
             var shift = cursor - layer.inPoint;
             // startTime, not inPoint: a line the user has trimmed keeps its trim.
             layer.startTime = layer.startTime + shift;
-            layer.outPoint = Math.max(layer.inPoint + comp.frameDuration,
-                layer.inPoint + plan.duration);
+            fitLayerToPlan(comp, layer, plan.duration, false);
             if (audioLayer) { audioLayer.startTime = audioLayer.startTime + shift; }
             var boundTo = rigTargetLayer(comp, layer);
             if (boundTo) { touched.push(boundTo); }
@@ -3391,11 +3616,22 @@
             "{0} レイヤーを「{1}」に口パクさせました",
         "Lip-synced {0} layer(s); {1} overlap / 已對嘴 {0} 層；有 {1} 句重疊":
             "{0} レイヤーを口パクさせました。{1} 件が重なっています",
+        "Preview / 試聽": "試聴",
+        "Playing… / 播放中…": "再生中…",
+        "Previewed / 已試聽": "試聴しました",
+        "Type something first, or select a text layer to hear. / 請先打字，或選一個文字圖層來聽。":
+            "先に文字を入力するか、聴きたいテキストレイヤーを選んでください。",
+        "Could not render the preview. / 無法算出試聽的聲音。":
+            "試聴用の音声を生成できませんでした。",
+        "Windows could not play the preview. / Windows 無法播放試聽的聲音。":
+            "Windows が試聴用の音声を再生できませんでした。",
         "Cloud voice / 雲端語音": "クラウド音声",
         "API key / 金鑰": "APIキー",
         "Get model / 下載模型": "モデルを入手",
-        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer. After Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。下載時 After Effects 會沒有反應。":
-            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。ダウンロード中は After Effects が応答しなくなります。",
+        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is a woman speaking Mandarin with a mainland accent. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是大陸口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。":
+            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。\n\n声は大陸なまりの標準中国語を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。\n\nダウンロード中は After Effects が応答しなくなります。",
+        "This voice has no sound for these characters, so they were left out: {0} / 這個語音沒有這些字的發音，所以沒有唸出來：{0}":
+            "この音声には次の文字の読みがないため、読み上げられませんでした：{0}",
         "Downloading… / 下載中…": "ダウンロード中…",
         "Model ready / 模型已就緒": "モデルの準備ができました",
         "Download failed / 下載失敗": "ダウンロードに失敗しました",
@@ -3716,6 +3952,7 @@
      */
     var IC_SIMPLIFIED_CHARS = {
         "並": "并", "併": "并", "佇": "伫", "來": "来", "個": "个", "們": "们",
+        "陸": "陆", "灣": "湾", "國": "国", "貨": "货", "試": "试", "帶": "带", "復": "复", "鐘": "钟",
         "償": "偿", "儲": "储", "內": "内", "兩": "两", "刪": "删", "別": "别",
         "剛": "刚", "劃": "划", "劇": "剧", "動": "动", "匯": "汇", "問": "问",
         "啟": "启", "嗎": "吗", "唸": "念", "圍": "围", "圖": "图", "夠": "够",
@@ -4012,10 +4249,39 @@
         "\n一時ファイルに書き、ツールが読み終えた時点で削除します。" +
         "\n「消去」でこのパソコンから取り除けます。");
 
+    help("preview",
+        "Hear the voice the panel is set to, without applying it to anything." +
+        "\n\nWith a text layer selected it speaks that layer's words, in the" +
+        " voice you are currently setting up rather than the one the layer" +
+        " already carries. With nothing selected it speaks whatever is in the" +
+        " text box." +
+        "\n\nNothing is written to the project: no layer, no effect, no undo" +
+        " step, no file beside the .aep. The audio goes to a temporary file" +
+        " that is overwritten by the next preview." +
+        "\n\nAfter Effects stops responding while it plays, because it waits" +
+        " for the sound to finish. A line is a few seconds.",
+        "直接聽面板上這組設定的聲音，不用先套到任何圖層上。" +
+        "\n\n選著文字圖層時唸的是那一層的字，但用的是你現在正在調的聲音，不是那層已經帶著的。" +
+        "\n沒選任何東西就唸文字框裡的內容。" +
+        "\n\n專案完全不會被動到：不會多圖層、不會多特效、不會多一步復原，專案檔旁邊也不會多檔案。" +
+        "\n聲音寫在暫存檔，下次試聽就蓋掉。" +
+        "\n\n播放時 After Effects 會沒有反應，因為它在等聲音放完。一句話是幾秒鐘。",
+        "パネルに設定した声を、どのレイヤーにも適用せずにそのまま聴けます。" +
+        "\n\nテキストレイヤーを選んでいるときは、そのレイヤーの文字を、今設定中の声で読みます" +
+        "\n（レイヤーがすでに持っている声ではありません）。何も選んでいなければ入力欄の文字を読みます。" +
+        "\n\nプロジェクトには何も書き込みません。レイヤーもエフェクトも取り消し履歴も増えず、" +
+        "\n.aep の隣にファイルもできません。音声は一時ファイルに書かれ、次の試聴で上書きされます。" +
+        "\n\n再生中は After Effects が応答しなくなります。音が終わるまで待つためで、一文なら数秒です。");
+
     help("getModel",
         "Download the offline voice model, once, so a voice source can run on" +
         " this computer instead of on somebody else's." +
-        "\n\nAbout 178 MB. It is the only thing this product ever downloads," +
+        "\n\nThe voice is a woman speaking Mandarin with a mainland accent." +
+        " It is the only Chinese model with a licence that allows it to be" +
+        " shipped with a product like this one, and no offline model with a" +
+        " Taiwanese accent exists at any licence. For Taiwan Mandarin, use the" +
+        " built-in voice or Azure's zh-TW voice." +
+        "\n\nAbout 177 MB. It is the only thing this product ever downloads," +
         " and nothing is fetched until you press this and confirm. Afterwards" +
         " that voice needs no network, no account and no key, and nothing you" +
         " type ever leaves the machine." +
@@ -4026,7 +4292,10 @@
         " Files, so it needs no administrator rights and an uninstall leaves" +
         " it alone.",
         "下載離線語音模型，只下載一次，之後就有一個在你自己電腦上跑的語音來源。" +
-        "\n\n大約 178 MB。這是這個產品唯一會下載的東西，而且按下去並確認之前什麼都不會抓。" +
+        "\n\n這個聲音是大陸口音的普通話女聲。可商用授權、能跟著這種產品一起出貨的中文模型" +
+        "\n只有這一個；台灣國語的離線模型，不管什麼授權都不存在。要台灣國語請用內建的聲音，" +
+        "\n或雲端的 Azure zh-TW 音色。" +
+        "\n\n大約 177 MB。這是這個產品唯一會下載的東西，而且按下去並確認之前什麼都不會抓。" +
         "\n裝好之後那個語音不用連網、不用帳號、不用金鑰，你打的字完全不會離開這台電腦。" +
         "\n\n下載時 After Effects 會沒有反應。中途失敗就再按一次：已經抓好而且大小正確的檔案" +
         "\n會跳過，只補缺的那些。" +
@@ -4034,7 +4303,10 @@
         "\n移除程式也不會動到它。",
         "オフライン音声モデルを一度だけダウンロードします。以後は、他人のサーバーではなく" +
         "\nこのパソコンの中で動く音声が使えます。" +
-        "\n\n約 178 MB。この製品がダウンロードするのはこれだけで、ここを押して確認するまで" +
+        "\n\n声は大陸なまりの標準中国語を話す女性です。この種の製品に同梱できるライセンスの" +
+        "\n中国語モデルはこれだけで、台湾なまりのオフラインモデルはライセンスを問わず" +
+        "\n存在しません。台湾の中国語には内蔵の音声か、クラウドの Azure zh-TW をお使いください。" +
+        "\n\n約 177 MB。この製品がダウンロードするのはこれだけで、ここを押して確認するまで" +
         "\n何も取得しません。導入後はネットワークもアカウントもキーも不要で、" +
         "\n入力した文字がこのパソコンの外に出ることはありません。" +
         "\n\nダウンロード中は After Effects が応答しなくなります。途中で失敗したらもう一度" +
@@ -4683,8 +4955,16 @@
                 return;
             }
             applySettingsToUI(settingsFromEffect(effect));
+            /*
+             * A line that is not bound to a rig can still say who it is.
+             *
+             * The rig's name is the better answer whenever there is a rig, so
+             * it stays first; this is the case that used to have no answer at
+             * all — a per-layer rig, or a line unbound from a shared one.
+             */
+            var who = bound ? rigCharacterName(bound) : characterOfEffect(effect);
             status.text = M("Read settings from {0} / 已讀取設定：{0}",
-                layer.name + (bound ? "  (" + rigCharacterName(bound) + ")" : ""));
+                layer.name + (who ? "  (" + who + ")" : ""));
         };
         speakTab.add("statictext", undefined,
             "Pronunciation override (optional) / 讀音覆寫（可留空）");
@@ -4833,10 +5113,68 @@
         };
         refreshTempo();
 
+        /*
+         * Preview lives on this page because this is the page you are on when
+         * you want it: eight sliders that change how a character sounds, and no
+         * way to hear the difference without applying it to a layer first.
+         *
+         * Its own row rather than beside Random and Save. The panel is 796 px
+         * of the 800 it may have and the Speak page is 568 of 570 (invariant
+         * 8z), so a row that could be measured wrong is not worth the 30 px
+         * this one costs on a page that has 80 to spare.
+         */
+        var previewRow = timbreTab.add("group");
+        var previewButton = previewRow.add("button", undefined, "Preview / 試聽");
+        tip(previewButton, "preview");
+
+        /*
+         * What gets spoken, and why the selected layer wins.
+         *
+         * Adjusting a timbre with a line selected means you want to hear that
+         * line — in the voice the panel is holding, which is the one you are
+         * changing, not the one the layer already carries. With nothing
+         * selected it falls back to the text box, so the button still works
+         * with no composition open.
+         *
+         * Truncated to MAX_TEXT_UNITS even though the tool has no such limit:
+         * that is what the layer will say once it is applied (invariant 8m),
+         * and a preview of a longer sentence than the product can speak is a
+         * preview of the wrong thing.
+         */
+        function previewText() {
+            var comp = activeComp();
+            var chosen = comp ? selectedTextLayers(comp) : [];
+            if (chosen.length) {
+                var said = trim(textFromLayer(chosen[0]));
+                if (said) {
+                    return said.length > MAX_TEXT_UNITS
+                        ? said.substring(0, MAX_TEXT_UNITS) : said;
+                }
+            }
+            return trim(String(textInput.text));
+        }
+
+        previewButton.onClick = function () {
+            var said = previewText();
+            if (!said) {
+                alert(M("Type something first, or select a text layer to hear. / 請先打字，或選一個文字圖層來聽。"));
+                return;
+            }
+            // No undo group: this writes nothing to the project, which is the
+            // whole point of it.
+            try {
+                status.text = M("Playing… / 播放中…");
+                previewVoice(said, currentSettings());
+                status.text = M("Previewed / 已試聽");
+            } catch (error) {
+                status.text = M("Error / 錯誤");
+                alert(String(error.message || error));
+            }
+        };
+
         // Saved characters sit with the timbre they mostly carry.
         var characterRow = timbreTab.add("group");
-        var preset = characterRow.add("dropdownlist", undefined,
-            ["Custom / 自訂", "Mimi / 咪咪", "Captain / 隊長", "Grandma / 奶奶", "Robot / 機器人"]);
+        var preset = characterRow.add("dropdownlist", undefined, BUILT_IN_CHARACTERS.slice(0));
         preset.selection = 0;
         var randomButton = characterRow.add("button", undefined, "Random / 隨機");
         var saveButton = characterRow.add("button", undefined, "Save / 儲存角色");
@@ -4914,8 +5252,7 @@
         }
 
         function refreshPresetList() {
-            var wanted = ["Custom / 自訂", "Mimi / 咪咪", "Captain / 隊長",
-                "Grandma / 奶奶", "Robot / 機器人"];
+            var wanted = BUILT_IN_CHARACTERS.slice(0);
             var saved = readSavedPresets();
             var index;
             for (index = 0; index < saved.length; index += 1) { wanted.push(saved[index].name); }
@@ -4926,14 +5263,59 @@
         }
 
         var savedPresets = refreshPresetList();
+
+        // The eight numbers a saved character is, in the order they are stored.
+        // One list, because Save writes it and currentCharacterName() compares
+        // against it, and two copies would disagree the first time a control
+        // joined a character.
+        function presetValuesNow() {
+            return [voice.selection ? voice.selection.index : 0,
+                emotion.selection ? emotion.selection.index : 0,
+                characterSize.selection ? characterSize.selection.index : 2,
+                pitch.value, speed.value, clarity.value, cuteness.value,
+                Math.round(seed.value)];
+        }
+
+        /*
+         * The character the panel is on, or nothing, for a line with no rig.
+         *
+         * "On a character" means the dropdown names one *and* the sliders still
+         * match it. Picking Mimi and then dragging Pitch leaves the dropdown
+         * saying Mimi, and a line labelled Mimi that does not sound like Mimi
+         * is a worse record than no label — this is the same reasoning as the
+         * stale-bake rule in invariant 8r, applied to a name.
+         *
+         * A built-in is stored by its English half. The labels are
+         * `"Mimi / 咪咪"` and the panel translates them, so storing what is on
+         * screen would make one line read as two different characters depending
+         * on which language it was applied in (invariant 8i), on a record meant
+         * to outlive the session.
+         */
+        function currentCharacterName() {
+            var at = preset.selection ? preset.selection.index : 0;
+            if (at <= 0) { return ""; }
+            var built = at < builtInPresets.length;
+            var values = built ? builtInPresets[at]
+                : (savedPresets[at - builtInPresets.length] || {}).values;
+            if (!values) { return ""; }
+            var now = presetValuesNow();
+            var index;
+            for (index = 0; index < values.length && index < now.length; index += 1) {
+                if (Math.abs(values[index] - now[index]) > 0.0005) { return ""; }
+            }
+            if (!built) { return savedPresets[at - builtInPresets.length].name; }
+            var label = BUILT_IN_CHARACTERS[at];
+            var split = label.indexOf(" / ");
+            return split < 0 ? label : label.substring(0, split);
+        }
+
         saveButton.onClick = function () {
             var name = prompt(M("Name this character / 幫這個角色取個名字"),
                 M("Character {0} / 角色 {0}", savedPresets.length + 1));
             if (!name) { return; }
             name = trim(name).replace(/[|=,]/g, " ");
             if (!name) { return; }
-            var values = [voice.selection.index, emotion.selection.index, characterSize.selection.index,
-                pitch.value, speed.value, clarity.value, cuteness.value, Math.round(seed.value)];
+            var values = presetValuesNow();
             var index;
             var replaced = false;
             for (index = 0; index < savedPresets.length; index += 1) {
@@ -5330,6 +5712,11 @@
                 source: source.selection ? source.selection.index : 0,
                 vibrato: vibrato.value,
                 vibratoRate: vibratoRate.value,
+                // Who this is, for a line that will not be bound to a rig.
+                // Empty unless the sliders still match the character named in
+                // the dropdown; applyToTextLayer() prefers the rig's name when
+                // there is one.
+                character: currentCharacterName(),
                 // How a melody is sung, which the panel does own. The melody
                 // itself is not here on purpose: it belongs to the line, and
                 // only Import puts one in.
@@ -6271,7 +6658,7 @@
                 return;
             }
             if (!confirm(M(
-                    "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer. After Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。下載時 After Effects 會沒有反應。",
+                    "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is a woman speaking Mandarin with a mainland accent. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是大陸口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。",
                     Math.round(LOCAL_MODEL_MEGABYTES)))) {
                 return;
             }
@@ -6386,10 +6773,12 @@
                 var reused = 0;
                 var touched = [];
                 var planned = [];
+                var unspoken = "";
                 for (index = 0; index < ready.length; index += 1) {
                     how.text = ready[index].text;
                     var voiced = cloudVoiceLine(comp, ready[index].layer, how, options);
                     if (voiced.cached) { reused += 1; }
+                    if (voiced.unspoken) { unspoken += voiced.unspoken; }
                     planned.push({ layer: ready[index].layer, plan: voiced.plan });
                     var bound = rigTargetLayer(comp, ready[index].layer);
                     if (bound) { touched.push(bound); }
@@ -6404,6 +6793,19 @@
                     ready.length - reused, reused);
                 status.text = M("Cloud voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音",
                     ready.length, picked.label);
+                /*
+                 * Said after the work rather than instead of it.
+                 *
+                 * The lines are voiced and the mouths move; what this reports is
+                 * that some characters had no sound in this model, which is one
+                 * alert at the end rather than one per line. The audio is right
+                 * about what it contains — the analyser read the file, not the
+                 * script — so this is the only place the difference can be seen.
+                 */
+                if (unspoken) {
+                    alert(M("This voice has no sound for these characters, so they were left out: {0} / 這個語音沒有這些字的發音，所以沒有唸出來：{0}",
+                        unspoken));
+                }
             } catch (error) {
                 status.text = M("Error / 錯誤");
                 alert(String(error.message || error));

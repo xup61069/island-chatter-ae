@@ -14,16 +14,34 @@
 // somebody who has not installed the model should see no local option at all
 // rather than an option that fails when pressed.
 //
-// Why it is not GPL: Piper — the obvious choice — moved to GPL-3.0 in October
-// 2025, and even its MIT-era releases linked espeak-ng, which is GPL v3 or
-// later. Either would force this whole product open. sherpa-onnx is Apache-2.0,
-// the MeloTTS weights are MIT, onnxruntime is MIT, and the Chinese pipeline
-// uses a lexicon rather than espeak-ng, so the question does not arise. That
-// chain is the reason this file exists at all; do not swap the engine without
-// re-reading it.
+/*
+ * Why the dependency list is this short, and why it is the whole point.
+ *
+ * Piper was the obvious choice and cannot be used: it moved to GPL-3.0 in
+ * October 2025, and even its MIT-era releases linked espeak-ng, which is GPL v3
+ * or later. sherpa-onnx looked like the answer — Apache-2.0, a lexicon-driven
+ * Chinese path, no espeak-ng anywhere near the code that runs. That reasoning
+ * shipped in 3.0.0 and was wrong, and the way it was wrong is the lesson:
+ * `sherpa-onnx-c-api.dll` *statically links espeak-ng*, with no build switch to
+ * exclude it, and the GPL attaches to the file that is distributed rather than
+ * to the code paths that execute. The check asked whether the Chinese pipeline
+ * *used* espeak-ng — a consequence — instead of whether the shipped binary
+ * *contained* it, which is the mechanism and is a `strings` away.
+ *
+ * So sherpa-onnx is gone and what is left is ONNX Runtime (MIT), which runs the
+ * same MeloTTS weights (MIT, a verbatim copy in the model package). The front
+ * end that sherpa-onnx used to provide lives in src/melo.cpp, where it is a
+ * better fit anyway: the Chinese is read by this product's own engine, so the
+ * offline voice says a line exactly the way the built-in voice says it,
+ * `[重|chong2]` included.
+ *
+ * Measured on this machine at 4.3x real time, against sherpa-onnx's 2.6x.
+ */
 
 #include "island_chatter/cloud.hpp"
-#include "sherpa-onnx/c-api/c-api.h"
+#include "island_chatter/melo.hpp"
+
+#include <onnxruntime_cxx_api.h>
 
 #include <algorithm>
 #include <cmath>
@@ -43,6 +61,8 @@
 namespace {
 
 namespace cloud = island_chatter::cloud;
+namespace melo = island_chatter::melo;
+using island_chatter::Settings;
 
 /*
  * Where the model comes from, and why the fetch lives in *this* tool.
@@ -70,14 +90,21 @@ const ModelFile kModelFiles[] = {
     {"model.onnx", 170429550u},
     {"lexicon.txt", 6837671u},
     {"tokens.txt", 655u},
-    {"date.fst", 59154u},
-    {"number.fst", 64482u},
-    {"phone.fst", 88630u},
-    {"new_heteronym.fst", 21974u},
 };
 
-// The dict/ folder in the published package is deliberately not here: from
-// sherpa-onnx 1.12.15 this model does not use it, and it is 11 MB.
+/*
+ * Three files, where 3.0.0 fetched seven.
+ *
+ * The four that are gone are OpenFST rule files — number, date, phone and
+ * heteronym normalisation — and they are gone because reading them needs
+ * OpenFST, which came in through sherpa-onnx. What they did has not been
+ * dropped with them: digits are spelled out by `melo::normalise_numbers`, and
+ * heteronyms were always the engine's job here, since it reads the text.
+ *
+ * The dict/ folder in the published package is not fetched either. It is 11 MB
+ * of jieba dictionary for a segmenter this does not use: the engine decides
+ * where the words are.
+ */
 const wchar_t* kModelHost = L"huggingface.co";
 const wchar_t* kModelPathPrefix = L"/csukuangfj/vits-melo-tts-zh_en/resolve/main/";
 
@@ -97,7 +124,7 @@ const wchar_t* kModelPathPrefix = L"/csukuangfj/vits-melo-tts-zh_en/resolve/main
 const cloud::Provider& local_provider() {
     static const cloud::Provider row{
         "local-melo",
-        "Local model (zh+en)",
+        "Local model (zh mainland + en)",
         "-",                       // no host; it never leaves this machine
         "-",
         "",
@@ -155,21 +182,6 @@ bool model_is_installed(const std::filesystem::path& root) {
         if (std::filesystem::file_size(path, failed) != file.bytes) { return false; }
     }
     return true;
-}
-
-std::string rule_fsts(const std::filesystem::path& root) {
-    // Text normalisation: phone numbers, dates, digits, and the heteronyms a
-    // lexicon alone gets wrong. Each is optional, so a model package without
-    // one still runs rather than refusing.
-    std::string joined;
-    for (const char* name : {"phone.fst", "date.fst", "number.fst", "new_heteronym.fst"}) {
-        const auto path = root / name;
-        std::error_code failed;
-        if (!std::filesystem::is_regular_file(path, failed)) { continue; }
-        if (!joined.empty()) { joined += ","; }
-        joined += path.u8string();
-    }
-    return joined;
 }
 
 void write_atomically(const std::filesystem::path& path,
@@ -369,60 +381,147 @@ void install_model(const std::filesystem::path& root) {
     std::cout << "VOICE 1\nOK " << cloud::as_hex(root.u8string()) << " " << total << " 0\n";
 }
 
+std::string read_text_file(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) {
+        throw std::runtime_error("the model file " + path.filename().u8string() +
+                                 " could not be opened");
+    }
+    // Sized and read in one call rather than through istreambuf_iterator, which
+    // goes a character at a time: on the 6.8 MB lexicon that difference is 1.1 s
+    // of the 4 s a line takes to speak.
+    const auto size = static_cast<std::streamsize>(file.tellg());
+    file.seekg(0, std::ios::beg);
+    std::string out(static_cast<std::size_t>(size), '\0');
+    if (size > 0 && !file.read(out.data(), size)) {
+        throw std::runtime_error("the model file " + path.filename().u8string() +
+                                 " could not be read to the end");
+    }
+    return out;
+}
+
+/*
+ * What the model says about itself, rather than what this file assumes.
+ *
+ * Both of these are wrong if guessed, and neither is wrong loudly. The rate
+ * goes into the WAV header, so a wrong one plays the whole line at the wrong
+ * pitch and the analyser then times the mouth against it (invariant 8aa spells
+ * out what a rate mismatch costs downstream). The speaker id is 1 in this
+ * package even though it declares one speaker, and passing 0 — which is what
+ * sherpa-onnx's config defaulted to and what any reasonable person would write
+ * — is a different voice, not an error.
+ */
+std::string metadata_value(const Ort::ModelMetadata& metadata, const char* key,
+                           Ort::AllocatorWithDefaultOptions& allocator) {
+    const auto value = metadata.LookupCustomMetadataMapAllocated(key, allocator);
+    return value ? std::string(value.get()) : std::string();
+}
+
 std::vector<unsigned char> speak(const std::filesystem::path& root, const std::string& text,
-                                 std::uint32_t* rate_out) {
-    const auto model = (root / "model.onnx").u8string();
-    const auto lexicon = (root / "lexicon.txt").u8string();
-    const auto tokens = (root / "tokens.txt").u8string();
-    const auto rules = rule_fsts(root);
-
-    SherpaOnnxOfflineTtsConfig config{};
-    config.model.vits.model = model.c_str();
-    config.model.vits.lexicon = lexicon.c_str();
-    config.model.vits.tokens = tokens.c_str();
-    config.model.vits.noise_scale = 0.667f;
-    config.model.vits.noise_scale_w = 0.8f;
-    config.model.vits.length_scale = 1.0f;
-    config.model.num_threads = 2;
-    config.model.provider = "cpu";
-    config.rule_fsts = rules.c_str();
-    // One sentence at a time. The panel bakes a line, not a paragraph, and
-    // batching changes where the silences fall.
-    config.max_num_sentences = 1;
-
-    const SherpaOnnxOfflineTts* tts = SherpaOnnxCreateOfflineTts(&config);
-    if (!tts) {
-        throw std::runtime_error("the local model could not be loaded; it may be incomplete");
+                                 std::uint32_t* rate_out, std::string* unspoken_out) {
+    const auto tokens = melo::Tokens::parse(read_text_file(root / "tokens.txt"));
+    const auto lexicon = melo::Lexicon::parse(read_text_file(root / "lexicon.txt"));
+    if (tokens.size() == 0) {
+        throw std::runtime_error("the model's tokens.txt has no phones in it");
     }
-    // GenerateWithConfig, not the older Generate: the three-argument form is
-    // marked deprecated in 1.13, and starting a new file on an API the vendor
-    // has already announced the end of is a rewrite scheduled for later.
-    SherpaOnnxGenerationConfig generation{};
-    generation.sid = 0;
-    generation.speed = 1.0f;
-    generation.silence_scale = 0.2f;
-    const SherpaOnnxGeneratedAudio* audio =
-        SherpaOnnxOfflineTtsGenerateWithConfig(tts, text.c_str(), &generation, nullptr, nullptr);
-    if (!audio || !audio->samples || audio->n <= 0) {
-        if (audio) { SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio); }
-        SherpaOnnxDestroyOfflineTts(tts);
-        throw std::runtime_error("the local model produced no audio for that line");
+
+    // The engine's own defaults. Nothing here changes the sound this model
+    // makes — the fields that would are a synthesizer's, and this line is not
+    // going through that synthesizer — but the reading is the engine's, and
+    // that is what these settings decide.
+    const Settings settings;
+    const auto plan = melo::plan(text, settings, lexicon, tokens);
+    if (unspoken_out) { *unspoken_out = plan.unspoken; }
+    if (plan.syllables == 0) {
+        std::string message = "there is nothing in that line this model can say";
+        if (!plan.unspoken.empty()) { message += ": " + plan.unspoken; }
+        throw std::runtime_error(message);
     }
+
+    Ort::Env environment(ORT_LOGGING_LEVEL_ERROR, "island_chatter");
+    Ort::SessionOptions options;
+    // Two, as sherpa-onnx used. More threads help a longer line and cost a
+    // short one, and a line of dialogue is short.
+    options.SetIntraOpNumThreads(2);
+    options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    Ort::Session session(environment, (root / "model.onnx").wstring().c_str(), options);
+
+    Ort::AllocatorWithDefaultOptions allocator;
+    const auto metadata = session.GetModelMetadata();
+    const std::string rate_text = metadata_value(metadata, "sample_rate", allocator);
+    const std::string speaker_text = metadata_value(metadata, "speaker_id", allocator);
+    std::uint32_t rate = 44100;
+    std::int64_t speaker = 0;
+    try {
+        if (!rate_text.empty()) { rate = static_cast<std::uint32_t>(std::stoul(rate_text)); }
+        if (!speaker_text.empty()) { speaker = std::stoll(speaker_text); }
+    } catch (const std::exception&) {
+        throw std::runtime_error("the model states a sample rate or speaker this tool "
+                                 "cannot read: \"" + rate_text + "\", \"" + speaker_text + "\"");
+    }
+    if (rate < 8000U || rate > 192000U) {
+        throw std::runtime_error("the model states a sample rate of " + std::to_string(rate) +
+                                 ", which is not a rate After Effects can import");
+    }
+
+    auto x = plan.tokens;
+    auto tones = plan.tones;
+    std::vector<std::int64_t> lengths{static_cast<std::int64_t>(x.size())};
+    std::array<std::int64_t, 2> sequence_shape{1, static_cast<std::int64_t>(x.size())};
+    std::array<std::int64_t, 1> single_shape{1};
+    std::vector<std::int64_t> speaker_value{speaker};
+    // The model's own published defaults. noise_scale and noise_scale_w are how
+    // much variation the decoder is allowed; length_scale is speed, left at 1
+    // because the panel's Speed belongs to the engine's synthesizer and running
+    // two speed controls that do different things is worse than having one.
+    std::vector<float> noise_scale{0.667F};
+    std::vector<float> length_scale{1.0F};
+    std::vector<float> noise_scale_w{0.8F};
+
+    const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    std::vector<Ort::Value> inputs;
+    inputs.push_back(Ort::Value::CreateTensor<std::int64_t>(
+        memory, x.data(), x.size(), sequence_shape.data(), sequence_shape.size()));
+    inputs.push_back(Ort::Value::CreateTensor<std::int64_t>(
+        memory, lengths.data(), lengths.size(), single_shape.data(), single_shape.size()));
+    inputs.push_back(Ort::Value::CreateTensor<std::int64_t>(
+        memory, tones.data(), tones.size(), sequence_shape.data(), sequence_shape.size()));
+    inputs.push_back(Ort::Value::CreateTensor<std::int64_t>(
+        memory, speaker_value.data(), speaker_value.size(), single_shape.data(),
+        single_shape.size()));
+    inputs.push_back(Ort::Value::CreateTensor<float>(
+        memory, noise_scale.data(), noise_scale.size(), single_shape.data(), single_shape.size()));
+    inputs.push_back(Ort::Value::CreateTensor<float>(
+        memory, length_scale.data(), length_scale.size(), single_shape.data(), single_shape.size()));
+    inputs.push_back(Ort::Value::CreateTensor<float>(
+        memory, noise_scale_w.data(), noise_scale_w.size(), single_shape.data(),
+        single_shape.size()));
+
+    const char* const input_names[] = {"x", "x_lengths", "tones", "sid",
+                                       "noise_scale", "length_scale", "noise_scale_w"};
+    const char* const output_names[] = {"y"};
+    auto outputs = session.Run(Ort::RunOptions{nullptr}, input_names, inputs.data(),
+                               inputs.size(), output_names, 1);
+    if (outputs.empty() || !outputs[0].IsTensor()) {
+        throw std::runtime_error("the model returned no audio for that line");
+    }
+    const auto shape = outputs[0].GetTensorTypeAndShapeInfo();
+    const std::size_t count = shape.GetElementCount();
+    if (count == 0) {
+        throw std::runtime_error("the model returned an empty waveform for that line");
+    }
+    const float* samples = outputs[0].GetTensorData<float>();
 
     std::vector<unsigned char> pcm;
-    pcm.reserve(static_cast<std::size_t>(audio->n) * 2U);
-    for (std::int32_t index = 0; index < audio->n; ++index) {
+    pcm.reserve(count * 2U);
+    for (std::size_t index = 0; index < count; ++index) {
         const auto value = static_cast<std::int16_t>(
-            std::lround(std::clamp(audio->samples[index], -1.0f, 1.0f) * 32767.0f));
+            std::lround(std::clamp(samples[index], -1.0F, 1.0F) * 32767.0F));
         pcm.push_back(static_cast<unsigned char>(value & 0xFF));
         pcm.push_back(static_cast<unsigned char>((value >> 8) & 0xFF));
     }
-    // The rate the model states, not the one the table guesses.
-    *rate_out = static_cast<std::uint32_t>(audio->sample_rate);
-
-    SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
-    SherpaOnnxDestroyOfflineTts(tts);
-    return cloud::wav_from_pcm16(pcm, *rate_out);
+    *rate_out = rate;
+    return cloud::wav_from_pcm16(pcm, rate);
 }
 
 [[noreturn]] void usage() {
@@ -508,11 +607,25 @@ int main(int argc, char** argv) {
         }
 
         std::uint32_t rate = 0;
-        const auto wav = speak(root, params.text, &rate);
+        std::string unspoken;
+        const auto wav = speak(root, params.text, &rate, &unspoken);
         std::error_code ignored;
         std::filesystem::create_directories(folder, ignored);
         write_atomically(destination, wav);
         std::cout << "VOICE 1\nOK " << printable << " " << wav.size() << " 0\n";
+        /*
+         * A line that came back missing a word says which word.
+         *
+         * After the OK and with no header of its own, so a reader written
+         * against the cloud tool's protocol — which has no such line — finds
+         * its VOICE on the first line and its OK where it expects, and simply
+         * does not recognise this one. Kana is the case this exists for: the
+         * engine reads it, this model has no Japanese in it, and the
+         * alternative is a render that is quietly short of a word.
+         */
+        if (!unspoken.empty()) {
+            std::cout << "WARN " << cloud::as_hex(unspoken) << "\n";
+        }
         return 0;
     } catch (const std::exception& error) {
         // stdout as hex, for the reason island_chatter_voice gives: callSystem()

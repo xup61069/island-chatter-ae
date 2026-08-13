@@ -7,13 +7,15 @@ param(
 $ErrorActionPreference = "Stop"
 # Part of the release synchronisation list in CLAUDE.md; tests/validate-script.js
 # checks this against package.json.
-$IslandChatterVersion = "2.5.0"
+$IslandChatterVersion = "3.1.0"
 # After Effects releases this plug-in is built and verified against.
 $MinimumSupportedYear = 2025
 $requiredFiles = @(
     "IslandChatterNative.aex",
     "island_chatter_bake.exe",
     "island_chatter_voice.exe",
+    "island_chatter_local.exe",
+    "onnxruntime.dll",
     "IslandChatterNativePanel.jsx"
 )
 
@@ -101,6 +103,14 @@ foreach ($target in $targets) {
                 -Destination (Join-Path $pluginDirectory "island_chatter_bake.exe") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "island_chatter_voice.exe") `
                 -Destination (Join-Path $pluginDirectory "island_chatter_voice.exe") -Force
+            # The offline voice and the runtime it needs. The model itself is
+            # not here: it is 177 MB the user fetches once, into LOCALAPPDATA,
+            # so it needs no administrator rights and an uninstall does not
+            # silently throw it away.
+            Copy-Item -LiteralPath (Join-Path $payloadRoot "island_chatter_local.exe") `
+                -Destination (Join-Path $pluginDirectory "island_chatter_local.exe") -Force
+            Copy-Item -LiteralPath (Join-Path $payloadRoot "onnxruntime.dll") `
+                -Destination (Join-Path $pluginDirectory "onnxruntime.dll") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterNativePanel.jsx") `
                 -Destination (Join-Path $panelDirectory "IslandChatterNativePanel.jsx") -Force
             # Shipped up to 1.0.10, when the panel stopped carrying its own copy
@@ -111,18 +121,14 @@ foreach ($target in $targets) {
             if (Test-Path -LiteralPath $strandedReadings -PathType Leaf) {
                 Remove-Item -LiteralPath $strandedReadings -Force
             }
-            # Same idea, and it matters more: an offline-voice build was made
-            # and installed before it was held back, and sherpa-onnx-c-api.dll
-            # links espeak-ng (GPL v3+). Upgrading has to take those away rather
-            # than leave 21 MB of them sitting in Program Files, where the panel
-            # would still find the tool and offer a voice this build does not
-            # support. THIRD_PARTY_NOTICES.md explains why it is held back.
-            foreach ($stranded in @("island_chatter_local.exe",
-                    "sherpa-onnx-c-api.dll", "onnxruntime.dll")) {
-                $strandedPath = Join-Path $pluginDirectory $stranded
-                if (Test-Path -LiteralPath $strandedPath -PathType Leaf) {
-                    Remove-Item -LiteralPath $strandedPath -Force
-                }
+            # Same idea, and it matters more: a 3.0.0 development build linked
+            # sherpa-onnx-c-api.dll, which statically links espeak-ng (GPL v3+).
+            # Nothing installs it now, and an upgrade has to take the stranded
+            # copy away rather than leave 4 MB of somebody else's GPL-linked
+            # binary in Program Files. THIRD_PARTY_NOTICES.md explains why.
+            $strandedSherpa = Join-Path $pluginDirectory "sherpa-onnx-c-api.dll"
+            if (Test-Path -LiteralPath $strandedSherpa -PathType Leaf) {
+                Remove-Item -LiteralPath $strandedSherpa -Force
             }
         } catch [System.UnauthorizedAccessException] {
             throw ("Cannot write to '$target'. Run this installer from a PowerShell window " +

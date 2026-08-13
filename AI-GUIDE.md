@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 2.5.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.1.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -130,8 +130,8 @@ whatever the panel is showing.
 | Tab | What is on it |
 | --- | --- |
 | **Speak** | The text box, Read selected layer, the pronunciation override, the voice / emotion / character-size menus, Pitch, Speed, Volume, Consonant, Clarity, Cuteness, Tempo — and *(2.4.0)* Import script, Gap, Hold, Speakers, which moved here because importing a script is typing with more lines in it |
-| **Timbre & animation** | *(2.4.0, was two tabs)* Formant, sound source, Vibrato, Vibrato Rate, Seed, the saved-character menu with Random / Save / Delete; then Markers, Fit Duration, Rig, Type-On, Chatter, Center, per-layer or shared rig, the character menu with New / Rebuild, Mouth switch, Leave, Smoothness. Both halves are about the *character* rather than about the line |
-| **Sing & dub** | The three ways a performance arrives already made: Choose MIDI, the track menu, Transpose, Key, Tone, Sing, Speak; *(2.3.0)* Lip-sync from audio, Vowels, Sensitivity; *(2.4.0)* Cloud voice, the voice-source menu, API key, Voice ID, Model, Region; *(2.5.0)* Get model, which is greyed out — the offline voice is written but not shipped, for the two reasons in CHANGELOG.md |
+| **Timbre & animation** | *(2.4.0, was two tabs)* Formant, sound source, Vibrato, Vibrato Rate, Seed, *(3.1.0)* Preview, the saved-character menu with Random / Save / Delete; then Markers, Fit Duration, Rig, Type-On, Chatter, Center, per-layer or shared rig, the character menu with New / Rebuild, Mouth switch, Leave, Smoothness. Both halves are about the *character* rather than about the line |
+| **Sing & dub** | The three ways a performance arrives already made: Choose MIDI, the track menu, Transpose, Key, Tone, Sing, Speak; *(2.3.0)* Lip-sync from audio, Vowels, Sensitivity; *(2.4.0)* Cloud voice, the voice-source menu, API key, Voice ID, Model, Region; *(3.1.0)* Get model, which fetches the offline model — 177 MB, once, and the voice then runs on this machine with no network, no account and no key. It is a mainland-accented Mandarin woman; that is the only Chinese model with a licence that allows it, and no Taiwanese-accented offline model exists |
 
 If a user is on an older build the tabs are different — **Timbre** and **Animation** were
 separate through 2.3.0, and **Import** held the script importer. Ask which version they have
@@ -188,7 +188,13 @@ Grouped by what they are for. Exact strings in all four languages are in
   every voice setting, back into the panel.
 - **Apply to selected text layers** — the main action. See [section 3](#3-the-shortest-path-to-a-result).
 - **Remove** — takes Island Chatter off the selected layers completely: the effect, the Tone
-  bootstrap, the rig sliders, the `IC:` markers and the Type-On animator.
+  bootstrap, the rig sliders, the `IC:` markers and the Type-On animator. *(3.1.0)* It also puts
+  the layer's length back to what it was before Fit Duration changed it. A layer that was never
+  fitted is left alone.
+- *(3.1.0)* **Preview** (on the Timbre & animation page) — speaks the selected layer's text, or
+  the text box, in the voice the panel is currently set to, without touching the project: no
+  layer, no effect, no undo step, no file beside the .aep. After Effects stops responding while
+  it plays, because it waits for the sound to finish.
 
 **Per-line options** (read when Apply runs)
 
@@ -229,8 +235,8 @@ Grouped by what they are for. Exact strings in all four languages are in
 Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
-- Controls and menu entries with a label: **87**
-- Distinct messages the panel can print: **87**
+- Controls and menu entries with a label: **84**
+- Distinct messages the panel can print: **91**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -247,7 +253,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Apply to selected text layers | 套用到選取文字圖層 | 应用到选中文本图层 | 選択したテキストレイヤーに適用 |
 | Bake | 轉成音訊 | 转成音频 | 音声ファイルに書き出す |
 | Buzzy | 電子 | 电子 | バジー |
-| Captain | 隊長 | 队长 | たいちょう |
 | Center | 維持置中 | 维持置中 | 中央ぞろえを保つ |
 | Chatter | 逐字開合 | 逐字开合 | 1 音ずつ開閉 |
 | Chip | 電子 | 电子 | チップ |
@@ -257,7 +262,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Cloud voice | 雲端語音 | 云端语音 | クラウド音声 |
 | Consonant | 聲母 | 声母 | しいん |
 | Cozy | 溫厚 | 温厚 | コージー |
-| Custom | 自訂 | 自订 | カスタム |
 | Cuteness | 可愛度 | 可爱度 | かわいさ |
 | Delete | 刪除 | 删除 | 削除 |
 | Direct text-layer voice | 文字圖層直接發聲 | 文本图层直接发声 | テキストレイヤーが直接しゃべる |
@@ -269,7 +273,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Gap | 間隔 | 间隔 | あいだ |
 | Get model | 下載模型 | 下载模型 | モデルを入手 |
 | Giant | 巨大 | 巨大 | きょだい |
-| Grandma | 奶奶 | 奶奶 | おばあちゃん |
 | Granular | 破碎 | 破碎 | グラニュラー |
 | Growl | 低吼 | 低吼 | うなり |
 | Happy | 開心 | 开心 | うれしい |
@@ -280,13 +283,13 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Lip-sync from audio | 音檔轉口型 | 音文件转口型 | 音声から口を動かす |
 | Markers | 逐字標記 | 逐字标记 | マーカー |
 | Metallic | 金屬 | 金属 | メタリック |
-| Mimi | 咪咪 | 咪咪 | ミミ |
 | Model | 模型 | 模型 | モデル |
 | Mouth switch | 建立嘴型切換 | 创建口型切换 | 口パクをつなぐ |
 | Neutral | 中性 | 中性 | ふつう |
 | New | 新增角色 | 新增角色 | キャラを追加 |
 | Per layer | 每層 | 每层 | レイヤーごと |
 | Pitch | 音高 | 音高 | ピッチ |
+| Preview | 試聽 | 试听 | 試聴 |
 | Pronunciation override (optional) | 讀音覆寫（可留空） | 读音覆写（可留空） | 読み方の指定（省略可） |
 | Question | 疑問 | 疑问 | ぎもん |
 | Random | 隨機 | 随机 | ランダム |
@@ -651,7 +654,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Choose or create a character first. | 請先選擇或新增角色。 | 请先选择或新增角色。 | 先にキャラを選ぶか追加してください。 |
 | Cloud voice on {0} layer(s) via {1} | 已用 {1} 為 {0} 層配音 | 已用 {1} 为 {0} 层配音 | {1} で {0} レイヤーに声を当てました |
 | Download failed | 下載失敗 | 下载失败 | ダウンロードに失敗しました |
-| Download the offline voice model? ⏎  ⏎ About {0} MB, once. After that this voice needs no network and no account — it runs on this computer. After Effects will not respond while it downloads. | 要下載離線語音模型嗎？ ⏎  ⏎ 大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。下載時 After Effects 會沒有反應。 | 要下载离线语音模型吗？ ⏎  ⏎ 大约 {0} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。下载时 After Effects 会没有反应。 | オフライン音声モデルをダウンロードしますか？ ⏎  ⏎ 約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。ダウンロード中は After Effects が応答しなくなります。 |
+| Download the offline voice model? ⏎  ⏎ About {0} MB, once. After that this voice needs no network and no account — it runs on this computer. ⏎  ⏎ It is a woman speaking Mandarin with a mainland accent. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure. ⏎  ⏎ After Effects will not respond while it downloads. | 要下載離線語音模型嗎？ ⏎  ⏎ 大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。 ⏎  ⏎ 這個聲音是大陸口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。 ⏎  ⏎ 下載時 After Effects 會沒有反應。 | 要下载离线语音模型吗？ ⏎  ⏎ 大约 {0} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。 ⏎  ⏎ 这个声音是大陆口音的普通话女声。可商用授权的中文模型只有这一个，台湾国语的离线模型并不存在；要台湾国语请用内建的声音或 Azure。 ⏎  ⏎ 下载时 After Effects 会没有反应。 | オフライン音声モデルをダウンロードしますか？ ⏎  ⏎ 約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。 ⏎  ⏎ 声は大陸なまりの標準中国語を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。 ⏎  ⏎ ダウンロード中は After Effects が応答しなくなります。 |
 | Downloading… | 下載中… | 下载中… | ダウンロード中… |
 | Error | 錯誤 | 错误 | エラー |
 | Imported {0} layer(s) | 已匯入 {0} 層 | 已导入 {0} 层 | {0} レイヤーを読み込みました |
@@ -673,6 +676,8 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Open an active composition first. | 請先開啟合成。 | 请先开启合成。 | 先にコンポジションを開いてください。 |
 | Overlapping lines: {0} | 台詞重疊：{0} | 台词重叠：{0} | セリフが重なっています：{0} |
 | Paste a script into the text box first. | 請先把劇本貼進上面的文字框。 | 请先把剧本粘贴到上面的文本框。 | 先に台本をテキスト欄に貼り付けてください。 |
+| Playing… | 播放中… | 播放中… | 再生中… |
+| Previewed | 已試聽 | 已试听 | 試聴しました |
 | Re-flowed {0} layer(s) @ {1} beat(s) | 已排列 {0} 層 @ {1} 拍 | 已排列 {0} 层 @ {1} 拍 | {0} レイヤーを {1} 拍あけて並べ直しました |
 | Re-synced {0} layer(s) | 已重新同步 {0} 層 | 已重新同步 {0} 层 | {0} レイヤーを更新しました |
 | Read settings from {0} | 已讀取設定：{0} | 已读取设置：{0} | {0} から設定を読み込みました |
@@ -697,7 +702,9 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | There are already {0} layer(s) here from an earlier MIDI import. ⏎  ⏎ Remove them first? No adds a second copy. | 這個合成裡已經有 {0} 層是之前匯入的。 ⏎  ⏎ 要先移除它們嗎？按「否」就直接再加一份。 | 这个合成里已经有 {0} 层是之前导入的。 ⏎  ⏎ 要先移除它们吗？按「否」就直接再加一份。 | このコンポには前回の MIDI 読み込みで作られたレイヤーが {0} 枚あります。 ⏎  ⏎ 先に取り除きますか？「いいえ」でもう一組追加します。 |
 | There are no Island Chatter lines here. | 這個合成裡沒有台詞圖層。 | 这个合成里没有台词图层。 | このコンポにセリフのレイヤーがありません。 |
 | There is no shared rig here. | 這個合成裡沒有共用控制器。 | 这个合成里没有共用控制器。 | このコンポには共有リグがありません。 |
+| This voice has no sound for these characters, so they were left out: {0} | 這個語音沒有這些字的發音，所以沒有唸出來：{0} | 这个语音没有这些字的发音，所以没有念出来：{0} | この音声には次の文字の読みがないため、読み上げられませんでした：{0} |
 | Truncated: {0} | 已截斷：{0} | 已截断：{0} | 文字が切れました：{0} |
+| Type something first, or select a text layer to hear. | 請先打字，或選一個文字圖層來聽。 | 请先打字，或选一个文本图层来听。 | 先に文字を入力するか、聴きたいテキストレイヤーを選んでください。 |
 | truncated: {0} | 被截斷：{0} | 被截断：{0} | 切れました：{0} |
 | {0} is longer than {1} characters. Split it first. | {0} 超過 {1} 個字，請先拆成幾句。 | {0} 超过 {1} 个字，请先拆成几句。 | {0} は {1} 文字を超えています。先に分けてください。 |
 | {0} is missing. Reinstall Island Chatter. | 找不到 {0}，請重新安裝 Island Chatter。 | 找不到 {0}，请重新安装 Island Chatter。 | {0} が見つかりません。Island Chatter を再インストールしてください。 |

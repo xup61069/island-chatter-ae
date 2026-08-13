@@ -296,6 +296,108 @@
             "Source Text survived the removal");
         attempt("remove again on an already clean layer", function () { removeFromLayer(comp, cleanup); });
 
+        /*
+         * Remove puts the length back, which nothing portable can see.
+         *
+         * validate-script.js can prove there is exactly one place that fits a
+         * line and that Remove reads the record, but only a host has an
+         * `outPoint`. The layer is deliberately trimmed to something that is
+         * neither the composition's length nor the speech's, so a restore that
+         * merely happens to land on one of those cannot pass.
+         */
+        var trimmed = comp.layers.addText("長度測試，這一句要夠長才看得出來。");
+        trimmed.inPoint = 0.5;
+        trimmed.outPoint = 3.25;
+        var wanted = trimmed.outPoint - trimmed.inPoint;
+        attempt("apply with Fit Duration on", function () {
+            applyToTextLayer(comp, trimmed, "", settings, options);
+        });
+        var fitted = trimmed.outPoint - trimmed.inPoint;
+        check(Math.abs(fitted - wanted) > 0.05,
+            "Fit Duration actually changed the length (" + wanted.toFixed(3) +
+            " -> " + fitted.toFixed(3) + "), or this test proves nothing");
+        check(findNamedEffect(trimmed, ORIGINAL_LENGTH_NAME) !== null,
+            "the original length was recorded on the layer");
+        // A second Apply must not overwrite the record with the engine's length.
+        attempt("apply a second time", function () {
+            applyToTextLayer(comp, trimmed, "", settings, options);
+        });
+        check(Math.abs(originalLengthOf(trimmed) - wanted) < 0.001,
+            "the record still holds the user's length after a re-Apply (" +
+            originalLengthOf(trimmed) + ")");
+        attempt("remove from the trimmed layer", function () { removeFromLayer(comp, trimmed); });
+        check(Math.abs((trimmed.outPoint - trimmed.inPoint) - wanted) < 0.001,
+            "Remove put the length back to " + wanted.toFixed(3) + ", got " +
+            (trimmed.outPoint - trimmed.inPoint).toFixed(3));
+        check(findNamedEffect(trimmed, ORIGINAL_LENGTH_NAME) === null,
+            "and took the record with it");
+
+        // A layer that was never fitted has no record, and Remove must not
+        // invent one: its length is the user's business.
+        var unfitted = comp.layers.addText("沒有配合長度");
+        unfitted.inPoint = 1.0;
+        unfitted.outPoint = 2.0;
+        var plainOptions = {};
+        for (var optionKey in options) {
+            if (options.hasOwnProperty(optionKey)) { plainOptions[optionKey] = options[optionKey]; }
+        }
+        plainOptions.fitDuration = false;
+        attempt("apply with Fit Duration off", function () {
+            applyToTextLayer(comp, unfitted, "", settings, plainOptions);
+        });
+        check(findNamedEffect(unfitted, ORIGINAL_LENGTH_NAME) === null,
+            "nothing was recorded for a layer that was never fitted");
+        attempt("remove from it", function () { removeFromLayer(comp, unfitted); });
+        check(Math.abs((unfitted.outPoint - unfitted.inPoint) - 1.0) < 0.001,
+            "its length is untouched, got " + (unfitted.outPoint - unfitted.inPoint).toFixed(3));
+
+        /*
+         * The character a line was given, read back off the line.
+         *
+         * The rig's name wins when there is one; without a rig the panel's
+         * character is used, and the effect is the only thing carrying it.
+         */
+        var named = comp.layers.addText("角色測試");
+        var namedSettings = {};
+        for (var settingKey in settings) {
+            if (settings.hasOwnProperty(settingKey)) { namedSettings[settingKey] = settings[settingKey]; }
+        }
+        namedSettings.character = "Mimi";
+        attempt("apply with a character", function () {
+            applyToTextLayer(comp, named, "", namedSettings, options);
+        });
+        check(characterOfLayer(named) === "Mimi",
+            "the line says which character it was given, got \"" + characterOfLayer(named) + "\"");
+        check(findNativeEffect(named) !== null,
+            "and the renamed effect is still found by matchName");
+        namedSettings.character = "";
+        attempt("apply again with no character", function () {
+            applyToTextLayer(comp, named, "", namedSettings, options);
+        });
+        check(characterOfLayer(named) === "",
+            "a re-Apply with no character clears the label rather than leaving it");
+        attempt("apply with a character and a pronunciation override", function () {
+            namedSettings.character = "咪咪";
+            applyToTextLayer(comp, named, "ni3 hao3", namedSettings, options);
+        });
+        check(characterOfLayer(named) === "咪咪",
+            "the character survives beside [Override], got \"" + characterOfLayer(named) + "\"");
+
+        /*
+         * Preview, all the way through: it renders, it plays, and it leaves the
+         * project exactly as it found it.
+         */
+        var itemsBefore = app.project.numItems;
+        var layersBefore = comp.numLayers;
+        attempt("preview a line without touching the project", function () {
+            previewVoice("你好，試聽。", settings);
+        });
+        check(app.project.numItems === itemsBefore,
+            "preview imported nothing (" + itemsBefore + " -> " + app.project.numItems + ")");
+        check(comp.numLayers === layersBefore,
+            "preview added no layer (" + layersBefore + " -> " + comp.numLayers + ")");
+        check(previewFile().exists, "preview wrote its temporary file");
+
         // Removal must leave effects the user owns alone.
         var mixed = comp.layers.addText("混合測試");
         var userBlur = mixed.property("ADBE Effect Parade").addProperty("ADBE Gaussian Blur 2");
