@@ -45,6 +45,7 @@
 
     var comp = null;
     var projectFile = null;
+    var skipped = false;
     try {
         var panelFile = new File(new File($.fileName).parent.parent.fsName +
             "/panel/IslandChatterNativePanel.jsx");
@@ -79,13 +80,10 @@
         }
         check(cloudRows >= 3, "the cloud tool still contributes its " + cloudRows + " sources");
         if (!picked) {
-            say("");
             say("The offline model is not installed, so there is nothing local to test.");
             say("Press 'Get model' in the panel, or run: island_chatter_local --install");
-            say("checks: " + checks + "   failures: " + failures);
-            say("RESULT: " + (failures === 0 ? "PASS (local part skipped)" : "FAIL"));
-            say("done");
-            return;
+            skipped = true;
+            return;   // the finally reports, and will not call this a pass
         }
         check(localRows === 1, "and the local tool contributes exactly one");
         check(picked.tool.fsName === local.fsName,
@@ -186,11 +184,28 @@
         try {
             if (comp) { comp.remove(); }
             app.purge(PurgeTarget.ALL_CACHES);
+            /*
+             * Close the project, and do it here rather than leaving it open.
+             *
+             * This suite has to save one, because the audio goes beside the
+             * project file. A *named, modified* project left open means the
+             * next thing that closes After Effects raises "Save changes to
+             * ic-local-test.aep?" — a modal that blocks every later script,
+             * looks exactly like a hang from the outside, and on an unattended
+             * or locked machine has nothing to click it with. It cost two runs
+             * here before the cause was seen.
+             */
+            if (projectFile) { app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES); }
             if (projectFile && projectFile.exists) { projectFile.remove(); }
         } catch (cleanupError) { say("cleanup: " + cleanupError.toString()); }
         say("");
         say("checks: " + checks + "   failures: " + failures);
-        say("RESULT: " + (failures === 0 ? "PASS" : "FAIL"));
+        // A run that checked nothing is not a pass. See the same note in
+        // ae-cloud-verify.jsx: a skip that reports PASS is a hollow pass, and
+        // anything reading these files for the word would believe it.
+        say("RESULT: " + (failures > 0 ? "FAIL"
+            : (checks === 0 ? (skipped ? "SKIPPED (nothing ran)" : "FAIL (nothing ran)")
+                : "PASS")));
         say("done");
     }
 }());

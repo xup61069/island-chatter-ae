@@ -5150,17 +5150,6 @@
         tip(providerList, "provider");
         var keyButton = cloudRow.add("button", undefined, "API key / 金鑰");
         tip(keyButton, "cloudKey");
-        /*
-         * Fetching the offline model, which is the one thing in this product
-         * that downloads anything.
-         *
-         * It sits beside the key button because the two are alternatives: a
-         * cloud source needs a key, a local one needs a model, and neither
-         * needs the other. The button says how big it is before it starts,
-         * because 177 MB on a slow line is a decision rather than a click.
-         */
-        var modelButton = cloudRow.add("button", undefined, "Get model / 下載模型");
-        tip(modelButton, "getModel");
 
         var cloudRowTwo = scriptTab.add("group");
         cloudRowTwo.orientation = "row";
@@ -5179,6 +5168,22 @@
         var cloudRegionField = cloudRowThree.add("edittext", undefined, "");
         cloudRegionField.characters = 9;
         tip(cloudRegionField, "cloudRegion");
+        /*
+         * Fetching the offline model, which is the one thing in this product
+         * that downloads anything.
+         *
+         * It belongs beside the key button — a cloud source needs a key, a
+         * local one needs a model, and neither needs the other — and it was
+         * there until it was measured: four controls took that row to 471 px in
+         * Japanese against the 460 a dock can give. Invariant 8z says a row
+         * that will not fit is split rather than reworded, and the panel is at
+         * 796 px of its 800 so a new row is not available either. This row had
+         * 200 px spare. The button says how big the download is before it
+         * starts, because 178 MB on a slow line is a decision rather than a
+         * click.
+         */
+        var modelButton = cloudRowThree.add("button", undefined, "Get model / 下載模型");
+        tip(modelButton, "getModel");
         // Empty until something has been fetched, and an empty statictext
         // collapses: the width on the next line does nothing until it has text.
         var cloudReadout = cloudRowThree.add("statictext", undefined, "");

@@ -1,0 +1,27 @@
+verifying
+panel body evaluated
+PASS  island_chatter_local.exe is where the panel looks for it
+PASS  the merged list has 4 voice sources
+PASS  openai remembers which tool serves it
+PASS  elevenlabs remembers which tool serves it
+PASS  azure remembers which tool serves it
+PASS  local-melo remembers which tool serves it
+PASS  the cloud tool still contributes its 3 sources
+PASS  and the local tool contributes exactly one
+PASS  the local row is served by the local tool, not the cloud one
+PASS  it has a name a person can read: Local model (zh+en)
+PASS  a local source needs no stored key
+PASS  the line speaks with the built-in engine first (8 syllables)
+PASS  the offline model spoke it and the plan came back (6 syllables)
+PASS  the audio is on the timeline
+PASS  the line is marked as carrying a generated voice
+PASS  the live effect is muted, so it is not heard twice
+PASS  the mouth follows the model's audio rather than the engine's timing
+PASS  the rig rebuilds from it
+PASS  the mouth opens and closes (6 open, 3 shut)
+PASS  pressing it again is answered from the cache
+PASS  no key file was written for a source that has no key
+
+checks: 21   failures: 0
+RESULT: PASS
+done

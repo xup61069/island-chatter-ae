@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 2.4.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.0.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -79,8 +79,9 @@ workflow.
 | After Effects | 2025 or 2026. Verified on 2026 / Windows 11 |
 | macOS | Not supported, no build exists |
 | Extra downloads | None. No sample packs, no runtime dependencies |
-| Network | Not needed. *(2.4.0)* Only the optional Cloud voice button uses one, and only when pressed |
+| Network | Not needed. *(2.4.0)* Only the optional Cloud voice button uses one, and only when pressed. *(3.0.0)* The offline model downloads once and then never again |
 | Cloud voice accounts | *(2.4.0)* Optional. The user's own OpenAI, ElevenLabs or Azure Speech API key. No credit is included |
+| Offline voice model | *(3.0.0)* Optional, 178 MB, downloaded on request into the user's own folder. No account, no key, and nothing typed leaves the machine |
 
 **Install:** close After Effects completely, then double-click `Install.bat` from the
 extracted ZIP and accept the User Account Control prompt. It writes to Program Files and so
@@ -97,6 +98,10 @@ needs elevation. Then start After Effects and open the panel from
   only part of the product that opens a network connection, and it only runs when the Cloud
   voice button is pressed. It exists as a separate executable because ExtendScript has no TLS
   and cannot make an HTTPS request at all
+- `Plug-ins\Island Chatter\island_chatter_local.exe` plus `sherpa-onnx-c-api.dll` and
+  `onnxruntime.dll` — *(3.0.0)* the offline voice. About 21 MB together. It runs a speech model
+  on this computer and opens no socket to do it; the only network it ever uses is the one-time
+  download of the model itself, which it fetches on request
 - `Scripts\ScriptUI Panels\IslandChatterNativePanel.jsx` — the panel
 
 Common install problems are in [Troubleshooting](#9-troubleshooting).
@@ -131,7 +136,7 @@ whatever the panel is showing.
 | --- | --- |
 | **Speak** | The text box, Read selected layer, the pronunciation override, the voice / emotion / character-size menus, Pitch, Speed, Volume, Consonant, Clarity, Cuteness, Tempo — and *(2.4.0)* Import script, Gap, Hold, Speakers, which moved here because importing a script is typing with more lines in it |
 | **Timbre & animation** | *(2.4.0, was two tabs)* Formant, sound source, Vibrato, Vibrato Rate, Seed, the saved-character menu with Random / Save / Delete; then Markers, Fit Duration, Rig, Type-On, Chatter, Center, per-layer or shared rig, the character menu with New / Rebuild, Mouth switch, Leave, Smoothness. Both halves are about the *character* rather than about the line |
-| **Sing & dub** | The three ways a performance arrives already made: Choose MIDI, the track menu, Transpose, Key, Tone, Sing, Speak; *(2.3.0)* Lip-sync from audio, Vowels, Sensitivity; *(2.4.0)* Cloud voice, the voice-source menu, API key, Voice ID, Model, Region |
+| **Sing & dub** | The three ways a performance arrives already made: Choose MIDI, the track menu, Transpose, Key, Tone, Sing, Speak; *(2.3.0)* Lip-sync from audio, Vowels, Sensitivity; *(2.4.0)* Cloud voice, the voice-source menu, API key, Voice ID, Model, Region; *(3.0.0)* Get model |
 
 If a user is on an older build the tabs are different — **Timbre** and **Animation** were
 separate through 2.3.0, and **Import** held the script importer. Ask which version they have

@@ -58,14 +58,15 @@
     var comp = null;
     var projectFile = null;
     var seeded = null;
+    var skipped = false;
     try {
         // The same refusal ae-smoke-test.jsx makes, for the same reason: this
         // suite saves over whatever is open, and somebody's work is not ours to
         // replace.
         if (app.project && (app.project.file || app.project.numItems > 0)) {
             say("SKIP  an After Effects project is already open; nothing was changed.");
-            say("done");
-            return;
+            skipped = true;
+            return;   // the finally still reports, and will not say PASS
         }
         var panelFile = new File(new File($.fileName).parent.parent.fsName +
             "/panel/IslandChatterNativePanel.jsx");
@@ -85,9 +86,12 @@
 
         // The table comes from the tool, which is the whole point of it living
         // there. A panel that had its own copy would pass this and still drift.
-        var table = cloudProviders();
+        // voiceSources(), not cloudProviders(): from 3.0.0 the panel merges the
+        // cloud tool's list with the offline tool's, and this suite is about
+        // the cloud half of it.
+        var table = voiceSources();
         check(table.length >= 3,
-            "the tool lists " + table.length + " providers");
+            "the merged list has " + table.length + " voice sources");
         var provider = null;
         var at;
         for (at = 0; at < table.length; at += 1) {
@@ -335,11 +339,26 @@
             // close After Effects would ask about it in a modal.
             app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES);
             if (seeded && seeded.exists) { seeded.remove(); }
+            // Same reason as ae-local-verify.jsx: a named, modified project
+            // left open turns the next script into a save prompt nobody can
+            // click, and it reads as a hang.
+            if (projectFile) { app.project.close(CloseOptions.DO_NOT_SAVE_CHANGES); }
             if (projectFile && projectFile.exists) { projectFile.remove(); }
         } catch (cleanupError) { say("cleanup: " + cleanupError.toString()); }
         say("");
         say("checks: " + checks + "   failures: " + failures);
-        say("RESULT: " + (failures === 0 ? "PASS" : "FAIL"));
+        /*
+         * A run that checked nothing is not a pass.
+         *
+         * The skip above returned before any check and the report still said
+         * RESULT: PASS — a hollow pass, which is the exact shape this project
+         * keeps finding in its own guards: the test still ran, and still said
+         * everything was fine. Anything reading these files for the word PASS
+         * would have believed it.
+         */
+        say("RESULT: " + (failures > 0 ? "FAIL"
+            : (checks === 0 ? (skipped ? "SKIPPED (nothing ran)" : "FAIL (nothing ran)")
+                : "PASS")));
         say("done");
     }
 }());

@@ -31,6 +31,11 @@
     try {
         if (app.project && (app.project.file || app.project.numItems > 0)) {
             log("SKIP  an existing project is open; close it first so bake can save a test project");
+            // Said out loud, and not as a pass. A skip that reports nothing at
+            // all leaves anything reading these files for RESULT with no
+            // answer, which reads the same as a run that never happened —
+            // because it is one.
+            log("RESULT: SKIPPED (nothing ran)");
             log("done");
             return;
         }
