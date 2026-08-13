@@ -2178,6 +2178,10 @@
      * silently re-fetch it either — that would be spending money on a keystroke.
      */
     var VOICE_TOOL_NAME = "island_chatter_voice.exe";
+    // 3.0.0's offline model. Optional in a way the cloud tool is not: it ships
+    // beside the others but the 170 MB model it needs does not, so this tool
+    // may be present and still have nothing to offer.
+    var LOCAL_TOOL_NAME = "island_chatter_local.exe";
     // Beside the bakes, one level down, because these are named after a hash
     // rather than after a line and a folder of them is not worth reading.
     var CLOUD_FOLDER_NAME = "cloud";
@@ -2196,6 +2200,9 @@
     // refuse politely, but this refusal is free and the one that is not is a
     // bill. A line of dialogue is never this long by accident.
     var MAX_CLOUD_CHARACTERS = 2000;
+    // What the offline model costs to fetch. Stated to the user before the
+    // download starts; the tool has the authoritative per-file sizes.
+    var LOCAL_MODEL_MEGABYTES = 178;
 
     function requireVoiceTool() {
         var tool = toolFile(VOICE_TOOL_NAME);
@@ -2249,12 +2256,42 @@
         return answer;
     }
 
-    // Asked for, never written down here. A second copy of the provider table
-    // in the panel is the mistake invariant 8b is about: it would drift the
-    // first time a default model changed, and it would drift silently.
-    function cloudProviders() {
+    /*
+     * Every voice source, asked for rather than written down.
+     *
+     * Two tools answer now and each reports only what it can actually serve:
+     * the cloud tool always lists its three, and the local tool lists nothing
+     * until its model is installed. So the menu never shows an option that
+     * fails when pressed, and the panel still holds no copy of either table —
+     * which is invariant 8b applied to a list that now has two sources.
+     *
+     * Each row remembers which tool produced it. That is the whole of the
+     * dispatch: `on_this_machine` decides what to *ask* the user for, and this
+     * decides who to *run*.
+     */
+    function voiceSources() {
+        var found = [];
+        var index;
         var tool = requireVoiceTool();
-        return parseVoiceReply(system.callSystem(quoted(tool.fsName) + " --providers")).providers;
+        var cloud = parseVoiceReply(
+            system.callSystem(quoted(tool.fsName) + " --providers")).providers;
+        for (index = 0; index < cloud.length; index += 1) {
+            cloud[index].tool = tool;
+            found.push(cloud[index]);
+        }
+        // The local tool is allowed to be absent: a build packaged without it,
+        // or an older install. That is not an error, it is three sources
+        // instead of four.
+        var local = toolFile(LOCAL_TOOL_NAME);
+        if (local) {
+            var offered = parseVoiceReply(
+                system.callSystem(quoted(local.fsName) + " --providers")).providers;
+            for (index = 0; index < offered.length; index += 1) {
+                offered[index].tool = local;
+                found.push(offered[index]);
+            }
+        }
+        return found;
     }
 
     function cloudFolder() {
@@ -2374,17 +2411,24 @@
      * the folder is and report which of the two happened.
      */
     function speakToFile(settings) {
-        var tool = requireVoiceTool();
+        var tool = settings.tool || requireVoiceTool();
         var folder = cloudFolder();
-        var keyFile = writeKeyFile(settings.key);
+        /*
+         * A source that runs here gets no key file, because there is no key and
+         * writing one would put an empty credential on disk for no reason. The
+         * rest of the command is identical for both, which is why the local
+         * tool accepts --key-file and ignores it rather than refusing it: one
+         * command builder, and the difference is a single conditional.
+         */
+        var keyFile = settings.onThisMachine ? null : writeKeyFile(settings.key);
         var answer;
         try {
             answer = parseVoiceReply(system.callSystem(quoted(tool.fsName) +
                 " --speak" + cloudArguments(settings) +
-                " --key-file " + hexUtf8(keyFile.fsName) +
+                (keyFile ? " --key-file " + hexUtf8(keyFile.fsName) : "") +
                 " --cache-dir " + hexUtf8(folder.fsName)));
         } finally {
-            if (keyFile.exists) { keyFile.remove(); }
+            if (keyFile && keyFile.exists) { keyFile.remove(); }
         }
         var file = new File(answer.path);
         if (!file.exists) {
@@ -3338,6 +3382,14 @@
             "{0} レイヤーを口パクさせました。{1} 件が重なっています",
         "Cloud voice / 雲端語音": "クラウド音声",
         "API key / 金鑰": "APIキー",
+        "Get model / 下載模型": "モデルを入手",
+        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer. After Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。下載時 After Effects 會沒有反應。":
+            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。ダウンロード中は After Effects が応答しなくなります。",
+        "Downloading… / 下載中…": "ダウンロード中…",
+        "Model ready / 模型已就緒": "モデルの準備ができました",
+        "Download failed / 下載失敗": "ダウンロードに失敗しました",
+        "Offline model installed ({0} MB) / 離線模型已安裝（{0} MB）":
+            "オフラインモデルを入れました（{0} MB）",
         // Not "Voice / 音色": the Timbre tab already carries that, and this is
         // the provider's own identifier for a voice rather than a setting.
         "Voice ID / 音色代號": "ボイスID",
@@ -3687,7 +3739,9 @@
         "雲": "云", "鑰": "钥", "區": "区", "腦": "脑", "錢": "钱", "傳": "传",
         "帳": "账", "認": "认", "網": "网", "辦": "办", "執": "执", "緒": "绪",
         "報": "报", "壓": "压", "碼": "码", "務": "务", "暫": "暂", "給": "给",
-        "係": "系", "價": "价", "欄": "栏", "費": "费"
+        "係": "系", "價": "价", "欄": "栏", "費": "费",
+        // Added with the offline model.
+        "載": "载", "統": "统", "員": "员", "權": "权"
     };
 
     function simplify(text) {
@@ -3946,6 +4000,36 @@
         "\n\nコマンドラインには決して現れません（そこはマシン上のどのプロセスからも読めます）。" +
         "\n一時ファイルに書き、ツールが読み終えた時点で削除します。" +
         "\n「消去」でこのパソコンから取り除けます。");
+
+    help("getModel",
+        "Download the offline voice model, once, so a voice source can run on" +
+        " this computer instead of on somebody else's." +
+        "\n\nAbout 178 MB. It is the only thing this product ever downloads," +
+        " and nothing is fetched until you press this and confirm. Afterwards" +
+        " that voice needs no network, no account and no key, and nothing you" +
+        " type ever leaves the machine." +
+        "\n\nAfter Effects will not respond while it downloads. If it fails" +
+        " part way, press it again: every file already fetched at the right" +
+        " size is skipped, so only what is missing is downloaded." +
+        "\n\nThe model is stored under your own user folder, not in Program" +
+        " Files, so it needs no administrator rights and an uninstall leaves" +
+        " it alone.",
+        "下載離線語音模型，只下載一次，之後就有一個在你自己電腦上跑的語音來源。" +
+        "\n\n大約 178 MB。這是這個產品唯一會下載的東西，而且按下去並確認之前什麼都不會抓。" +
+        "\n裝好之後那個語音不用連網、不用帳號、不用金鑰，你打的字完全不會離開這台電腦。" +
+        "\n\n下載時 After Effects 會沒有反應。中途失敗就再按一次：已經抓好而且大小正確的檔案" +
+        "\n會跳過，只補缺的那些。" +
+        "\n\n模型放在你自己的使用者資料夾，不在 Program Files，所以不需要系統管理員權限，" +
+        "\n移除程式也不會動到它。",
+        "オフライン音声モデルを一度だけダウンロードします。以後は、他人のサーバーではなく" +
+        "\nこのパソコンの中で動く音声が使えます。" +
+        "\n\n約 178 MB。この製品がダウンロードするのはこれだけで、ここを押して確認するまで" +
+        "\n何も取得しません。導入後はネットワークもアカウントもキーも不要で、" +
+        "\n入力した文字がこのパソコンの外に出ることはありません。" +
+        "\n\nダウンロード中は After Effects が応答しなくなります。途中で失敗したらもう一度" +
+        "\n押してください。正しいサイズで取得済みのファイルは飛ばし、足りない分だけ取ります。" +
+        "\n\nモデルはご自身のユーザーフォルダーに保存されます。Program Files ではないので" +
+        "\n管理者権限は不要で、アンインストールしても残ります。");
 
     help("cloudVoiceId",
         "The provider's own name or id for the voice you want. Leave it as it" +
@@ -5066,6 +5150,17 @@
         tip(providerList, "provider");
         var keyButton = cloudRow.add("button", undefined, "API key / 金鑰");
         tip(keyButton, "cloudKey");
+        /*
+         * Fetching the offline model, which is the one thing in this product
+         * that downloads anything.
+         *
+         * It sits beside the key button because the two are alternatives: a
+         * cloud source needs a key, a local one needs a model, and neither
+         * needs the other. The button says how big it is before it starts,
+         * because 177 MB on a slow line is a decision rather than a click.
+         */
+        var modelButton = cloudRow.add("button", undefined, "Get model / 下載模型");
+        tip(modelButton, "getModel");
 
         var cloudRowTwo = scriptTab.add("group");
         cloudRowTwo.orientation = "row";
@@ -6068,7 +6163,7 @@
         }
 
         function refreshProviders(preferred) {
-            cloudTable = cloudProviders();
+            cloudTable = voiceSources();
             while (providerList.items.length > 0) {
                 providerList.remove(providerList.items[providerList.items.length - 1]);
             }
@@ -6107,6 +6202,42 @@
                     ? M("Key saved / 已存下金鑰")
                     : M("Key cleared / 已清除金鑰");
             } catch (error) {
+                alert(String(error.message || error));
+            }
+        };
+
+        /*
+         * The only download this product ever makes, and it says so first.
+         *
+         * 177 MB is a decision, not a click, so the size and the destination
+         * are both stated. It is resumable in the only sense that matters:
+         * every file that is already there at the right length is skipped, so
+         * pressing this again after a failure costs only what is missing.
+         */
+        modelButton.onClick = function () {
+            var local = toolFile(LOCAL_TOOL_NAME);
+            if (!local) {
+                alert(M("{0} is missing. Reinstall Island Chatter. / 找不到 {0}，請重新安裝 Island Chatter。",
+                    LOCAL_TOOL_NAME));
+                return;
+            }
+            if (!confirm(M(
+                    "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer. After Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。下載時 After Effects 會沒有反應。",
+                    Math.round(LOCAL_MODEL_MEGABYTES)))) {
+                return;
+            }
+            cloudReadout.text = M("Downloading… / 下載中…");
+            try {
+                var answer = parseVoiceReply(
+                    system.callSystem(quoted(local.fsName) + " --install"));
+                // The list is asked again rather than assumed: the tool decides
+                // whether the model counts as installed, and it checks sizes.
+                refreshProviders(rememberedProvider);
+                cloudReadout.text = M("Model ready / 模型已就緒");
+                status.text = M("Offline model installed ({0} MB) / 離線模型已安裝（{0} MB）",
+                    Math.round(answer.bytes / 1048576));
+            } catch (error) {
+                cloudReadout.text = M("Download failed / 下載失敗");
                 alert(String(error.message || error));
             }
         };
@@ -6192,6 +6323,10 @@
                 var options = currentOptions();
                 var how = {
                     provider: picked.id,
+                    // Which tool serves this source, and whether it runs here.
+                    // Everything below is the same for all four.
+                    tool: picked.tool,
+                    onThisMachine: picked.onThisMachine,
                     voice: trim(String(cloudVoiceField.text)),
                     model: trim(String(cloudModelField.text)),
                     region: trim(String(cloudRegionField.text)),

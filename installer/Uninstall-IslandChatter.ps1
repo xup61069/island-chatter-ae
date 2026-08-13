@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
+﻿[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "High")]
 param(
     [string]$AfterEffectsRoot
 )
@@ -41,6 +41,9 @@ foreach ($target in $targets) {
             (Join-Path $target "Plug-ins\Island Chatter\IslandChatterNative.aex"),
             (Join-Path $target "Plug-ins\Island Chatter\island_chatter_bake.exe"),
             (Join-Path $target "Plug-ins\Island Chatter\island_chatter_voice.exe"),
+            (Join-Path $target "Plug-ins\Island Chatter\island_chatter_local.exe"),
+            (Join-Path $target "Plug-ins\Island Chatter\sherpa-onnx-c-api.dll"),
+            (Join-Path $target "Plug-ins\Island Chatter\onnxruntime.dll"),
             (Join-Path $target "Scripts\ScriptUI Panels\IslandChatterNativePanel.jsx"),
             # Shipped up to 1.0.10, when the panel stopped needing its own copy.
             (Join-Path $target "Scripts\ScriptUI Panels\IslandChatterMandarinReadings.jsxinc")

@@ -89,9 +89,13 @@ if(WIN32 AND ISLAND_CHATTER_SHERPA_ROOT)
     add_executable(island_chatter_local tools/local_cli.cpp)
     target_include_directories(island_chatter_local PRIVATE
         "${ISLAND_CHATTER_SHERPA_ROOT}/include")
+    # winhttp for --install only. This tool follows redirects, which the cloud
+    # tool refuses to do, and that is safe here precisely because this one
+    # never holds a credential.
     target_link_libraries(island_chatter_local PRIVATE
         island_chatter_cloud
-        "${ISLAND_CHATTER_SHERPA_ROOT}/lib/sherpa-onnx-c-api.lib")
+        "${ISLAND_CHATTER_SHERPA_ROOT}/lib/sherpa-onnx-c-api.lib"
+        winhttp)
     if(MSVC)
         target_compile_options(island_chatter_local PRIVATE /W4 /permissive- /EHsc)
     endif()

@@ -229,8 +229,8 @@ Grouped by what they are for. Exact strings in all four languages are in
 Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
-- Controls and menu entries with a label: **86**
-- Distinct messages the panel can print: **81**
+- Controls and menu entries with a label: **87**
+- Distinct messages the panel can print: **87**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -267,6 +267,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Fit Duration | 配合長度 | 配合长度 | 長さを合わせる |
 | Formant | 共鳴 | 共鸣 | きょうめい |
 | Gap | 間隔 | 间隔 | あいだ |
+| Get model | 下載模型 | 下载模型 | モデルを入手 |
 | Giant | 巨大 | 巨大 | きょだい |
 | Grandma | 奶奶 | 奶奶 | おばあちゃん |
 | Granular | 破碎 | 破碎 | グラニュラー |
@@ -649,6 +650,9 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Choose a track first. | 請先選一個軌道。 | 请先选一个轨道。 | 先にトラックを選んでください。 |
 | Choose or create a character first. | 請先選擇或新增角色。 | 请先选择或新增角色。 | 先にキャラを選ぶか追加してください。 |
 | Cloud voice on {0} layer(s) via {1} | 已用 {1} 為 {0} 層配音 | 已用 {1} 为 {0} 层配音 | {1} で {0} レイヤーに声を当てました |
+| Download failed | 下載失敗 | 下载失败 | ダウンロードに失敗しました |
+| Download the offline voice model? ⏎  ⏎ About {0} MB, once. After that this voice needs no network and no account — it runs on this computer. After Effects will not respond while it downloads. | 要下載離線語音模型嗎？ ⏎  ⏎ 大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。下載時 After Effects 會沒有反應。 | 要下载离线语音模型吗？ ⏎  ⏎ 大约 {0} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。下载时 After Effects 会没有反应。 | オフライン音声モデルをダウンロードしますか？ ⏎  ⏎ 約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。ダウンロード中は After Effects が応答しなくなります。 |
+| Downloading… | 下載中… | 下载中… | ダウンロード中… |
 | Error | 錯誤 | 错误 | エラー |
 | Imported {0} layer(s) | 已匯入 {0} 層 | 已导入 {0} 层 | {0} レイヤーを読み込みました |
 | Kanji read as Chinese: {0} | 漢字以中文讀音唸出：{0} | 汉字以中文读音念出：{0} | 漢字は中国語読みです：{0} |
@@ -657,12 +661,14 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Lip-synced {0} layer(s) onto {1} | 已對嘴 {0} 層到「{1}」 | 已对嘴 {0} 层到「{1}」 | {0} レイヤーを「{1}」に口パクさせました |
 | Lip-synced {0} layer(s); {1} overlap | 已對嘴 {0} 層；有 {1} 句重疊 | 已对嘴 {0} 层；有 {1} 句重叠 | {0} レイヤーを口パクさせました。{1} 件が重なっています |
 | MIDI loaded: {0} — pick a track, then Sing | 已讀取 {0} —— 選好軌道後按「唱出來」 | 已读取 {0} —— 选好轨道后按「唱出来」 | MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」 |
+| Model ready | 模型已就緒 | 模型已就绪 | モデルの準備ができました |
 | Mouth on Time Remap | 嘴型已接上時間重映射 | 口型已接上时间重映射 | 口パクをタイムリマップにつなぎました |
 | Mouth switch on {0} layer(s) -> {1} | 已接上嘴型 {0} 層 -> {1} | 已接上口型 {0} 层 -> {1} | 口パクを {0} レイヤーにつなぎました -> {1} |
 | Name this character | 幫這個角色取個名字 | 帮这个角色取个名字 | キャラの名前を入れてください |
 | No notes in that file | 這個檔案裡沒有音符 | 这个文件里没有音符 | このファイルに音符がありません |
 | None of those were singing | 選取的圖層沒有旋律 | 选中的图层没有旋律 | 選んだレイヤーにメロディがありません |
 | Now editing {0} | 目前角色：{0} | 目前角色：{0} | 編集中のキャラ：{0} |
+| Offline model installed ({0} MB) | 離線模型已安裝（{0} MB） | 离线模型已安装（{0} MB） | オフラインモデルを入れました（{0} MB） |
 | Only the first {0} UTF-16 units are spoken; the rest of the Source Text was cut: ⏎  ⏎ {1} | 只會唸出前 {0} 個 UTF-16 字元，超出的 Source Text 已截斷： ⏎  ⏎ {1} | 只会念出前 {0} 个 UTF-16 字符，超出的 Source Text 已截断： ⏎  ⏎ {1} | しゃべるのは最初の {0} UTF-16 単位までです。残りのソーステキストは切りました： ⏎  ⏎ {1} |
 | Open an active composition first. | 請先開啟合成。 | 请先开启合成。 | 先にコンポジションを開いてください。 |
 | Overlapping lines: {0} | 台詞重疊：{0} | 台词重叠：{0} | セリフが重なっています：{0} |
@@ -694,6 +700,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Truncated: {0} | 已截斷：{0} | 已截断：{0} | 文字が切れました：{0} |
 | truncated: {0} | 被截斷：{0} | 被截断：{0} | 切れました：{0} |
 | {0} is longer than {1} characters. Split it first. | {0} 超過 {1} 個字，請先拆成幾句。 | {0} 超过 {1} 个字，请先拆成几句。 | {0} は {1} 文字を超えています。先に分けてください。 |
+| {0} is missing. Reinstall Island Chatter. | 找不到 {0}，請重新安裝 Island Chatter。 | 找不到 {0}，请重新安装 Island Chatter。 | {0} が見つかりません。Island Chatter を再インストールしてください。 |
 | {0} line(s) · {1} BPM | {0} 句・{1} BPM | {0} 句・{1} BPM | {0} 行・{1} BPM |
 | {0} long line(s) split | 太長的句子拆成 {0} 層 | 太长的句子拆成 {0} 层 | 長い行を {0} レイヤーに分けました |
 | {0} needs the region its resource is in. | {0} 需要填寫資源所在的區域。 | {0} 需要填写资源所在的区域。 | {0} にはリソースのリージョンが必要です。 |

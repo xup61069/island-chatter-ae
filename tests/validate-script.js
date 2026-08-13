@@ -544,6 +544,22 @@ const takeFunction = (name) => {
   }
   throw new Error(`Panel planner function ${name}() is unbalanced`);
 };
+// The same brace walk, over a C++ source that is not the panel. Used by the
+// guards that read the tools, where "the function still contains this" is the
+// only check available without a compiler.
+const takeCppFunction = (source, name) => {
+  const start = source.indexOf(` ${name}(`);
+  if (start < 0) throw new Error(`${name}() is missing`);
+  let depth = 0;
+  for (let cursor = source.indexOf("{", start); cursor < source.length; cursor += 1) {
+    if (source[cursor] === "{") depth += 1;
+    else if (source[cursor] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, cursor + 1);
+    }
+  }
+  throw new Error(`${name}() is unbalanced`);
+};
 const takeVariable = (name) => {
   const start = nativePanelSource.indexOf(`var ${name} =`);
   if (start < 0) throw new Error(`Panel planner is missing ${name}`);
@@ -883,7 +899,9 @@ for (const bpm of [60, 90, 120, 174]) {
     // Added with the audio lip-sync page.
     "伸敏然引擎晃收忘告另外剪拒峰乎伏底境噪繁漏通易品答" +
     // Added with the cloud voice.
-    "端域家供商送花能等路析敲工具版解各服偏事暗命令支住便宜且址站如"));
+    "端域家供商送花能等路析敲工具版解各服偏事暗命令支住便宜且址站如" +
+    // Added with the offline model.
+    "反跑唯抓途跳缺使者系限"));
 
   const unclassified = new Set();
   const mapped = vm.runInContext("IC_SIMPLIFIED_CHARS", panelSimplifier);
@@ -2165,6 +2183,9 @@ for (const [file, staged] of [
   ["IslandChatterNative.aex", "$resources"],
   ["island_chatter_bake.exe", "$resources"],
   ["island_chatter_voice.exe", "$resources"],
+  ["island_chatter_local.exe", "$resources"],
+  ["sherpa-onnx-c-api.dll", "$resources"],
+  ["onnxruntime.dll", "$resources"],
   ["IslandChatterNativePanel.jsx", "$resources"],
   ["Install-IslandChatter.ps1", "$resources"],
   ["Uninstall-IslandChatter.ps1", "$resources"],
@@ -2220,6 +2241,9 @@ for (const releaseFile of [
   "IslandChatterNative.aex",
   "island_chatter_bake.exe",
   "island_chatter_voice.exe",
+  "island_chatter_local.exe",
+  "sherpa-onnx-c-api.dll",
+  "onnxruntime.dll",
   "IslandChatterNativePanel.jsx",
 ]) {
   if (!installerSource.includes(releaseFile)) {
@@ -2232,15 +2256,32 @@ for (const releaseFile of [
 {
   const required = installerSource.match(/\$requiredFiles = @\(([\s\S]*?)\)/);
   if (!required) throw new Error("Install-IslandChatter.ps1 has no $requiredFiles list");
-  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe"]) {
+  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe",
+    "island_chatter_local.exe", "sherpa-onnx-c-api.dll", "onnxruntime.dll"]) {
     if (!required[1].includes(tool)) {
       throw new Error(`Install-IslandChatter.ps1 does not require ${tool} to be present`);
     }
   }
   const uninstallerSource = fs.readFileSync(
     path.join(root, "installer", "Uninstall-IslandChatter.ps1"), "utf8");
-  if (!uninstallerSource.includes("island_chatter_voice.exe")) {
-    throw new Error("Uninstall-IslandChatter.ps1 leaves island_chatter_voice.exe behind");
+  for (const leftover of ["island_chatter_voice.exe", "island_chatter_local.exe",
+    "sherpa-onnx-c-api.dll", "onnxruntime.dll"]) {
+    if (!uninstallerSource.includes(leftover)) {
+      throw new Error(`Uninstall-IslandChatter.ps1 leaves ${leftover} behind`);
+    }
+  }
+  // Apache-2.0 and MIT both require the notice to travel with the binary, and
+  // the model the user downloads carries its own. Naming them here means a
+  // dependency cannot be added to the package without the notice.
+  const notices = fs.readFileSync(path.join(root, "THIRD_PARTY_NOTICES.md"), "utf8");
+  for (const [what, marker] of [
+    ["sherpa-onnx (Apache-2.0)", "Apache License, Version 2.0"],
+    ["ONNX Runtime", "Copyright (c) Microsoft Corporation"],
+    ["the MeloTTS weights", "Copyright (c) 2024 MyShell.ai"],
+  ]) {
+    if (!notices.includes(marker)) {
+      throw new Error(`THIRD_PARTY_NOTICES.md does not carry the notice for ${what}`);
+    }
   }
 }
 
@@ -2263,6 +2304,19 @@ for (const releaseFile of [
     throw new Error(
       "tools/package-release.ps1 must refuse to package without island_chatter_voice.exe, " +
       "the way it already refuses without the bake tool");
+  }
+  // island_chatter_local only builds when ISLAND_CHATTER_SHERPA_ROOT is set, so
+  // this refusal is also what stops a release being cut from a tree configured
+  // without it — which would ship a build whose offline voice silently is not
+  // there.
+  if (!/throw \(\"Build island_chatter_local first/.test(packager)) {
+    throw new Error(
+      "tools/package-release.ps1 must refuse to package without island_chatter_local.exe");
+  }
+  if (!/island_chatter_local cannot run without/.test(packager)) {
+    throw new Error(
+      "tools/package-release.ps1 must refuse to package the offline tool without the two " +
+      "DLLs it loads; the executable alone fails at startup");
   }
   // Both tools have to come out of the same build directory as the .aex, or a
   // release can ship a plug-in and a tool built from different sources — which
@@ -2299,8 +2353,34 @@ for (const releaseFile of [
         "the panel must ask for it with --providers rather than keep a second copy.");
     }
   }
-  if (!/--providers/.test(takeFunction("cloudProviders"))) {
-    throw new Error("cloudProviders() must fetch the table from the tool");
+  /*
+   * Two tools answer the "what voice sources are there" question from 3.0.0,
+   * and the panel still keeps no copy of either table.
+   *
+   * Each row must remember which tool produced it, because that is the whole
+   * of the dispatch: `onThisMachine` decides what to ask the *user* for, and
+   * `tool` decides who to *run*. A row that lost its tool would silently be
+   * spoken by the cloud tool, which for a local source means a request to a
+   * provider that has never heard of it.
+   */
+  const sources = takeFunction("voiceSources");
+  if (!/--providers/.test(sources)) {
+    throw new Error("voiceSources() must fetch the table from the tools");
+  }
+  if (!/toolFile\(LOCAL_TOOL_NAME\)/.test(sources)) {
+    throw new Error("voiceSources() does not offer the offline model at all");
+  }
+  for (const assigned of [/cloud\[index\]\.tool = tool/, /offered\[index\]\.tool = local/]) {
+    if (!assigned.test(sources)) {
+      throw new Error(
+        "voiceSources() does not record which tool serves each row; a row that lost it " +
+        "would be spoken by the wrong executable");
+    }
+  }
+  // A missing local tool is three sources rather than an error: a build
+  // packaged before 3.0.0, or one where the feature was left out.
+  if (!/if \(local\) \{/.test(sources)) {
+    throw new Error("voiceSources() treats a missing offline tool as a failure; it is not one");
   }
 
   /*
@@ -2315,6 +2395,17 @@ for (const releaseFile of [
   if (!/--key-file/.test(speakToFile)) {
     throw new Error("speakToFile() must hand the key over as a file path");
   }
+  // Which executable serves this source. A row that lost its tool would be
+  // spoken by the cloud one, meaning a request to a provider that has never
+  // heard of it — with a key attached.
+  if (!/var tool = settings\.tool \|\| requireVoiceTool\(\)/.test(speakToFile)) {
+    throw new Error("speakToFile() ignores which tool the source came from");
+  }
+  if (!/settings\.onThisMachine \? null : writeKeyFile\(settings\.key\)/.test(speakToFile)) {
+    throw new Error(
+      "speakToFile() writes a key file for a source that runs on this machine; there is no " +
+      "key, and an empty credential on disk is worse than none");
+  }
   if (/--key\s/.test(nativePanelSource) || /"\s*--key"/.test(nativePanelSource)) {
     throw new Error("The panel puts the API key on a command line, where any process can read it");
   }
@@ -2324,7 +2415,8 @@ for (const releaseFile of [
   // The panel deletes the temp file too. The tool deletes it as soon as it has
   // read it, but a tool that never started leaves the file behind, and a
   // credential on disk is not something to leave to one of two chances.
-  if (!/finally \{\s*if \(keyFile\.exists\) \{ keyFile\.remove\(\); \}/.test(speakToFile)) {
+  if (!/finally \{\s*if \(keyFile && keyFile\.exists\) \{ keyFile\.remove\(\); \}/
+    .test(speakToFile)) {
     throw new Error("speakToFile() must remove the temporary key file even when the call fails");
   }
 
@@ -2520,6 +2612,50 @@ for (const releaseFile of [
     throw new Error(
       "the response read loop does not bound what it accumulates against kMaxReplyBytes; " +
       "an endpoint that never stops sending would be read until memory runs out");
+  }
+}
+
+/*
+ * The offline model's transport, 3.0.0.
+ *
+ * It is the mirror image of the cloud one and the difference is the point.
+ * island_chatter_voice refuses redirects because it carries an API key, and
+ * WinHTTP re-sends headers to whatever host a 3xx names. island_chatter_local
+ * *needs* redirects, because a release host redirects to a CDN — and that is
+ * only safe because this tool has no credential to leak. Both halves of that
+ * argument are pinned: it must not grow a key, and the download must stay
+ * bounded by the length it expects rather than by trust.
+ */
+{
+  const fetcher = fs.readFileSync(
+    path.join(root, "native", "tools", "local_cli.cpp"), "utf8");
+  if (/--key-file[\s\S]{0,200}from_hex/.test(fetcher)) {
+    throw new Error(
+      "island_chatter_local reads --key-file. It must accept and discard it: this is the " +
+      "tool that follows redirects, and it is only safe to do that with nothing to leak.");
+  }
+  if (!/WinHttpSendRequest\(call\.value, WINHTTP_NO_ADDITIONAL_HEADERS/.test(fetcher)) {
+    throw new Error(
+      "the model download sends headers of its own; a request that follows redirects must " +
+      "carry nothing worth stealing");
+  }
+  if (!/written \+ available > file\.bytes/.test(fetcher)) {
+    throw new Error(
+      "the model download is not bounded by the length it expects; an endpoint that keeps " +
+      "sending would fill the disk");
+  }
+  if (!/written != file\.bytes/.test(fetcher)) {
+    throw new Error(
+      "a short download is accepted; a truncated model.onnx loads and then fails somewhere " +
+      "with no connection to the cause");
+  }
+  // Presence is not installation. Sizes are checked so an interrupted download
+  // reports "incomplete" rather than becoming a mystery at render time.
+  if (!/std::filesystem::file_size\(path, failed\) != file\.bytes/
+    .test(takeCppFunction(fetcher, "model_is_installed"))) {
+    throw new Error(
+      "model_is_installed() only checks that the files exist; a half-downloaded model " +
+      "would pass and fail later");
   }
 }
 

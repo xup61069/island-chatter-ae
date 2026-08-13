@@ -37,9 +37,49 @@
 #include <string>
 #include <vector>
 
+#include <windows.h>
+#include <winhttp.h>
+
 namespace {
 
 namespace cloud = island_chatter::cloud;
+
+/*
+ * Where the model comes from, and why the fetch lives in *this* tool.
+ *
+ * island_chatter_voice has a hardened WinHTTP transport already, and the
+ * obvious move is to reuse it. It is the wrong move. That transport refuses to
+ * follow redirects, on purpose, because it carries an API key in a header and
+ * WinHTTP re-sends headers to whatever host a 3xx names. A download from a
+ * release host redirects to a CDN on every request, so it *needs* redirects —
+ * and the only safe place for a request that follows them is a tool that has no
+ * credential to leak. This one accepts --key-file and throws it away without
+ * reading it, so there is nothing here to follow a redirect with.
+ *
+ * The files are fetched individually rather than as the published .tar.bz2,
+ * which means no bzip2 decoder ships in this product. The sizes are checked in
+ * because "downloaded" has to be a question with an answer: a truncated
+ * model.onnx loads and then fails somewhere far away from the cause.
+ */
+struct ModelFile {
+    const char* name;
+    std::uint64_t bytes;
+};
+
+const ModelFile kModelFiles[] = {
+    {"model.onnx", 170429550u},
+    {"lexicon.txt", 6837671u},
+    {"tokens.txt", 655u},
+    {"date.fst", 59154u},
+    {"number.fst", 64482u},
+    {"phone.fst", 88630u},
+    {"new_heteronym.fst", 21974u},
+};
+
+// The dict/ folder in the published package is deliberately not here: from
+// sherpa-onnx 1.12.15 this model does not use it, and it is 11 MB.
+const wchar_t* kModelHost = L"huggingface.co";
+const wchar_t* kModelPathPrefix = L"/csukuangfj/vits-melo-tts-zh_en/resolve/main/";
 
 /*
  * The one local source, described the same way a cloud one is.
@@ -99,13 +139,20 @@ std::filesystem::path model_root(const std::string& override_dir) {
            local_provider().default_model;
 }
 
-// Every file the model needs, so "installed" is a question with one answer
-// rather than a guess from the folder existing.
+/*
+ * "Installed" means every file is there *and the right size*.
+ *
+ * Presence alone is not enough: a download interrupted at 90% leaves a
+ * model.onnx that exists, loads far enough to look plausible, and then fails
+ * somewhere with no connection to the cause. Checking the size costs a stat per
+ * file and turns that into "the model is incomplete, install it again".
+ */
 bool model_is_installed(const std::filesystem::path& root) {
-    static const char* required[] = {"model.onnx", "lexicon.txt", "tokens.txt"};
-    for (const char* name : required) {
+    for (const auto& file : kModelFiles) {
         std::error_code failed;
-        if (!std::filesystem::is_regular_file(root / name, failed)) { return false; }
+        const auto path = root / file.name;
+        if (!std::filesystem::is_regular_file(path, failed)) { return false; }
+        if (std::filesystem::file_size(path, failed) != file.bytes) { return false; }
     }
     return true;
 }
@@ -190,6 +237,138 @@ void print_providers(const std::string& override_dir) {
     std::cout << "END " << listed << "\n";
 }
 
+// --- fetching the model ------------------------------------------------------
+
+struct Net {
+    HINTERNET value = nullptr;
+    explicit Net(HINTERNET handle) : value(handle) {}
+    ~Net() { if (value) { WinHttpCloseHandle(value); } }
+    Net(const Net&) = delete;
+    Net& operator=(const Net&) = delete;
+};
+
+std::string describe_net_error(DWORD code) {
+    return cloud::meaning_of_network_error(code) + " [WinHTTP " + std::to_string(code) + "]";
+}
+
+/*
+ * One file, streamed to disk.
+ *
+ * Streamed rather than buffered because the largest of them is 170 MB and the
+ * cloud tool's 64 MB ceiling exists for a reason — but the reason there was an
+ * endpoint that will not stop sending, and here the expected length is known in
+ * advance and checked, which is a better bound than a constant.
+ *
+ * Written to a .part and renamed, so an interrupted download cannot leave a
+ * file that model_is_installed() would accept.
+ */
+void fetch_one(HINTERNET session, const ModelFile& file, const std::filesystem::path& root) {
+    const auto destination = root / file.name;
+    std::error_code failed;
+    if (std::filesystem::is_regular_file(destination, failed) &&
+        std::filesystem::file_size(destination, failed) == file.bytes) {
+        return;   // already here and the right length
+    }
+
+    Net connection(WinHttpConnect(session, kModelHost, INTERNET_DEFAULT_HTTPS_PORT, 0));
+    if (!connection.value) { throw std::runtime_error(describe_net_error(GetLastError())); }
+
+    std::wstring path = kModelPathPrefix;
+    for (const char* letter = file.name; *letter; ++letter) {
+        path.push_back(static_cast<wchar_t>(*letter));
+    }
+    Net call(WinHttpOpenRequest(connection.value, L"GET", path.c_str(), nullptr,
+                                WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                WINHTTP_FLAG_SECURE));
+    if (!call.value) { throw std::runtime_error(describe_net_error(GetLastError())); }
+    // Redirects are left ON here, unlike the cloud transport, and that is safe
+    // only because this request carries no credential of any kind. Do not add
+    // a header to it.
+    if (!WinHttpSendRequest(call.value, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(call.value, nullptr)) {
+        throw std::runtime_error(describe_net_error(GetLastError()));
+    }
+    DWORD status = 0;
+    DWORD status_size = sizeof status;
+    if (!WinHttpQueryHeaders(call.value, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+                             WINHTTP_NO_HEADER_INDEX)) {
+        throw std::runtime_error(describe_net_error(GetLastError()));
+    }
+    if (status < 200 || status >= 300) {
+        throw std::runtime_error(std::string("could not download ") + file.name + ": " +
+                                 cloud::message_from_error(static_cast<int>(status), ""));
+    }
+
+    auto temporary = destination;
+    temporary += ".part";
+    std::uint64_t written = 0;
+    {
+        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            throw std::runtime_error(std::string("cannot write ") + file.name + " to disk");
+        }
+        std::vector<char> chunk;
+        for (;;) {
+            DWORD available = 0;
+            if (!WinHttpQueryDataAvailable(call.value, &available)) {
+                throw std::runtime_error(describe_net_error(GetLastError()));
+            }
+            if (available == 0) { break; }
+            // The declared length is the bound. An endpoint that keeps sending
+            // past it is not the file that was asked for.
+            if (written + available > file.bytes) {
+                throw std::runtime_error(std::string("the download of ") + file.name +
+                                         " is longer than the file should be");
+            }
+            chunk.resize(available);
+            DWORD read = 0;
+            if (!WinHttpReadData(call.value, chunk.data(), available, &read)) {
+                throw std::runtime_error(describe_net_error(GetLastError()));
+            }
+            if (read == 0) { break; }
+            out.write(chunk.data(), static_cast<std::streamsize>(read));
+            if (!out) {
+                throw std::runtime_error(std::string("writing ") + file.name +
+                                         " failed part of the way through; is the disk full?");
+            }
+            written += read;
+        }
+    }
+    if (written != file.bytes) {
+        std::filesystem::remove(temporary, failed);
+        throw std::runtime_error(std::string("the download of ") + file.name + " stopped after " +
+                                 std::to_string(written) + " of " + std::to_string(file.bytes) +
+                                 " bytes");
+    }
+    std::filesystem::remove(destination, failed);
+    std::filesystem::rename(temporary, destination, failed);
+    if (failed) {
+        std::filesystem::remove(temporary, failed);
+        throw std::runtime_error(std::string("could not move ") + file.name + " into place");
+    }
+}
+
+void install_model(const std::filesystem::path& root) {
+    std::error_code failed;
+    std::filesystem::create_directories(root, failed);
+    Net session(WinHttpOpen(L"IslandChatter", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+    if (!session.value) { throw std::runtime_error(describe_net_error(GetLastError())); }
+    // Generous: this is a 170 MB file, not a sentence.
+    WinHttpSetTimeouts(session.value, 15000, 15000, 30000, 600000);
+    std::uint64_t total = 0;
+    for (const auto& file : kModelFiles) {
+        fetch_one(session.value, file, root);
+        total += file.bytes;
+    }
+    if (!model_is_installed(root)) {
+        throw std::runtime_error("the model is still incomplete after downloading");
+    }
+    std::cout << "VOICE 1\nOK " << cloud::as_hex(root.u8string()) << " " << total << " 0\n";
+}
+
 std::vector<unsigned char> speak(const std::filesystem::path& root, const std::string& text,
                                  std::uint32_t* rate_out) {
     const auto model = (root / "model.onnx").u8string();
@@ -249,6 +428,7 @@ std::vector<unsigned char> speak(const std::filesystem::path& root, const std::s
 [[noreturn]] void usage() {
     std::cerr <<
         "island_chatter_local --providers [--model-dir <hex-utf8-path>]\n"
+        "island_chatter_local --install [--model-dir <hex-utf8-path>]\n"
         "island_chatter_local --cache-path --text <hex-utf8> --cache-dir <hex-utf8-path>\n"
         "island_chatter_local --speak --text <hex-utf8> --cache-dir <hex-utf8-path>\n"
         "                     [--model-dir <hex-utf8-path>]\n"
@@ -270,17 +450,23 @@ int main(int argc, char** argv) {
         // parser sees the rest; everything else is the cloud tool's contract,
         // parsed by the cloud tool's parser so the two cannot drift.
         std::string override_dir;
+        bool installing = false;
         std::vector<std::string> rest;
         for (std::size_t index = 0; index < args.size(); ++index) {
             if (args[index] == "--model-dir" && index + 1 < args.size()) {
                 override_dir = cloud::from_hex(args[++index]);
                 continue;
             }
+            if (args[index] == "--install") { installing = true; continue; }
             // A key means nothing here and is accepted rather than refused, so
             // the panel does not need a second command builder. It is never
             // read, never stored and never printed.
             if (args[index] == "--key-file" && index + 1 < args.size()) { ++index; continue; }
             rest.push_back(args[index]);
+        }
+        if (installing) {
+            install_model(model_root(override_dir));
+            return 0;
         }
         const auto command = cloud::parse_arguments(rest);
 

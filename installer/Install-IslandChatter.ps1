@@ -14,6 +14,9 @@ $requiredFiles = @(
     "IslandChatterNative.aex",
     "island_chatter_bake.exe",
     "island_chatter_voice.exe",
+    "island_chatter_local.exe",
+    "sherpa-onnx-c-api.dll",
+    "onnxruntime.dll",
     "IslandChatterNativePanel.jsx"
 )
 
@@ -101,6 +104,13 @@ foreach ($target in $targets) {
                 -Destination (Join-Path $pluginDirectory "island_chatter_bake.exe") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "island_chatter_voice.exe") `
                 -Destination (Join-Path $pluginDirectory "island_chatter_voice.exe") -Force
+            # The offline voice and the two DLLs it loads. They sit beside it
+            # rather than anywhere on PATH, which is where Windows looks first.
+            foreach ($localFile in @("island_chatter_local.exe",
+                    "sherpa-onnx-c-api.dll", "onnxruntime.dll")) {
+                Copy-Item -LiteralPath (Join-Path $payloadRoot $localFile) `
+                    -Destination (Join-Path $pluginDirectory $localFile) -Force
+            }
             Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterNativePanel.jsx") `
                 -Destination (Join-Path $panelDirectory "IslandChatterNativePanel.jsx") -Force
             # Shipped up to 1.0.10, when the panel stopped carrying its own copy
