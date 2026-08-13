@@ -132,4 +132,4 @@ build is not permitted. An original procedural synthesizer containing no audio a
 Nintendo or *Animal Crossing* audio; not affiliated with Adobe, Nintendo, OpenAI, ElevenLabs
 or Microsoft.
 
-Version 3.0.0
+Version 2.5.0

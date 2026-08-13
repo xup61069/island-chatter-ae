@@ -99,8 +99,8 @@ nor eSpeak NG. **That was wrong**, and the error is worth writing down because
 it is a classic one: it was checked against what the Chinese pipeline *executes*
 rather than against what the shipped file *contains*.
 
-`sherpa-onnx-c-api.dll` as published by the sherpa-onnx project statically links
-eSpeak NG. The evidence is in the binary — `CallPhonemizeEspeak`,
+`sherpa-onnx-c-api.dll` as published by the sherpa-onnx project statically links eSpeak NG.
+It is therefore not in this package, and neither is `island_chatter_local.exe`. The evidence is in the binary — `CallPhonemizeEspeak`,
 `ESPEAK_DATA_PATH`, `Software\eSpeak NG`, `Failed to initialize espeak-ng with
 data dir`, a hundred eSpeak-bearing strings in all — and in the upstream build,
 where `if(SHERPA_ONNX_ENABLE_TTS)` unconditionally pulls in espeak-ng with no

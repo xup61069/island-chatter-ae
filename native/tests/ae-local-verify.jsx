@@ -59,9 +59,25 @@
         eval(source.substring(bodyStart + 1, bodyEnd));
         say("panel body evaluated");
 
+        /*
+         * The tool being absent is the normal state, not a failure.
+         *
+         * The offline voice is finished but held back — the sherpa-onnx build
+         * links espeak-ng (GPL v3+) and the only permissively licensed Chinese
+         * model is mainland-accented — so released packages do not carry it.
+         * This suite is for whoever configures with ISLAND_CHATTER_SHERPA_ROOT
+         * and installs the result. Reporting FAIL when it is simply not there
+         * would cry wolf on every ordinary run.
+         */
         var local = toolFile("island_chatter_local.exe");
+        if (!local) {
+            say("SKIP  island_chatter_local.exe is not installed, which is expected:");
+            say("      the offline voice is built only with ISLAND_CHATTER_SHERPA_ROOT set");
+            say("      and is not shipped. See CHANGELOG.md for the two reasons.");
+            skipped = true;
+            return;
+        }
         check(local !== null, "island_chatter_local.exe is where the panel looks for it");
-        if (!local) { throw new Error("no local tool; nothing further can run"); }
 
         /*
          * Both tools, merged, each row knowing who serves it.

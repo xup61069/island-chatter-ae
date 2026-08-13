@@ -2183,9 +2183,6 @@ for (const [file, staged] of [
   ["IslandChatterNative.aex", "$resources"],
   ["island_chatter_bake.exe", "$resources"],
   ["island_chatter_voice.exe", "$resources"],
-  ["island_chatter_local.exe", "$resources"],
-  ["sherpa-onnx-c-api.dll", "$resources"],
-  ["onnxruntime.dll", "$resources"],
   ["IslandChatterNativePanel.jsx", "$resources"],
   ["Install-IslandChatter.ps1", "$resources"],
   ["Uninstall-IslandChatter.ps1", "$resources"],
@@ -2241,9 +2238,6 @@ for (const releaseFile of [
   "IslandChatterNative.aex",
   "island_chatter_bake.exe",
   "island_chatter_voice.exe",
-  "island_chatter_local.exe",
-  "sherpa-onnx-c-api.dll",
-  "onnxruntime.dll",
   "IslandChatterNativePanel.jsx",
 ]) {
   if (!installerSource.includes(releaseFile)) {
@@ -2256,14 +2250,16 @@ for (const releaseFile of [
 {
   const required = installerSource.match(/\$requiredFiles = @\(([\s\S]*?)\)/);
   if (!required) throw new Error("Install-IslandChatter.ps1 has no $requiredFiles list");
-  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe",
-    "island_chatter_local.exe", "sherpa-onnx-c-api.dll", "onnxruntime.dll"]) {
+  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe"]) {
     if (!required[1].includes(tool)) {
       throw new Error(`Install-IslandChatter.ps1 does not require ${tool} to be present`);
     }
   }
   const uninstallerSource = fs.readFileSync(
     path.join(root, "installer", "Uninstall-IslandChatter.ps1"), "utf8");
+  // The uninstaller still removes the offline files: an earlier build may have
+  // installed them, and leaving 21 MB behind is not acceptable just because the
+  // current package no longer ships them.
   for (const leftover of ["island_chatter_voice.exe", "island_chatter_local.exe",
     "sherpa-onnx-c-api.dll", "onnxruntime.dll"]) {
     if (!uninstallerSource.includes(leftover)) {
@@ -2278,6 +2274,7 @@ for (const releaseFile of [
     ["sherpa-onnx (Apache-2.0)", "Apache License, Version 2.0"],
     ["ONNX Runtime", "Copyright (c) Microsoft Corporation"],
     ["the MeloTTS weights", "Copyright (c) 2024 MyShell.ai"],
+    ["why the offline voice is held back", "statically links eSpeak NG"],
   ]) {
     if (!notices.includes(marker)) {
       throw new Error(`THIRD_PARTY_NOTICES.md does not carry the notice for ${what}`);
@@ -2306,17 +2303,23 @@ for (const releaseFile of [
       "the way it already refuses without the bake tool");
   }
   // island_chatter_local only builds when ISLAND_CHATTER_SHERPA_ROOT is set, so
-  // this refusal is also what stops a release being cut from a tree configured
-  // without it — which would ship a build whose offline voice silently is not
-  // there.
-  if (!/throw \(\"Build island_chatter_local first/.test(packager)) {
-    throw new Error(
-      "tools/package-release.ps1 must refuse to package without island_chatter_local.exe");
-  }
-  if (!/island_chatter_local cannot run without/.test(packager)) {
-    throw new Error(
-      "tools/package-release.ps1 must refuse to package the offline tool without the two " +
-      "DLLs it loads; the executable alone fails at startup");
+  /*
+   * The offline voice must NOT be packaged, which is the opposite of the rule
+   * above and needs saying out loud rather than being an absence.
+   *
+   * island_chatter_local.exe links sherpa-onnx-c-api.dll, which statically
+   * links espeak-ng (GPL v3 or later). The GPL attaches to the file that is
+   * shipped, not to the code paths that run, so putting either in the ZIP would
+   * place a product that sells compiled builds under the GPL. The tool still
+   * builds when ISLAND_CHATTER_SHERPA_ROOT is set, for whoever picks this up
+   * when sherpa-onnx removes espeak-ng. It simply does not ship.
+   */
+  for (const gpl of ["island_chatter_local.exe", "sherpa-onnx-c-api.dll"]) {
+    if (new RegExp(`Join-Path \\$resources "${gpl.replace(/\./g, "\\.")}"`).test(packager)) {
+      throw new Error(
+        `tools/package-release.ps1 stages ${gpl}, which hands the user a binary linking ` +
+        "espeak-ng (GPL v3+). See THIRD_PARTY_NOTICES.md.");
+    }
   }
   // Both tools have to come out of the same build directory as the .aex, or a
   // release can ship a plug-in and a tool built from different sources — which

@@ -1,6 +1,6 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
-    [string]$Version = "3.0.0",
+    [string]$Version = "2.5.0",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = ""
 )
@@ -70,27 +70,22 @@ $resolvedVoice = Join-Path $buildRelease "island_chatter_voice.exe"
 if (-not (Test-Path -LiteralPath $resolvedVoice -PathType Leaf)) {
     throw "Build island_chatter_voice first. Missing: $resolvedVoice"
 }
-# The offline voice, and the two DLLs it cannot run without. Same rule again:
-# a package missing any of them installs a build whose local voice fails at the
-# moment somebody presses it. island_chatter_local only builds when
-# ISLAND_CHATTER_SHERPA_ROOT is set, so this is also what stops a release being
-# cut from a tree that was configured without it.
-$resolvedLocal = Join-Path $buildRelease "island_chatter_local.exe"
-if (-not (Test-Path -LiteralPath $resolvedLocal -PathType Leaf)) {
-    throw ("Build island_chatter_local first (configure with -DISLAND_CHATTER_SHERPA_ROOT=...). " +
-        "Missing: $resolvedLocal")
-}
-$localRuntime = @("sherpa-onnx-c-api.dll", "onnxruntime.dll") | ForEach-Object {
-    $dll = Join-Path $buildRelease $_
-    if (-not (Test-Path -LiteralPath $dll -PathType Leaf)) {
-        throw "island_chatter_local cannot run without $_. Missing: $dll"
-    }
-    $dll
-}
+# The offline voice is deliberately NOT packaged, and this is the note that
+# stops somebody putting it back without reading why.
+#
+# island_chatter_local.exe links sherpa-onnx-c-api.dll, and that DLL statically
+# links espeak-ng, which is GPL v3 or later. The GPL attaches to the file that
+# is shipped, not to the code paths that run, so putting it in this ZIP would
+# place the whole product under the GPL — which is incompatible with selling
+# compiled builds and forbidding their redistribution. The second reason is
+# not legal at all: the only permissively licensed Chinese model available is
+# mainland-accented, and this is a Traditional Chinese product.
+#
+# The tool still builds when ISLAND_CHATTER_SHERPA_ROOT is set, for whoever
+# picks this up when sherpa-onnx 2.0.0 removes espeak-ng. It just does not ship.
 Write-Host "Packaging plug-in: $resolvedAex ($aexTime)"
 Write-Host "Packaging bake tool: $resolvedBake"
 Write-Host "Packaging voice tool: $resolvedVoice"
-Write-Host "Packaging local tool: $resolvedLocal"
 
 $distRoot = Join-Path $repoRoot "dist"
 $stageRoot = Join-Path $distRoot "Island-Chatter-AE-$Version-Windows-x64"
@@ -116,9 +111,6 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $
 Copy-Item -LiteralPath $resolvedAex -Destination (Join-Path $resources "IslandChatterNative.aex")
 Copy-Item -LiteralPath $resolvedBake -Destination (Join-Path $resources "island_chatter_bake.exe")
 Copy-Item -LiteralPath $resolvedVoice -Destination (Join-Path $resources "island_chatter_voice.exe")
-Copy-Item -LiteralPath $resolvedLocal -Destination (Join-Path $resources "island_chatter_local.exe")
-Copy-Item -LiteralPath $localRuntime[0] -Destination (Join-Path $resources "sherpa-onnx-c-api.dll")
-Copy-Item -LiteralPath $localRuntime[1] -Destination (Join-Path $resources "onnxruntime.dll")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterNativePanel.jsx") `
     -Destination (Join-Path $resources "IslandChatterNativePanel.jsx")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install-IslandChatter.ps1") `

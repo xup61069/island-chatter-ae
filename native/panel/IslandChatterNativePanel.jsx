@@ -2203,6 +2203,17 @@
     // What the offline model costs to fetch. Stated to the user before the
     // download starts; the tool has the authoritative per-file sizes.
     var LOCAL_MODEL_MEGABYTES = 178;
+    /*
+     * Which source a panel with no remembered choice starts on.
+     *
+     * Azure, because its default voice is `zh-TW-HsiaoChenNeural` — Taiwan
+     * Mandarin — and this product is Traditional Chinese first. The others
+     * default to mainland-accented Chinese, which is the wrong first
+     * impression for the audience this is built for. Not a reordering of the
+     * table: the remembered choice is an index, so moving rows would switch
+     * anybody who had already picked one.
+     */
+    var PREFERRED_PROVIDER_ID = "azure";
 
     function requireVoiceTool() {
         var tool = toolFile(VOICE_TOOL_NAME);
@@ -5184,6 +5195,18 @@
          */
         var modelButton = cloudRowThree.add("button", undefined, "Get model / 下載模型");
         tip(modelButton, "getModel");
+        /*
+         * Off unless the offline tool is actually installed.
+         *
+         * It is not, in the releases that ship this: the offline voice is
+         * finished code held back for two reasons written up in the changelog —
+         * the sherpa-onnx build links espeak-ng (GPL v3+), and the only
+         * permissively licensed Chinese model available is mainland-accented,
+         * which is the wrong voice for a Traditional Chinese product. A button
+         * that is present and fails reads as breakage; a button that is present
+         * and greyed reads as "not yet", which is the truth.
+         */
+        modelButton.enabled = toolFile(LOCAL_TOOL_NAME) !== null;
         // Empty until something has been fetched, and an empty statictext
         // collapses: the width on the next line does nothing until it has text.
         var cloudReadout = cloudRowThree.add("statictext", undefined, "");
@@ -6178,9 +6201,30 @@
                 // translation table.
                 providerList.add("item", cloudTable[index].label);
             }
+            /*
+             * Nothing remembered lands on Azure, not on row zero.
+             *
+             * This panel is Traditional Chinese first — the whole product is,
+             * which is why the Simplified half is *derived* from it — and Azure
+             * is the only source in the table whose default voice is actually
+             * Taiwan Mandarin (`zh-TW-HsiaoChenNeural`). Leaving the default on
+             * whichever vendor happens to be first in the tool's list hands a
+             * Taiwanese user a mainland accent on the very first press.
+             *
+             * Chosen by id rather than by moving the row, because the remembered
+             * choice is stored as an index: reordering the table would silently
+             * switch anybody who had already picked one.
+             */
             if (cloudTable.length) {
-                providerList.selection = clamp(
-                    Math.round(preferred === undefined ? 0 : preferred), 0, cloudTable.length - 1);
+                var wanted = preferred;
+                if (wanted === undefined) {
+                    wanted = 0;
+                    var pick;
+                    for (pick = 0; pick < cloudTable.length; pick += 1) {
+                        if (cloudTable[pick].id === PREFERRED_PROVIDER_ID) { wanted = pick; }
+                    }
+                }
+                providerList.selection = clamp(Math.round(wanted), 0, cloudTable.length - 1);
             }
             showProviderFields();
             return cloudTable.length;
