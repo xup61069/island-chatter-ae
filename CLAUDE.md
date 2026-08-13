@@ -751,6 +751,40 @@ install has no WAV output template; the script uses `AIFF 48kHz`.
 
 Mandarin intelligibility and voice quality remain human-listening checks.
 
+## Writing a guard
+
+**A guard whose first run is a pass has not been tested; it has been written.** Break the thing
+it guards, run it, watch it fail, then put the thing back. Every invariant above that says "was
+broken once on purpose" means exactly that, and the reason the phrase keeps appearing is that
+this project has shipped hollow guards repeatedly — the ES3 reserved-word check in
+`validate-script.js` reported success while checking nothing from 1.4.0 onward, the width check
+in `ae-language-verify.jsx` would have measured four tab containers and found no rows at all,
+and the translation check could only ever catch a deletion, never an omission.
+
+Two shapes account for almost all of them.
+
+**Measuring a consequence instead of the mechanism.** A consequence has other causes, so it
+survives the break: a seam guard compared each seam against the largest step *including the
+seams*, and could not fail however bad the joins were; a harmonics guard measured brightness in
+rendered audio, which moved less between builds than between two sentences. The fix is always
+to assert the thing itself, which usually means exposing it — `Diagnostics`, or
+`cache_material()`, which is public only so its fields can be counted rather than inferred
+through the two collisions that happen to be reachable from `Params`.
+
+**Searching source text for an identifier.** This one is specific to the guards in
+`validate-script.js` that read `.cpp` and `.jsx` as text, and it bit five times in 2.4.0 alone:
+the identifier survives the break because it also appears in the comment explaining it, in the
+error message beside it, or in the branch the break just made dead. `WINHTTP_FLAG_SECURE`
+replaced by `0` still matched, because the paragraph above it names the flag.
+`if (false)` around the reply bound still matched, because the message inside says
+`kMaxReplyBytes`. `onThisMachine: false` still matched a search for `onThisMachine`. So pin the
+**use**, not the name: the call with its argument list, the comparison with both sides, the
+field being read out of `fields[7]`. If a regex would still match after the protection is
+deleted, it is not a guard.
+
+The break-and-watch step is cheap here — `npm test` is seconds and `ctest` is seconds — and it
+is the only thing that distinguishes a guard from a comment that happens to be executable.
+
 ## Release synchronization
 
 For a version bump, update and validate all of these together:
