@@ -21,3 +21,5 @@ ae-size-probe-result.txt
 ae-close-project.txt
 ae-lipsync-verify-result.txt
 ae-cloud-verify-result.txt
+ae-local-verify-result.txt
+ae-quit.txt
