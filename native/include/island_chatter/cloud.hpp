@@ -76,6 +76,21 @@ struct Provider {
     // else does, and a required field nobody needs is a field everybody fills
     // in wrongly once.
     bool needs_region;
+    /*
+     * Does this source run on the user's own machine?
+     *
+     * False for all three today, and the field is here anyway, because the
+     * agreed road puts an offline model in 3.0.0 and the expensive part of
+     * adding one later is not the model — it is a panel that has assumed
+     * everywhere that a voice source needs an API key, needs a network, and
+     * needs to warn that the text is leaving the computer. None of those is
+     * true of a local model, and each is a separate place to remember.
+     *
+     * So the panel asks the table rather than assuming: no key button, no
+     * region, and a confirmation that does not claim the text goes anywhere.
+     * Adding the row in 3.0.0 is then a row.
+     */
+    bool on_this_machine;
 };
 
 const std::vector<Provider>& providers();
@@ -207,6 +222,27 @@ std::string message_from_error(int status, const std::string& body);
 // The plain-language part of that: what an HTTP status means for a TTS call,
 // for the case where the provider sent no body worth reading.
 std::string meaning_of_status(int status);
+
+/*
+ * And the same for a request that never got an answer at all.
+ *
+ * This lives here rather than beside the WinHTTP call for one reason: it is the
+ * only part of a network failure that can be tested. The socket cannot — there
+ * is no way to make a real request fail on demand without either a paid account
+ * or an --endpoint override, and an endpoint override is precisely the hole
+ * that disabling redirects exists to close, so the tool will not have one.
+ *
+ * What is left is the decision: does a name that will not resolve say something
+ * different from a connection that is refused, from a timeout, from a TLS
+ * failure? Four different things to do next, so four different sentences, and
+ * cloud_tests.cpp pins that they stay four. The caller appends whatever
+ * Windows itself said.
+ *
+ * Codes are WinHTTP's, given as numbers because this file does not include
+ * windows.h: 12002 ERROR_WINHTTP_TIMEOUT, 12007 NAME_NOT_RESOLVED,
+ * 12029 CANNOT_CONNECT, 12030 CONNECTION_ERROR, 12175 SECURE_FAILURE.
+ */
+std::string meaning_of_network_error(unsigned long code);
 
 /*
  * An upper bound on what will be read back.

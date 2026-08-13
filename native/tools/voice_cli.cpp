@@ -68,23 +68,10 @@ std::string narrow(const std::wstring& wide) {
  * could not be resolved" tells them to check their connection.
  */
 std::string describe_windows_error(DWORD code) {
-    std::string plain;
-    switch (code) {
-        case ERROR_WINHTTP_NAME_NOT_RESOLVED:
-            plain = "the provider's address could not be looked up; check the network";
-            break;
-        case ERROR_WINHTTP_CANNOT_CONNECT:
-            plain = "nothing answered at the provider's address; check the network or a firewall";
-            break;
-        case ERROR_WINHTTP_TIMEOUT:
-            plain = "the request timed out";
-            break;
-        case ERROR_WINHTTP_SECURE_FAILURE:
-            plain = "the secure connection could not be established";
-            break;
-        default:
-            break;
-    }
+    // The sentence comes from cloud.cpp, where a test can reach it; only the
+    // vendor's own wording is fetched here, because only here is there a
+    // winhttp.dll to fetch it from.
+    std::string plain = cloud::meaning_of_network_error(code);
     wchar_t* buffer = nullptr;
     const auto length = FormatMessageW(
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
@@ -100,7 +87,6 @@ std::string describe_windows_error(DWORD code) {
         }
     }
     if (buffer) { LocalFree(buffer); }
-    if (plain.empty()) { plain = "the request could not be sent"; }
     if (!detail.empty()) { plain += " (" + detail + ")"; }
     return plain + " [WinHTTP " + std::to_string(code) + "]";
 }
@@ -358,6 +344,9 @@ void print_providers() {
                                               : std::string(provider.default_model))
                   << " " << cloud::as_hex(provider.default_voice)
                   << " " << (provider.needs_region ? 1 : 0)
+                  // Whether it runs here. Nothing does yet; the panel reads it
+                  // rather than assuming, so 3.0.0's offline model is a row.
+                  << " " << (provider.on_this_machine ? 1 : 0)
                   << "\n";
     }
     std::cout << "END " << cloud::providers().size() << "\n";

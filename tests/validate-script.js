@@ -2352,6 +2352,39 @@ for (const releaseFile of [
       throw new Error(`The cloud voice confirmation does not state ${why}`);
     }
   }
+  /*
+   * A voice source that runs on this machine must not be assumed to need an
+   * account, a network, or the warning that comes with one.
+   *
+   * 3.0.0's offline model is meant to be a row in the provider table rather
+   * than a second code path, and the expensive part of that is a panel which
+   * has assumed otherwise in several places. Each of those is a question here,
+   * asked of the table.
+   */
+  // The field being read, not the name being mentioned. `onThisMachine: false`
+  // still contains the identifier, and a guard that searched for it passed
+  // against exactly that — the same way three other guards in this file did
+  // before they were broken on purpose.
+  if (!/onThisMachine: fields\[7\] === "1"/.test(takeFunction("parseVoiceReply"))) {
+    throw new Error(
+      "parseVoiceReply() does not read the flag saying a source runs on this machine " +
+      "out of the tool's reply");
+  }
+  if (!/picked\.onThisMachine \? "" : storedKey\(picked\.id\)/.test(handler)) {
+    throw new Error(
+      "the cloud voice asks every source for an API key; a model running on this machine " +
+      "has no account behind it");
+  }
+  if (!/picked\.onThisMachine\s*\n?\s*\? confirm\(/.test(handler)) {
+    throw new Error(
+      "the confirmation tells a local source's user that their text leaves the computer, " +
+      "which is false — and training people through the one warning that matters is worse " +
+      "than not having it");
+  }
+  if (!/keyButton\.enabled = !picked\.onThisMachine/.test(takeFunction("showProviderFields"))) {
+    throw new Error("the API key button stays offered for a source that has no account");
+  }
+
   // Nothing else may reach a provider. Apply, Re-sync and a rig rebuild all run
   // on ordinary keystrokes, and any of them calling this would turn editing a
   // line into a purchase.

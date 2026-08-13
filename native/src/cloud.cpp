@@ -46,6 +46,7 @@ const std::vector<Provider>& table() {
             24000,
             "gpt-4o-mini-tts",
             "alloy",
+            false,
             false
         },
         Provider{
@@ -64,6 +65,7 @@ const std::vector<Provider>& table() {
             24000,
             "eleven_multilingual_v2",
             "21m00Tcm4TlvDq8ikWAM",
+            false,
             false
         },
         Provider{
@@ -84,7 +86,8 @@ const std::vector<Provider>& table() {
             24000,
             "",
             "zh-TW-HsiaoChenNeural",
-            true
+            true,
+            false
         },
     };
     return rows;
@@ -612,6 +615,22 @@ std::string meaning_of_status(int status) {
     if (status >= 500) { return "the provider had a server error"; }
     if (status >= 400) { return "the provider refused the request"; }
     return "the provider answered with status " + std::to_string(status);
+}
+
+std::string meaning_of_network_error(unsigned long code) {
+    switch (code) {
+        case 12007UL:
+            return "the provider's address could not be looked up; check the network";
+        case 12029UL:
+        case 12030UL:
+            return "nothing answered at the provider's address; check the network or a firewall";
+        case 12002UL:
+            return "the request timed out";
+        case 12175UL:
+            return "the secure connection could not be established";
+        default:
+            return "the request could not be sent";
+    }
 }
 
 std::string message_from_error(int status, const std::string& body) {

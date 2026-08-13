@@ -170,6 +170,25 @@ effect.
    end would otherwise be read until the machine runs out of memory. TLS 1.2+ is requested
    explicitly, best-effort; `WINHTTP_FLAG_SECURE` is not optional.
 
+   **A voice source is not necessarily remote, and the panel must ask rather than assume.**
+   Every row in the table carries `on_this_machine`, false for all three today. The expensive
+   part of 3.0.0's offline model is not the model: it is a panel that has assumed in four
+   separate places that a source needs an API key, needs a region, needs the network and needs
+   to warn that the text is leaving the computer. None of those is true of a local model, and a
+   confirmation that says "the text leaves this computer" when it does not is worse than no
+   confirmation — it teaches people to click through the one warning that matters. All four are
+   pinned in `validate-script.js`, so adding the row in 3.0.0 stays a row.
+
+   **The socket is deliberately untestable, and everything it feeds is not.** There is no
+   `--endpoint` override and there must never be one: a flag that points the tool at an
+   arbitrary host is a flag that hands that host the API key, which is the same hole disabling
+   redirects exists to close. So a fake server is not the shape of this test. Instead every
+   *decision* the transport makes is a pure function — `meaning_of_network_error()` for the
+   four failures that never reach a status code, `message_from_error()` for the ones that do,
+   `wav_from_reply()` for a body that is the right length and the wrong thing — and each is
+   pinned. What remains unverified is the round trip itself, and it should be said out loud
+   rather than implied by a green suite.
+
    **The provider table is data, and there is one copy.** Host, path, headers, body template and
    reply format are strings; the transport branches on none of them. The panel does not know a
    single URL — it runs `--providers`. A second table in the panel would drift the first time a
@@ -290,6 +309,14 @@ effect.
    that works — the undo history goes but the RAM preview survives. Bake renders before
    it touches the project and only releases the previous bake if the write failed, so a
    first bake never purges. `native/tests/ae-rebake-probe.jsx` is the diagnostic.
+
+   **Observed once, on 2026-08-13, and not yet understood:** in an After Effects session that
+   had already run five host suites, the retry failed as well and `ae-bake-test.jsx` reported
+   "cannot open the output file for writing". The same suite passed immediately in a freshly
+   started After Effects. So the purge appears not to release the handle reliably late in a
+   long session. That is one observation and not a diagnosis — do not add a workaround on the
+   strength of it, and do re-run the bake and cloud suites in a fresh host before concluding
+   anything from a bake failure.
 8h. **Kana is spoken, kanji is not guessed.** A syllabary needs no dictionary, so Japanese
    costs nothing to install and nothing to keep synchronised. Kanji is another matter: the
    reading depends on the word, so unmarked kanji keeps its Mandarin reading and the panel
@@ -402,6 +429,16 @@ effect.
    single very long label cannot breach the width limit — ScriptUI clamps one control — so
    the only way to overflow a row is still to put too many controls in it, exactly as the
    eleven-control sing row did.
+
+   **Three pages from 2.4.0, and the count has only ever been a measured number.** Timbre and
+   Animation were 208 and 260 px — two short pages about the character rather than about the
+   line — so they are one page, which also buys width back from the strip. The script importer
+   moved to Speak, on the reasoning that importing a script is typing with more lines in it.
+   That move is the one to watch: it costs Speak 64 px, Speak is what decides the panel's
+   height, and the result measures **568 px against the 570 limit and 796 against the 800**.
+   It passes, and it has almost nothing left. Anyone adding a row to Speak will be told so by
+   `ae-language-verify.jsx` rather than by a user with a clipped panel; if that happens, moving
+   the importer back to the last page returns 64 px and is a two-line change.
 
    `remeasure()` resets **both** axes on a `tab` and a `tabbedpanel` rather than carrying the
    height over. Apply's 34 px is a deliberate number and is kept; a page's height is whatever

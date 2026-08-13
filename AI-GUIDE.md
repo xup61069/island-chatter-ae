@@ -125,14 +125,17 @@ The **language dropdown is at the top left** and changes only the interface — 
 changes what is spoken. Kana is always read as Japanese and Han characters as Mandarin,
 whatever the panel is showing.
 
-**The settings are on four tabs** *(2.2.0; before that the panel was one long column)*:
+**The settings are on three tabs** *(2.4.0; four in 2.2.0–2.3.0, and one long column before that)*:
 
 | Tab | What is on it |
 | --- | --- |
-| **Speak** | The text box, Read selected layer, the pronunciation override, the voice / emotion / character-size menus, Pitch, Speed, Volume, Consonant, Clarity, Cuteness, and Tempo |
-| **Timbre** | Formant, sound source, Vibrato, Vibrato Rate, Seed, and the saved-character menu with Random / Save / Delete |
-| **Animation** | Markers, Fit Duration, Rig, Type-On, Chatter, Center, per-layer or shared rig, the character menu with New / Rebuild, Mouth switch, Leave, Smoothness |
-| **Import** | The four ways a performance arrives from outside: Import script, Gap, Hold, Speakers; Choose MIDI, the track menu, Transpose, Key, Tone, Sing, Speak; *(2.3.0)* Lip-sync from audio, Vowels, Sensitivity; and *(2.4.0)* Cloud voice, the provider menu, API key, Voice ID, Model, Region |
+| **Speak** | The text box, Read selected layer, the pronunciation override, the voice / emotion / character-size menus, Pitch, Speed, Volume, Consonant, Clarity, Cuteness, Tempo — and *(2.4.0)* Import script, Gap, Hold, Speakers, which moved here because importing a script is typing with more lines in it |
+| **Timbre & animation** | *(2.4.0, was two tabs)* Formant, sound source, Vibrato, Vibrato Rate, Seed, the saved-character menu with Random / Save / Delete; then Markers, Fit Duration, Rig, Type-On, Chatter, Center, per-layer or shared rig, the character menu with New / Rebuild, Mouth switch, Leave, Smoothness. Both halves are about the *character* rather than about the line |
+| **Sing & dub** | The three ways a performance arrives already made: Choose MIDI, the track menu, Transpose, Key, Tone, Sing, Speak; *(2.3.0)* Lip-sync from audio, Vowels, Sensitivity; *(2.4.0)* Cloud voice, the voice-source menu, API key, Voice ID, Model, Region |
+
+If a user is on an older build the tabs are different — **Timbre** and **Animation** were
+separate through 2.3.0, and **Import** held the script importer. Ask which version they have
+before telling them where a control is.
 
 **Apply, Re-sync, Re-flow, Bake, Remove and the status line are not on a tab.** They sit
 below the tabs and are visible whichever one is showing, so telling a user to "press Apply"
@@ -227,7 +230,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
 - Controls and menu entries with a label: **86**
-- Distinct messages the panel can print: **80**
+- Distinct messages the panel can print: **81**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -678,6 +681,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Select the lines to turn back into speech. | 請選取要改回講話的圖層。 | 请选中要改回讲话的图层。 | しゃべりに戻すレイヤーを選んでください。 |
 | Send {0} line(s), {1} characters, to {2}? ⏎  ⏎ The text leaves this computer. Lines already fetched with the same settings are reused and cost nothing. | 要把 {0} 句、共 {1} 個字送到 {2} 嗎？ ⏎  ⏎ 文字會離開這台電腦。文字和設定都沒變的句子會直接沿用上次的檔案，不會再花錢。 | 要把 {0} 句、共 {1} 个字送到 {2} 吗？ ⏎  ⏎ 文字会离开这台电脑。文字和设置都没变的句子会直接沿用上次的文件，不会再花钱。 | {0} 行・{1} 文字を {2} に送信しますか？ ⏎  ⏎ 文字はこのパソコンの外に出ます。文字も設定も変わっていない行は前回のファイルを使い回すので、費用はかかりません。 |
 | Set the API key for {0} first. | 請先設定 {0} 的 API 金鑰。 | 请先设置 {0} 的 API 金钥。 | 先に {0} の APIキーを設定してください。 |
+| Speak {0} line(s), {1} characters, with {2}? ⏎  ⏎ This runs on your own computer: nothing is sent anywhere and nothing is billed. | 要用 {2} 唸出 {0} 句、共 {1} 個字嗎？ ⏎  ⏎ 這是在你自己的電腦上算的，不會送出任何東西，也不會產生費用。 | 要用 {2} 念出 {0} 句、共 {1} 个字吗？ ⏎  ⏎ 这是在你自己的电脑上算的，不会送出任何东西，也不会产生费用。 | {0} 行・{1} 文字を {2} でしゃべらせますか？ ⏎  ⏎ これはあなたのパソコンの中で動きます。どこにも送信されず、費用もかかりません。 |
 | Speaking again: {0} layer(s) | 已改回講話 {0} 層 | 已改回讲话 {0} 层 | {0} レイヤーをしゃべりに戻しました |
 | Speed set manually | 語速為手動設定 | 语速为手动设置 | はやさは手動設定です |
 | Sung note names on {0} layer(s) | 已唱唱名 {0} 層 | 已唱唱名 {0} 层 | 階名で {0} レイヤーを歌わせました |

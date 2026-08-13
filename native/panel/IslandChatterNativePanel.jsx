@@ -2233,7 +2233,10 @@
                     host: fields[3],
                     model: fields[4] === "2d" ? "" : utf8FromHex(fields[4]),
                     voice: utf8FromHex(fields[5]),
-                    needsRegion: fields[6] === "1"
+                    needsRegion: fields[6] === "1",
+                    // A reply written before this field existed reads as
+                    // false, which is what every shipped source is.
+                    onThisMachine: fields[7] === "1"
                 });
             } else if (fields[0] === "PATH") {
                 answer.path = utf8FromHex(fields[1]);
@@ -3312,9 +3315,12 @@
     var UI_LANGUAGE_SETTING = "uiLanguage";
     var IC_JAPANESE_UI = {
         "Speak / 說話": "話す",
-        "Timbre / 音色": "音色",
-        "Animation / 動畫": "アニメーション",
-        "Import / 匯入": "読み込み",
+        // Three tabs from 2.4.0. "Timbre / 音色" and "Animation / 動畫" were
+        // two short pages about the same thing — the character — and "Import /
+        // 匯入" lost the script importer to the Speak page, which left it
+        // holding only performances that arrive already made.
+        "Timbre & animation / 音色與動畫": "音色とアニメーション",
+        "Sing & dub / 唱歌與配音": "歌と吹き替え",
         "Lip-sync from audio / 音檔轉口型": "音声から口を動かす",
         "Sensitivity / 靈敏度": "感度",
         "Vowels / 判斷母音": "母音を判定",
@@ -3357,6 +3363,8 @@
             "選択したレイヤーに文字がありません。",
         "Send {0} line(s), {1} characters, to {2}?\n\nThe text leaves this computer. Lines already fetched with the same settings are reused and cost nothing. / 要把 {0} 句、共 {1} 個字送到 {2} 嗎？\n\n文字會離開這台電腦。文字和設定都沒變的句子會直接沿用上次的檔案，不會再花錢。":
             "{0} 行・{1} 文字を {2} に送信しますか？\n\n文字はこのパソコンの外に出ます。文字も設定も変わっていない行は前回のファイルを使い回すので、費用はかかりません。",
+        "Speak {0} line(s), {1} characters, with {2}?\n\nThis runs on your own computer: nothing is sent anywhere and nothing is billed. / 要用 {2} 唸出 {0} 句、共 {1} 個字嗎？\n\n這是在你自己的電腦上算的，不會送出任何東西，也不會產生費用。":
+            "{0} 行・{1} 文字を {2} でしゃべらせますか？\n\nこれはあなたのパソコンの中で動きます。どこにも送信されず、費用もかかりません。",
         "{0} new, {1} reused / 新增 {0}、沿用 {1}": "新規 {0} 件・再利用 {1} 件",
         "Cloud voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音":
             "{1} で {0} レイヤーに声を当てました",
@@ -3679,7 +3687,7 @@
         "雲": "云", "鑰": "钥", "區": "区", "腦": "脑", "錢": "钱", "傳": "传",
         "帳": "账", "認": "认", "網": "网", "辦": "办", "執": "执", "緒": "绪",
         "報": "报", "壓": "压", "碼": "码", "務": "务", "暫": "暂", "給": "给",
-        "係": "系", "價": "价", "欄": "栏"
+        "係": "系", "價": "价", "欄": "栏", "費": "费"
     };
 
     function simplify(text) {
@@ -4515,21 +4523,45 @@
             return tab;
         }
         var speakTab = addTab("Speak / 說話");
-        var timbreTab = addTab("Timbre / 音色");
-        var animationTab = addTab("Animation / 動畫");
+        var characterTab = addTab("Timbre & animation / 音色與動畫");
         /*
-         * Four pages, not five, and the reason is measured.
+         * Three pages, and every count this has been is a measured number
+         * rather than a preference.
          *
-         * Audio lip-sync arrived in 2.3.0 as a fifth tab and the strip of
-         * titles went to 507 px against the 460 a dock can give — about 97 px
-         * per tab, most of it the tab's own padding rather than its words, so
-         * shortening the titles could not have reached it. The things on
-         * this page are the ways a whole performance arrives from outside the
-         * panel: a script file, a MIDI file, a recording, and from 2.4.0 a
-         * cloud model.
+         * 2.2.0 made it four, from one column of forty rows that wanted
+         * 1354 px against the ~900 px a 1080p dock gives — a docked ScriptUI
+         * panel does not scroll, it clips, and what was clipped was every verb
+         * the product has. 2.3.0 tried a fifth for audio and could not have
+         * one: the strip of titles went to 507 px against the 460 a dock can
+         * give, about 97 px per tab and most of that the tab's own padding, so
+         * no amount of shortening a title would have reached it.
+         *
+         * 2.4.0 goes the other way, to three. Timbre and Animation were 208
+         * and 260 px, two short pages that were both about the character
+         * rather than about the line, so they are one page. Fewer tabs also
+         * buys width back, which matters because the strip had become the
+         * widest thing in the panel.
+         *
+         * What is on the last page is the answer to "where did this
+         * performance come from" when the answer is not "somebody typed it":
+         * a MIDI file, a recording, a cloud model.
          */
-        var scriptTab = addTab("Import / 匯入");
+        var performTab = addTab("Sing & dub / 唱歌與配音");
         tabs.selection = speakTab;
+
+        /*
+         * Aliases, not a rename.
+         *
+         * The rows below are written where they read naturally — timbre with
+         * timbre, animation with animation — and ScriptUI adds children in
+         * source order, so pointing two names at one page merges them without
+         * moving a single row. Doing it the other way round, by cutting and
+         * pasting sixty lines into a different block, is how a control gets
+         * lost or reordered in a diff nobody can review.
+         */
+        var timbreTab = characterTab;
+        var animationTab = characterTab;
+        var scriptTab = performTab;
 
         speakTab.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
         var textInput = speakTab.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });
@@ -4895,7 +4927,21 @@
         var smoothness = addSlider(animationTab, "Smoothness / 平滑", 0, 100, DEFAULT_SMOOTHNESS);
         tip(smoothness, "smoothness");
 
-        var importRow = scriptTab.add("group");
+        /*
+         * A whole script is still typing, so it lives with the typing.
+         *
+         * Import is the same verb as Apply with more lines in it: text goes in,
+         * voiced layers come out. Putting it on the Speak page keeps the two
+         * next to each other and leaves the last page to the three ways a
+         * performance arrives already *made* — sung from a file, recorded, or
+         * spoken by somebody else's model.
+         *
+         * It costs the Speak page ~56 px and the Speak page is what decides how
+         * tall the panel is, so this is the row that has to be watched: the
+         * numbers are in ae-size-probe-result.txt and ae-language-verify.jsx
+         * fails if a page passes 570 px or the panel passes 800.
+         */
+        var importRow = speakTab.add("group");
         importRow.orientation = "row";
         var importButton = importRow.add("button", undefined, "Import script / 匯入劇本");
         tip(importButton, "import");
@@ -4906,7 +4952,7 @@
         var gapReadout = importRow.add("statictext", undefined, "");
         gapReadout.preferredSize.width = 150;
         // The two options that change what an import does, on their own row.
-        var importRowTwo = scriptTab.add("group");
+        var importRowTwo = speakTab.add("group");
         importRowTwo.orientation = "row";
         var holdOn = importRowTwo.add("checkbox", undefined, "Hold / 接到下一句");
         tip(holdOn, "hold");
@@ -5003,6 +5049,18 @@
         cloudRow.orientation = "row";
         var cloudButton = cloudRow.add("button", undefined, "Cloud voice / 雲端語音");
         tip(cloudButton, "cloudVoice");
+        /*
+         * "Voice source", not "provider", and the name is the forward
+         * compatibility rather than a decoration.
+         *
+         * Today every entry is a company with an API. In 3.0.0 one of them is
+         * meant to be a model running on this machine, and the expensive part
+         * of that is not the model — it is a panel that has assumed in six
+         * places that a source needs a key, needs a region and needs to warn
+         * that the text is leaving the computer. The list is data from the
+         * tool and carries a flag for that, so each of those is a question
+         * rather than an assumption.
+         */
         var providerList = cloudRow.add("dropdownlist", undefined, []);
         providerList.preferredSize.width = 110;
         tip(providerList, "provider");
@@ -5992,6 +6050,8 @@
             // Only one provider has a per-region endpoint. A field nobody needs
             // is a field somebody fills in wrongly once.
             cloudRegionField.enabled = picked.needsRegion;
+            // A source that runs here has no account and no key to set.
+            keyButton.enabled = !picked.onThisMachine;
         }
 
         function rememberProviderFields() {
@@ -6065,8 +6125,10 @@
             var picked;
             try { picked = requireProviders(); }
             catch (missing) { alert(String(missing.message || missing)); return; }
-            var key = storedKey(picked.id);
-            if (!key) {
+            // Asked of the source, not assumed of all of them: a model running
+            // on this machine has no account behind it.
+            var key = picked.onThisMachine ? "" : storedKey(picked.id);
+            if (!picked.onThisMachine && !key) {
                 alert(M("Set the API key for {0} first. / 請先設定 {0} 的 API 金鑰。", picked.label));
                 return;
             }
@@ -6108,11 +6170,22 @@
              * should find it out afterwards, and the count is said because a
              * batch of twenty lines is a bill rather than a click.
              */
-            if (!confirm(M(
+            /*
+             * A source that runs here gets a different sentence, because the
+             * one below would be a lie about it.
+             *
+             * "The text leaves this computer" is the whole reason this
+             * confirmation exists, and repeating it for a local model would
+             * train people to click through the one warning that matters.
+             */
+            var agreed = picked.onThisMachine
+                ? confirm(M(
+                    "Speak {0} line(s), {1} characters, with {2}?\n\nThis runs on your own computer: nothing is sent anywhere and nothing is billed. / 要用 {2} 唸出 {0} 句、共 {1} 個字嗎？\n\n這是在你自己的電腦上算的，不會送出任何東西，也不會產生費用。",
+                    ready.length, characters, picked.label))
+                : confirm(M(
                     "Send {0} line(s), {1} characters, to {2}?\n\nThe text leaves this computer. Lines already fetched with the same settings are reused and cost nothing. / 要把 {0} 句、共 {1} 個字送到 {2} 嗎？\n\n文字會離開這台電腦。文字和設定都沒變的句子會直接沿用上次的檔案，不會再花錢。",
-                    ready.length, characters, picked.label + " · " + picked.host))) {
-                return;
-            }
+                    ready.length, characters, picked.label + " · " + picked.host));
+            if (!agreed) { return; }
             app.beginUndoGroup(SCRIPT_NAME + " - Cloud voice");
             try {
                 rememberProviderFields();

@@ -515,6 +515,123 @@ void test_errors_are_the_providers_own_words() {
     require(!contains(html, "<html>"), "a page of HTML is not pasted into a dialog");
 }
 
+/*
+ * The failures that never reach a status code.
+ *
+ * A request refused by DNS, by a firewall, by a timeout or by TLS never gets an
+ * HTTP answer at all, and those four need four different things done about
+ * them. They cannot be provoked for real: making a live request fail on demand
+ * needs either a paid account or an --endpoint override, and an endpoint
+ * override is exactly the hole that disabling redirects exists to close — a
+ * flag that points the tool at an arbitrary host is a flag that hands it the
+ * API key. So the socket stays untested on purpose, and the *decision* it feeds
+ * is tested instead.
+ */
+void test_network_failures_are_distinguished() {
+    const unsigned long codes[] = {12002UL, 12007UL, 12029UL, 12175UL};
+    std::set<std::string> distinct;
+    for (const auto code : codes) {
+        const auto said = cloud::meaning_of_network_error(code);
+        require(!said.empty(), "every network failure says something");
+        distinct.insert(said);
+        note(std::to_string(code) + ": " + said);
+    }
+    require(distinct.size() == 4,
+            "a timeout, a name that will not resolve, a refused connection and a TLS "
+            "failure are four different sentences");
+    // 12030 is the same problem as 12029 from the user's side, so it shares the
+    // sentence rather than inventing a fifth thing to try.
+    require(cloud::meaning_of_network_error(12030UL) ==
+                cloud::meaning_of_network_error(12029UL),
+            "a dropped connection reads the same as one that was never made");
+    require(!cloud::meaning_of_network_error(999UL).empty(),
+            "an unrecognised code still produces a sentence rather than nothing");
+}
+
+/*
+ * Bodies that are the right length and the wrong thing.
+ *
+ * These are the shapes a fake server would have been stood up to produce: a
+ * half-written file, an HTML error page delivered with a 200, an odd number of
+ * PCM bytes. Every one of them becomes a .wav on disk unless something refuses
+ * it, and a .wav that After Effects imports as silence looks exactly like the
+ * feature not working rather than like the wrong format arriving.
+ */
+void test_broken_replies_are_refused_by_name() {
+    const auto* openai = cloud::find("openai");
+    const auto* eleven = cloud::find("elevenlabs");
+
+    struct Case {
+        const cloud::Provider* provider;
+        std::string body;
+        const char* must_contain;
+        const char* what;
+    };
+    /*
+     * A RIFF/WAVE header and nothing after it: the write died part way through.
+     *
+     * Built a byte at a time on purpose. Written as `half_wav += "\x24\x00\x00\x00"`
+     * the literal stops at the first NUL, so "WAVE" lands at offset 5 instead of
+     * 8 and the case silently becomes "some bytes that are not a WAV" — which
+     * still fails, just for the wrong reason and against the wrong message.
+     */
+    std::string half_wav = "RIFF";
+    half_wav.append(std::string("\x24\x00\x00\x00", 4));
+    half_wav += "WAVE";
+    const Case cases[] = {
+        {openai, half_wav, "too short", "a WAV cut off after its header"},
+        {openai, "<!DOCTYPE html><html><body>502 Bad Gateway</body></html>", "XML or HTML",
+         "an HTML error page delivered with a 200"},
+        {openai, std::string("RIF"), "instead of a WAV", "three bytes"},
+        {openai, std::string("OggS") + std::string(60, ' '), "Ogg",
+         "an Ogg file where a WAV was asked for"},
+        {eleven, std::string(1, '\x01'), "too few bytes", "a single byte of PCM"},
+    };
+    for (const auto& example : cases) {
+        bool refused = false;
+        std::string said;
+        try {
+            cloud::wav_from_reply(*example.provider, bytes_of(example.body));
+        } catch (const std::exception& error) {
+            refused = true;
+            said = error.what();
+        }
+        require(refused && contains(said, example.must_contain),
+                std::string(example.what) + " is refused by name: " + said);
+    }
+
+    // An odd byte count cannot be whole 16-bit samples. The half sample at the
+    // end is dropped rather than read past the end of the buffer.
+    std::vector<unsigned char> odd(4801, 0);
+    const auto wrapped = cloud::wav_from_reply(*eleven, odd);
+    require(wrapped.size() == 44u + 4800u,
+            "an odd number of PCM bytes drops the half sample rather than overrunning");
+}
+
+/*
+ * A source that runs on this machine is not a special case in the code, and
+ * that is the point.
+ *
+ * 3.0.0 puts an offline model here. The expensive part of adding one is not the
+ * model: it is a panel that has assumed everywhere that a voice source needs an
+ * API key, needs a network and needs to warn that the text is leaving the
+ * computer. The table carries the flag now, every shipped row says false, and
+ * the panel asks rather than assumes — validate-script.js pins that end.
+ */
+void test_local_sources_are_representable() {
+    for (const auto& provider : cloud::providers()) {
+        require(!provider.on_this_machine,
+                std::string(provider.id) + " is a remote service, and says so");
+    }
+    // The flag is real rather than decorative: a row can be built with it set,
+    // and nothing in the table's shape prevents one.
+    cloud::Provider local = *cloud::find("openai");
+    local.id = "local-test";
+    local.on_this_machine = true;
+    require(local.on_this_machine && !cloud::find("local-test"),
+            "a local row is expressible today without one being shipped");
+}
+
 }  // namespace
 
 int main() {
@@ -529,6 +646,9 @@ int main() {
     test_cache_key();
     test_reply_handling();
     test_errors_are_the_providers_own_words();
+    test_network_failures_are_distinguished();
+    test_broken_replies_are_refused_by_name();
+    test_local_sources_are_representable();
 
     if (failures) {
         std::cerr << failures << " cloud test(s) failed\n";
