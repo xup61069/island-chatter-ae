@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.2.0` (Windows x64).
+- Current public release: `v3.3.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -332,6 +332,34 @@ effect.
    audio the engine rendered, and a tone burst inside a vowel changes the spectrum it is
    identified from. `analysis_tests.cpp` therefore skips that one score in a trial build and
    says why. Syllable *timing* is unaffected, which is what the mouth is driven by.
+
+8aj. **The menu offers what runs; the manager lists what exists.**
+   `--providers` answers "what can be offered today" and lists only installed models, so that
+   nothing in the voice-source menu fails when it is pressed. `--models` answers "what is
+   there", installed or not, and is what the Offline models window reads.
+
+   Both answers are needed, and 3.2.0 shipped only the first: its download button fetched
+   whichever offline row was selected in the menu, and the menu could not show a model that was
+   not installed yet. So the first press anybody ever made said "choose one in the menu first"
+   with nothing to choose — a dead end reachable by every new user, and one no test caught
+   because every test ran on a machine where the model was already there.
+
+   The rule that produced it is still right: an option that appears and then fails reads as the
+   feature being broken. What was wrong was answering a question about the catalogue with the
+   menu. **When a list is filtered for a reason, something else has to be unfiltered**, or the
+   thing being filtered out becomes unreachable.
+
+   Downloading names the model (`--install --provider`), removing names it too, and removing
+   asks first — 177 MB is twenty minutes to get back. A removal deletes only the files the tool
+   fetched and leaves the folder if anything else is in it: a wildcard delete of a path built
+   from a string is how the wrong folder gets emptied. After a download the new source is
+   *selected*, because somebody who has just spent twenty minutes on a model should not have to
+   go and find it.
+
+   **And the button that speaks says which kind of voice it will use.** "Cloud voice" over an
+   offline model contradicts the one thing that matters about that model, on the control the
+   user is about to press. Relabelling at run time means resetting `preferredSize` (8z), or the
+   longer label is drawn into the shorter one's box and comes back as an ellipsis.
 
 8b. **The panel asks the engine for the plan; it must never compute one.** Markers, the
    rig, Type-On and Fit Duration all need to know where each syllable falls.

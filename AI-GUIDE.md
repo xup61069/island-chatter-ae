@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 3.2.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.3.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -236,7 +236,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
 - Controls and menu entries with a label: **87**
-- Distinct messages the panel can print: **97**
+- Distinct messages the panel can print: **106**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -273,7 +273,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Fit Duration | 配合長度 | 配合长度 | 長さを合わせる |
 | Formant | 共鳴 | 共鸣 | きょうめい |
 | Gap | 間隔 | 间隔 | あいだ |
-| Get model | 下載模型 | 下载模型 | モデルを入手 |
 | Giant | 巨大 | 巨大 | きょだい |
 | Granular | 破碎 | 破碎 | グラニュラー |
 | Growl | 低吼 | 低吼 | うなり |
@@ -290,6 +289,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | My voice… | 我的聲音… | 我的声音… | 自分の声… |
 | Neutral | 中性 | 中性 | ふつう |
 | New | 新增角色 | 新增角色 | キャラを追加 |
+| Offline models… | 離線模型… | 离线模型… | オフラインモデル… |
 | Per layer | 每層 | 每层 | レイヤーごと |
 | Pitch | 音高 | 音高 | ピッチ |
 | Preview | 試聽 | 试听 | 試聴 |
@@ -657,13 +657,15 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Choose a recording of a held “{0}” | 請選一段拉長的「{0}」的錄音 | 请选一段拉长的「{0}」的录音 | 「{0}」を伸ばして録音したファイルを選んでください |
 | Choose a track first. | 請先選一個軌道。 | 请先选一个轨道。 | 先にトラックを選んでください。 |
 | Choose or create a character first. | 請先選擇或新增角色。 | 请先选择或新增角色。 | 先にキャラを選ぶか追加してください。 |
-| Choose which offline model to download in the source menu. | 請先在來源清單選一個要下載的離線模型。 | 请先在来源清单选一个要下载的离线模型。 | ダウンロードするオフラインモデルを、音声ソースの一覧から選んでください。 |
+| Close | 關閉 | 关闭 | 閉じる |
 | Cloud voice on {0} layer(s) via {1} | 已用 {1} 為 {0} 層配音 | 已用 {1} 为 {0} 层配音 | {1} で {0} レイヤーに声を当てました |
+| Download | 下載 | 下载 | ダウンロード |
 | Download failed | 下載失敗 | 下载失败 | ダウンロードに失敗しました |
-| Download the offline voice model? ⏎  ⏎ About {0} MB, once. After that this voice needs no network and no account — it runs on this computer. ⏎  ⏎ After Effects will not respond while it downloads. | 要下載離線語音模型嗎？ ⏎  ⏎ 大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。 ⏎  ⏎ 下載時 After Effects 會沒有反應。 | 要下载离线语音模型吗？ ⏎  ⏎ 大约 {0} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。 ⏎  ⏎ 下载时 After Effects 会没有反应。 | オフライン音声モデルをダウンロードしますか？ ⏎  ⏎ 約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。 ⏎  ⏎ ダウンロード中は After Effects が応答しなくなります。 |
+| Download {0}? ⏎  ⏎ About {1} MB, once. After that this voice needs no network and no account — it runs on this computer. ⏎  ⏎ After Effects will not respond while it downloads. | 要下載{0}嗎？ ⏎  ⏎ 大約 {1} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。 ⏎  ⏎ 下載時 After Effects 會沒有反應。 | 要下载{0}吗？ ⏎  ⏎ 大约 {1} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。 ⏎  ⏎ 下载时 After Effects 会没有反应。 | {0} をダウンロードしますか？ ⏎  ⏎ 約 {1} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。 ⏎  ⏎ ダウンロード中は After Effects が応答しなくなります。 |
 | Downloading… | 下載中… | 下载中… | ダウンロード中… |
 | Error | 錯誤 | 错误 | エラー |
 | Imported {0} layer(s) | 已匯入 {0} 層 | 已导入 {0} 层 | {0} レイヤーを読み込みました |
+| Installed · {0} MB | 已安裝 · {0} MB | 已安装 · {0} MB | 導入済み・{0} MB |
 | Kanji read as Chinese: {0} | 漢字以中文讀音唸出：{0} | 汉字以中文读音念出：{0} | 漢字は中国語読みです：{0} |
 | Key cleared | 已清除金鑰 | 已清除金钥 | APIキーを消去しました |
 | Key saved | 已存下金鑰 | 已存下金钥 | APIキーを保存しました |
@@ -672,13 +674,17 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | MIDI loaded: {0} — pick a track, then Sing | 已讀取 {0} —— 選好軌道後按「唱出來」 | 已读取 {0} —— 选好轨道后按「唱出来」 | MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」 |
 | Measured {0} vowel(s); Apply writes them onto a layer | 已量到 {0} 個母音，按 Apply 才會寫到圖層上 | 已量到 {0} 个母音，按 Apply 才会写到图层上 | 母音を {0} つ測りました。レイヤーに書き込むには「適用」を押してください |
 | Model ready | 模型已就緒 | 模型已就绪 | モデルの準備ができました |
+| Models live in your own user folder, so removing Island Chatter leaves them alone. After Effects stops responding while one downloads. | 模型放在你自己的使用者資料夾，所以移除 Island Chatter 不會動到它們。下載時 After Effects 會沒有反應。 | 模型放在你自己的使用者文件夹，所以移除 Island Chatter 不会动到它们。下载时 After Effects 会没有反应。 | モデルはご自身のユーザーフォルダーに保存されるため、Island Chatter を削除しても残ります。ダウンロード中は After Effects が応答しなくなります。 |
 | Mouth on Time Remap | 嘴型已接上時間重映射 | 口型已接上时间重映射 | 口パクをタイムリマップにつなぎました |
 | Mouth switch on {0} layer(s) -> {1} | 已接上嘴型 {0} 層 -> {1} | 已接上口型 {0} 层 -> {1} | 口パクを {0} レイヤーにつなぎました -> {1} |
 | Name this character | 幫這個角色取個名字 | 帮这个角色取个名字 | キャラの名前を入れてください |
 | No notes in that file | 這個檔案裡沒有音符 | 这个文件里没有音符 | このファイルに音符がありません |
 | None of those were singing | 選取的圖層沒有旋律 | 选中的图层没有旋律 | 選んだレイヤーにメロディがありません |
+| Not downloaded · {0} MB | 尚未下載 · {0} MB | 尚未下载 · {0} MB | 未ダウンロード・{0} MB |
 | Now editing {0} | 目前角色：{0} | 目前角色：{0} | 編集中のキャラ：{0} |
 | Offline model installed ({0} MB) | 離線模型已安裝（{0} MB） | 离线模型已安装（{0} MB） | オフラインモデルを入れました（{0} MB） |
+| Offline models | 離線模型 | 离线模型 | オフラインモデル |
+| Offline voice | 離線語音 | 离线语音 | オフライン音声 |
 | Only the first {0} UTF-16 units are spoken; the rest of the Source Text was cut: ⏎  ⏎ {1} | 只會唸出前 {0} 個 UTF-16 字元，超出的 Source Text 已截斷： ⏎  ⏎ {1} | 只会念出前 {0} 个 UTF-16 字符，超出的 Source Text 已截断： ⏎  ⏎ {1} | しゃべるのは最初の {0} UTF-16 単位までです。残りのソーステキストは切りました： ⏎  ⏎ {1} |
 | Open an active composition first. | 請先開啟合成。 | 请先开启合成。 | 先にコンポジションを開いてください。 |
 | Overlapping lines: {0} | 台詞重疊：{0} | 台词重叠：{0} | セリフが重なっています：{0} |
@@ -690,6 +696,8 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Read settings from {0} | 已讀取設定：{0} | 已读取设置：{0} | {0} から設定を読み込みました |
 | Read text only | 只讀到文字（此圖層尚未套用） | 只读到文字（此图层尚未应用） | テキストだけ読み込みました（未適用） |
 | Rebuilt {0} rig(s), {1} line(s) | 已重建 {0} 組控制器、{1} 句 | 已重建 {0} 组控制器、{1} 句 | リグ {0} 組・{1} 行を作り直しました |
+| Remove {0}? ⏎  ⏎ It frees about {1} MB. You can download it again at any time. | 要移除{0}嗎？ ⏎  ⏎ 會空出大約 {1} MB。之後隨時可以再下載一次。 | 要移除{0}吗？ ⏎  ⏎ 会空出大约 {1} MB。之后随时可以再下载一次。 | {0} を取り除きますか？ ⏎  ⏎ 約 {1} MB が空きます。いつでも再ダウンロードできます。 |
+| Removed {0} | 已移除 {0} | 已移除 {0} | {0} を取り除きました |
 | Removed {0} item(s) from {1} layer(s) | 已移除 {1} 層上的 {0} 個項目 | 已移除 {1} 层上的 {0} 个项目 | {1} レイヤーから {0} 項目を取り除きました |
 | Saved {0} | 已儲存：{0} | 已保存：{0} | {0} を保存しました |
 | Select a saved character first. | 請先選取自訂角色。 | 请先选中自订角色。 | 先に保存したキャラを選んでください。 |
@@ -709,6 +717,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | There are already {0} layer(s) here from an earlier MIDI import. ⏎  ⏎ Remove them first? No adds a second copy. | 這個合成裡已經有 {0} 層是之前匯入的。 ⏎  ⏎ 要先移除它們嗎？按「否」就直接再加一份。 | 这个合成里已经有 {0} 层是之前导入的。 ⏎  ⏎ 要先移除它们吗？按「否」就直接再加一份。 | このコンポには前回の MIDI 読み込みで作られたレイヤーが {0} 枚あります。 ⏎  ⏎ 先に取り除きますか？「いいえ」でもう一組追加します。 |
 | There are no Island Chatter lines here. | 這個合成裡沒有台詞圖層。 | 这个合成里没有台词图层。 | このコンポにセリフのレイヤーがありません。 |
 | There is no shared rig here. | 這個合成裡沒有共用控制器。 | 这个合成里没有共用控制器。 | このコンポには共有リグがありません。 |
+| This build knows about no offline models. | 這個版本沒有任何離線模型。 | 这个版本没有任何离线模型。 | このビルドにはオフラインモデルがありません。 |
 | This voice has no sound for these characters, so they were left out: {0} | 這個語音沒有這些字的發音，所以沒有唸出來：{0} | 这个语音没有这些字的发音，所以没有念出来：{0} | この音声には次の文字の読みがないため、読み上げられませんでした：{0} |
 | Trial: the voice carries a short mark every few seconds | 試用版：聲音每隔幾秒會有一小段標記聲 | 试用版：声音每隔几秒会有一小段标记声 | 体験版：数秒ごとに短い印の音が入ります |
 | Truncated: {0} | 已截斷：{0} | 已截断：{0} | 文字が切れました：{0} |

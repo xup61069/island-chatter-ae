@@ -288,6 +288,66 @@ void print_providers(const std::string& override_dir) {
 }
 
 /*
+ * Every model this tool knows about, installed or not, and how big it is.
+ *
+ * A different question from `--providers`, and both answers are needed. The
+ * *menu* may only offer what works, or a press fails and reads as breakage —
+ * that is what `--providers` is for. But something has to tell a first-time
+ * user that offline models exist at all, and until 3.3.0 nothing did: the menu
+ * showed cloud sources, the download button demanded that an offline row be
+ * selected first, and an offline row only appeared after it had been
+ * downloaded. A dead end, reachable by anybody who pressed the button on the
+ * day they installed the product.
+ *
+ * So the manager reads this list, which is the whole catalogue, and the menu
+ * still reads the other one, which is what runs today.
+ */
+void print_models(const std::string& override_dir) {
+    std::cout << "VOICE 1\n";
+    for (const auto& model : kLocalModels) {
+        std::filesystem::path root;
+        bool installed = false;
+        try {
+            root = model_root(model, override_dir);
+            installed = model_is_installed(model, root);
+        } catch (const std::exception&) { root.clear(); }
+        std::uint64_t bytes = 0;
+        for (const auto& file : model.files) { bytes += file.bytes; }
+        std::cout << "M " << model.id
+                  << " " << cloud::as_hex(model.label)
+                  << " " << (installed ? 1 : 0)
+                  << " " << bytes
+                  << " " << cloud::as_hex(root.empty() ? std::string() : root.u8string())
+                  << "\n";
+    }
+    std::cout << "END " << (sizeof kLocalModels / sizeof kLocalModels[0]) << "\n";
+}
+
+/*
+ * Taking one back off the disk.
+ *
+ * 177 MB is worth being able to reclaim, and the folder is ours: it is named
+ * after the model and nothing else writes there. Only the files this tool
+ * fetched are removed, then the folder if it is empty — a wildcard delete of a
+ * path built from a string is how the wrong folder gets emptied.
+ */
+void remove_model(const LocalModel& model, const std::filesystem::path& root) {
+    std::error_code failed;
+    std::uint64_t freed = 0;
+    for (const auto& file : model.files) {
+        const auto path = root / file.name;
+        if (!std::filesystem::is_regular_file(path, failed)) { continue; }
+        const auto size = std::filesystem::file_size(path, failed);
+        if (std::filesystem::remove(path, failed)) { freed += size; }
+    }
+    // Only if it is empty. Somebody may have put something of their own here.
+    if (std::filesystem::is_empty(root, failed) && !failed) {
+        std::filesystem::remove(root, failed);
+    }
+    std::cout << "VOICE 1\nOK " << cloud::as_hex(root.u8string()) << " " << freed << " 0\n";
+}
+
+/*
  * Which model a request is about.
  *
  * `--provider` is the id the panel stores in the project, so it is the thing to
@@ -585,7 +645,11 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
 [[noreturn]] void usage() {
     std::cerr <<
         "island_chatter_local --providers [--model-dir <hex-utf8-path>]\n"
-        "island_chatter_local --install [--model-dir <hex-utf8-path>]\n"
+        "  The models that are installed, as voice sources the panel can offer.\n"
+        "island_chatter_local --models [--model-dir <hex-utf8-path>]\n"
+        "  Every model this tool knows about, installed or not, with its size.\n"
+        "island_chatter_local --install [--provider <id>] [--model-dir <hex-utf8-path>]\n"
+        "island_chatter_local --remove --provider <id> [--model-dir <hex-utf8-path>]\n"
         "island_chatter_local --cache-path --text <hex-utf8> --cache-dir <hex-utf8-path>\n"
         "island_chatter_local --speak --text <hex-utf8> --cache-dir <hex-utf8-path>\n"
         "                     [--model-dir <hex-utf8-path>]\n"
@@ -608,6 +672,8 @@ int main(int argc, char** argv) {
         // parsed by the cloud tool's parser so the two cannot drift.
         std::string override_dir;
         bool installing = false;
+        bool listing_models = false;
+        bool removing = false;
         std::vector<std::string> rest;
         for (std::size_t index = 0; index < args.size(); ++index) {
             if (args[index] == "--model-dir" && index + 1 < args.size()) {
@@ -615,11 +681,26 @@ int main(int argc, char** argv) {
                 continue;
             }
             if (args[index] == "--install") { installing = true; continue; }
+            if (args[index] == "--models") { listing_models = true; continue; }
+            if (args[index] == "--remove") { removing = true; continue; }
             // A key means nothing here and is accepted rather than refused, so
             // the panel does not need a second command builder. It is never
             // read, never stored and never printed.
             if (args[index] == "--key-file" && index + 1 < args.size()) { ++index; continue; }
             rest.push_back(args[index]);
+        }
+        if (listing_models) {
+            print_models(override_dir);
+            return 0;
+        }
+        if (removing) {
+            std::string wanted;
+            for (std::size_t index = 0; index + 1 < rest.size(); ++index) {
+                if (rest[index] == "--provider") { wanted = rest[index + 1]; }
+            }
+            const LocalModel& model = model_for(wanted);
+            remove_model(model, model_root(model, override_dir));
+            return 0;
         }
         if (installing) {
             // --install carries --provider too, so pressing Get model on the

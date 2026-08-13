@@ -2596,7 +2596,9 @@
                 M("Island Chatter could not run the cloud voice tool. / Island Chatter 無法執行雲端語音工具。") +
                 "\n\n" + reply);
         }
-        var answer = { providers: [], path: "", bytes: 0, cached: false, unspoken: "" };
+        var answer = {
+            providers: [], models: [], path: "", bytes: 0, cached: false, unspoken: ""
+        };
         var index;
         for (index = 1; index < lines.length; index += 1) {
             var fields = lines[index].split(" ");
@@ -2623,6 +2625,25 @@
                 answer.path = utf8FromHex(fields[1]);
                 answer.bytes = parseInt(fields[2], 10);
                 answer.cached = fields[3] === "1";
+            } else if (fields[0] === "M") {
+                /*
+                 * The catalogue, which is a different question from the menu.
+                 *
+                 * `--providers` answers "what can I offer today", and it has to
+                 * stay that way or the menu offers something that fails when
+                 * pressed. `--models` answers "what exists", which is what the
+                 * manager below needs — and what nothing could answer until
+                 * 3.3.0, when pressing the download button with nothing
+                 * installed asked the user to select a model from a list that
+                 * only shows installed ones.
+                 */
+                answer.models.push({
+                    id: fields[1],
+                    label: utf8FromHex(fields[2]),
+                    installed: fields[3] === "1",
+                    bytes: parseFloat(fields[4]) || 0,
+                    folder: fields.length > 5 ? utf8FromHex(fields[5]) : ""
+                });
             } else if (fields[0] === "WARN") {
                 /*
                  * The offline model spoke the line but not all of it.
@@ -3786,13 +3807,25 @@
             "Windows が試聴用の音声を再生できませんでした。",
         "Cloud voice / 雲端語音": "クラウド音声",
         "API key / 金鑰": "APIキー",
-        "Get model / 下載模型": "モデルを入手",
-        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n下載時 After Effects 會沒有反應。":
-            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。\n\nダウンロード中は After Effects が応答しなくなります。",
+        "Offline models… / 離線模型…": "オフラインモデル…",
+        "Offline models / 離線模型": "オフラインモデル",
+        "Offline voice / 離線語音": "オフライン音声",
+        "Download / 下載": "ダウンロード",
+        "Remove / 移除": "取り除く",
+        "Close / 關閉": "閉じる",
+        "Installed · {0} MB / 已安裝 · {0} MB": "導入済み・{0} MB",
+        "Not downloaded · {0} MB / 尚未下載 · {0} MB": "未ダウンロード・{0} MB",
+        "Removed {0} / 已移除 {0}": "{0} を取り除きました",
+        "This build knows about no offline models. / 這個版本沒有任何離線模型。":
+            "このビルドにはオフラインモデルがありません。",
+        "Models live in your own user folder, so removing Island Chatter leaves them alone. After Effects stops responding while one downloads. / 模型放在你自己的使用者資料夾，所以移除 Island Chatter 不會動到它們。下載時 After Effects 會沒有反應。":
+            "モデルはご自身のユーザーフォルダーに保存されるため、Island Chatter を削除しても残ります。ダウンロード中は After Effects が応答しなくなります。",
+        "Download {0}?\n\nAbout {1} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nAfter Effects will not respond while it downloads. / 要下載{0}嗎？\n\n大約 {1} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n下載時 After Effects 會沒有反應。":
+            "{0} をダウンロードしますか？\n\n約 {1} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。\n\nダウンロード中は After Effects が応答しなくなります。",
+        "Remove {0}?\n\nIt frees about {1} MB. You can download it again at any time. / 要移除{0}嗎？\n\n會空出大約 {1} MB。之後隨時可以再下載一次。":
+            "{0} を取り除きますか？\n\n約 {1} MB が空きます。いつでも再ダウンロードできます。",
         "This model is Mandarin as it is spoken in China, by a woman. It is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure. / 這個模型是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。":
             "このモデルの声は中国の標準中国語（普通話）を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。",
-        "Choose which offline model to download in the source menu. / 請先在來源清單選一個要下載的離線模型。":
-            "ダウンロードするオフラインモデルを、音声ソースの一覧から選んでください。",
         "This voice has no sound for these characters, so they were left out: {0} / 這個語音沒有這些字的發音，所以沒有唸出來：{0}":
             "この音声には次の文字の読みがないため、読み上げられませんでした：{0}",
         "Downloading… / 下載中…": "ダウンロード中…",
@@ -4115,7 +4148,7 @@
      */
     var IC_SIMPLIFIED_CHARS = {
         "並": "并", "併": "并", "佇": "伫", "來": "来", "個": "个", "們": "们",
-        "陸": "陆", "灣": "湾", "國": "国", "貨": "货", "試": "试", "帶": "带", "復": "复", "鐘": "钟", "穩": "稳", "順": "顺", "彎": "弯", "複": "复", "製": "制",
+        "陸": "陆", "灣": "湾", "國": "国", "貨": "货", "試": "试", "帶": "带", "復": "复", "鐘": "钟", "穩": "稳", "視": "视", "順": "顺", "彎": "弯", "複": "复", "製": "制",
         "償": "偿", "儲": "储", "內": "内", "兩": "两", "刪": "删", "別": "别",
         "剛": "刚", "劃": "划", "劇": "剧", "動": "动", "匯": "汇", "問": "问",
         "啟": "启", "嗎": "吗", "唸": "念", "圍": "围", "圖": "图", "夠": "够",
@@ -4472,45 +4505,52 @@
         "\n何も書き込まれず、「消去」で内蔵の声に戻ります。");
 
     help("getModel",
-        "Download the offline voice model, once, so a voice source can run on" +
-        " this computer instead of on somebody else's." +
-        "\n\nThe voice is Mandarin as it is spoken in China, by a woman." +
-        " It is the only Chinese model with a licence that allows it to be" +
-        " shipped with a product like this one, and no offline model with a" +
-        " Taiwanese accent exists at any licence. For Taiwan Mandarin, use the" +
-        " built-in voice or Azure's zh-TW voice." +
-        "\n\nAbout 177 MB. It is the only thing this product ever downloads," +
-        " and nothing is fetched until you press this and confirm. Afterwards" +
-        " that voice needs no network, no account and no key, and nothing you" +
-        " type ever leaves the machine." +
-        "\n\nAfter Effects will not respond while it downloads. If it fails" +
-        " part way, press it again: every file already fetched at the right" +
-        " size is skipped, so only what is missing is downloaded." +
-        "\n\nThe model is stored under your own user folder, not in Program" +
-        " Files, so it needs no administrator rights and an uninstall leaves" +
-        " it alone.",
-        "下載離線語音模型，只下載一次，之後就有一個在你自己電腦上跑的語音來源。" +
-        "\n\n這個聲音是中國口音的普通話女聲。可商用授權、能跟著這種產品一起出貨的中文模型" +
-        "\n只有這一個；台灣國語的離線模型，不管什麼授權都不存在。要台灣國語請用內建的聲音，" +
-        "\n或雲端的 Azure zh-TW 音色。" +
-        "\n\n大約 177 MB。這是這個產品唯一會下載的東西，而且按下去並確認之前什麼都不會抓。" +
-        "\n裝好之後那個語音不用連網、不用帳號、不用金鑰，你打的字完全不會離開這台電腦。" +
-        "\n\n下載時 After Effects 會沒有反應。中途失敗就再按一次：已經抓好而且大小正確的檔案" +
-        "\n會跳過，只補缺的那些。" +
-        "\n\n模型放在你自己的使用者資料夾，不在 Program Files，所以不需要系統管理員權限，" +
-        "\n移除程式也不會動到它。",
-        "オフライン音声モデルを一度だけダウンロードします。以後は、他人のサーバーではなく" +
-        "\nこのパソコンの中で動く音声が使えます。" +
-        "\n\n声は中国の標準中国語（普通話）を話す女性です。この種の製品に同梱できるライセンスの" +
-        "\n中国語モデルはこれだけで、台湾なまりのオフラインモデルはライセンスを問わず" +
-        "\n存在しません。台湾の中国語には内蔵の音声か、クラウドの Azure zh-TW をお使いください。" +
-        "\n\n約 177 MB。この製品がダウンロードするのはこれだけで、ここを押して確認するまで" +
-        "\n何も取得しません。導入後はネットワークもアカウントもキーも不要で、" +
-        "\n入力した文字がこのパソコンの外に出ることはありません。" +
-        "\n\nダウンロード中は After Effects が応答しなくなります。途中で失敗したらもう一度" +
-        "\n押してください。正しいサイズで取得済みのファイルは飛ばし、足りない分だけ取ります。" +
-        "\n\nモデルはご自身のユーザーフォルダーに保存されます。Program Files ではないので" +
-        "\n管理者権限は不要で、アンインストールしても残ります。");
+        "Open the list of offline voice models: what there is, how big each one"
+        + " is, and whether you have it. Downloading one gives you a voice source"
+        + " that runs on this computer instead of on somebody else's."
+        + "\n\nThere are two. Chinese and English, about 177 MB \u2014 a woman"
+        + " speaking Mandarin as it is spoken in China. It is the only Chinese"
+        + " model with a licence that allows it to be shipped with a product like"
+        + " this one, and no offline model with a Taiwanese accent exists at any"
+        + " licence; for Taiwan Mandarin use the built-in voice or Azure's zh-TW"
+        + " voice. Japanese, about 171 MB, which reads kana and common kanji."
+        + "\n\nNothing is fetched until you press Download and confirm, and a"
+        + " model can be removed again from the same window. Afterwards that voice"
+        + " needs no network, no account and no key, and nothing you type ever"
+        + " leaves the machine."
+        + "\n\nAfter Effects will not respond while one downloads. If it fails"
+        + " part way, press it again: every file already fetched at the right"
+        + " size is skipped, so only what is missing is downloaded."
+        + "\n\nModels are stored under your own user folder, not in Program"
+        + " Files, so they need no administrator rights and an uninstall leaves"
+        + " them alone.",
+        "\u6253\u958b\u96e2\u7dda\u8a9e\u97f3\u6a21\u578b\u7684\u6e05\u55ae\uff1a\u6709\u54ea\u4e9b\u3001\u5404\u591a\u5927\u3001\u4f60\u6709\u6c92\u6709\u3002\u4e0b\u8f09\u4e00\u500b\uff0c\u5c31\u6703\u591a\u4e00\u500b"
+        + "\n\u5728\u4f60\u81ea\u5df1\u96fb\u8166\u4e0a\u8dd1\u7684\u8a9e\u97f3\u4f86\u6e90\u3002"
+        + "\n\n\u6709\u5169\u500b\u3002\u4e2d\u6587\uff0b\u82f1\u6587\uff0c\u5927\u7d04 177 MB\uff0c\u662f\u4e2d\u570b\u53e3\u97f3\u7684\u666e\u901a\u8a71\u5973\u8072\u2014\u2014\u53ef\u5546\u7528\u6388\u6b0a\u3001"
+        + "\n\u80fd\u8ddf\u8457\u9019\u7a2e\u7522\u54c1\u4e00\u8d77\u51fa\u8ca8\u7684\u4e2d\u6587\u6a21\u578b\u53ea\u6709\u9019\u4e00\u500b\uff1b\u53f0\u7063\u570b\u8a9e\u7684\u96e2\u7dda\u6a21\u578b\uff0c\u4e0d\u7ba1\u4ec0\u9ebc\u6388\u6b0a"
+        + "\n\u90fd\u4e0d\u5b58\u5728\uff0c\u8981\u53f0\u7063\u570b\u8a9e\u8acb\u7528\u5167\u5efa\u7684\u8072\u97f3\u6216\u96f2\u7aef\u7684 Azure zh-TW \u97f3\u8272\u3002"
+        + "\n\u65e5\u6587\uff0c\u5927\u7d04 171 MB\uff0c\u5047\u540d\u548c\u5e38\u7528\u6f22\u5b57\u90fd\u8b80\u5f97\u51fa\u4f86\u3002"
+        + "\n\n\u6309\u300c\u4e0b\u8f09\u300d\u4e26\u78ba\u8a8d\u4e4b\u524d\u4ec0\u9ebc\u90fd\u4e0d\u6703\u6293\uff0c\u540c\u4e00\u500b\u8996\u7a97\u4e5f\u53ef\u4ee5\u628a\u6a21\u578b\u79fb\u9664\u3002\u88dd\u597d\u4e4b\u5f8c\u90a3\u500b\u8a9e\u97f3"
+        + "\n\u4e0d\u7528\u9023\u7db2\u3001\u4e0d\u7528\u5e33\u865f\u3001\u4e0d\u7528\u91d1\u9470\uff0c\u4f60\u6253\u7684\u5b57\u5b8c\u5168\u4e0d\u6703\u96e2\u958b\u9019\u53f0\u96fb\u8166\u3002"
+        + "\n\n\u4e0b\u8f09\u6642 After Effects \u6703\u6c92\u6709\u53cd\u61c9\u3002\u4e2d\u9014\u5931\u6557\u5c31\u518d\u6309\u4e00\u6b21\uff1a\u5df2\u7d93\u6293\u597d\u800c\u4e14\u5927\u5c0f\u6b63\u78ba\u7684\u6a94\u6848"
+        + "\n\u6703\u8df3\u904e\uff0c\u53ea\u88dc\u7f3a\u7684\u90a3\u4e9b\u3002"
+        + "\n\n\u6a21\u578b\u653e\u5728\u4f60\u81ea\u5df1\u7684\u4f7f\u7528\u8005\u8cc7\u6599\u593e\uff0c\u4e0d\u5728 Program Files\uff0c\u6240\u4ee5\u4e0d\u9700\u8981\u7cfb\u7d71\u7ba1\u7406\u54e1\u6b0a\u9650\uff0c"
+        + "\n\u79fb\u9664\u7a0b\u5f0f\u4e5f\u4e0d\u6703\u52d5\u5230\u5b83\u5011\u3002",
+        "\u30aa\u30d5\u30e9\u30a4\u30f3\u97f3\u58f0\u30e2\u30c7\u30eb\u306e\u4e00\u89a7\u3092\u958b\u304d\u307e\u3059\u3002\u4f55\u304c\u3042\u308a\u3001\u3069\u308c\u304f\u3089\u3044\u306e\u5927\u304d\u3055\u3067\u3001"
+        + "\n\u5c0e\u5165\u6e08\u307f\u304b\u3069\u3046\u304b\u304c\u5206\u304b\u308a\u307e\u3059\u3002\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u3059\u308b\u3068\u3001\u4ed6\u4eba\u306e\u30b5\u30fc\u30d0\u30fc\u3067\u306f\u306a\u304f"
+        + "\n\u3053\u306e\u30d1\u30bd\u30b3\u30f3\u306e\u4e2d\u3067\u52d5\u304f\u97f3\u58f0\u30bd\u30fc\u30b9\u304c\u5897\u3048\u307e\u3059\u3002"
+        + "\n\n2 \u3064\u3042\u308a\u307e\u3059\u3002\u4e2d\u56fd\u8a9e\uff0b\u82f1\u8a9e\u306f\u7d04 177 MB \u3067\u3001\u4e2d\u56fd\u306e\u6a19\u6e96\u4e2d\u56fd\u8a9e\uff08\u666e\u901a\u8a71\uff09\u3092"
+        + "\n\u8a71\u3059\u5973\u6027\u3067\u3059\u3002\u3053\u306e\u7a2e\u306e\u88fd\u54c1\u306b\u540c\u68b1\u3067\u304d\u308b\u30e9\u30a4\u30bb\u30f3\u30b9\u306e\u4e2d\u56fd\u8a9e\u30e2\u30c7\u30eb\u306f\u3053\u308c\u3060\u3051\u3067\u3001"
+        + "\n\u53f0\u6e7e\u306a\u307e\u308a\u306e\u30aa\u30d5\u30e9\u30a4\u30f3\u30e2\u30c7\u30eb\u306f\u30e9\u30a4\u30bb\u30f3\u30b9\u3092\u554f\u308f\u305a\u5b58\u5728\u3057\u307e\u305b\u3093\u3002\u53f0\u6e7e\u306e\u4e2d\u56fd\u8a9e\u306b\u306f"
+        + "\n\u5185\u8535\u306e\u97f3\u58f0\u304b Azure zh-TW \u3092\u304a\u4f7f\u3044\u304f\u3060\u3055\u3044\u3002\u65e5\u672c\u8a9e\u306f\u7d04 171 MB \u3067\u3001"
+        + "\n\u4eee\u540d\u3068\u5e38\u7528\u6f22\u5b57\u3092\u8aad\u307f\u307e\u3059\u3002"
+        + "\n\n\u300c\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u300d\u3092\u62bc\u3057\u3066\u78ba\u8a8d\u3059\u308b\u307e\u3067\u4f55\u3082\u53d6\u5f97\u3057\u307e\u305b\u3093\u3002\u540c\u3058\u30a6\u30a3\u30f3\u30c9\u30a6\u304b\u3089"
+        + "\n\u53d6\u308a\u9664\u304f\u3053\u3068\u3082\u3067\u304d\u307e\u3059\u3002\u5c0e\u5165\u5f8c\u306f\u30cd\u30c3\u30c8\u30ef\u30fc\u30af\u3082\u30a2\u30ab\u30a6\u30f3\u30c8\u3082\u30ad\u30fc\u3082\u4e0d\u8981\u3067\u3001"
+        + "\n\u5165\u529b\u3057\u305f\u6587\u5b57\u304c\u3053\u306e\u30d1\u30bd\u30b3\u30f3\u306e\u5916\u306b\u51fa\u308b\u3053\u3068\u306f\u3042\u308a\u307e\u305b\u3093\u3002"
+        + "\n\n\u30c0\u30a6\u30f3\u30ed\u30fc\u30c9\u4e2d\u306f After Effects \u304c\u5fdc\u7b54\u3057\u306a\u304f\u306a\u308a\u307e\u3059\u3002\u9014\u4e2d\u3067\u5931\u6557\u3057\u305f\u3089\u3082\u3046\u4e00\u5ea6"
+        + "\n\u62bc\u3057\u3066\u304f\u3060\u3055\u3044\u3002\u6b63\u3057\u3044\u30b5\u30a4\u30ba\u3067\u53d6\u5f97\u6e08\u307f\u306e\u30d5\u30a1\u30a4\u30eb\u306f\u98db\u3070\u3057\u3001\u8db3\u308a\u306a\u3044\u5206\u3060\u3051\u53d6\u308a\u307e\u3059\u3002"
+        + "\n\n\u30e2\u30c7\u30eb\u306f\u3054\u81ea\u8eab\u306e\u30e6\u30fc\u30b6\u30fc\u30d5\u30a9\u30eb\u30c0\u30fc\u306b\u4fdd\u5b58\u3055\u308c\u307e\u3059\u3002Program Files \u3067\u306f\u306a\u3044\u306e\u3067"
+        + "\n\u7ba1\u7406\u8005\u6a29\u9650\u306f\u4e0d\u8981\u3067\u3001\u30a2\u30f3\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u3057\u3066\u3082\u6b8b\u308a\u307e\u3059\u3002");
 
     help("cloudVoiceId",
         "The provider's own name or id for the voice you want. Leave it as it" +
@@ -5850,7 +5890,7 @@
          * starts, because 178 MB on a slow line is a decision rather than a
          * click.
          */
-        var modelButton = cloudRowThree.add("button", undefined, "Get model / 下載模型");
+        var modelButton = cloudRowThree.add("button", undefined, "Offline models… / 離線模型…");
         tip(modelButton, "getModel");
         /*
          * Off unless the offline tool is actually installed.
@@ -6841,6 +6881,25 @@
             cloudRegionField.enabled = picked.needsRegion;
             // A source that runs here has no account and no key to set.
             keyButton.enabled = !picked.onThisMachine;
+            /*
+             * The button says what pressing it will do.
+             *
+             * Calling it "Cloud voice" while an offline model is selected is
+             * not a wording problem: it contradicts the one thing that matters
+             * about that model — that nothing leaves the machine — on the
+             * control the user is about to press. The panel's own confirmation
+             * already asks the table whether a source is local (invariant 8ab);
+             * this is the same question asked of the label.
+             *
+             * `preferredSize` goes back to automatic width afterwards, or the
+             * longer of the two labels is drawn into the shorter one's box and
+             * After Effects renders the overflow as an ellipsis (invariant 8z).
+             */
+            cloudButton.text = picked.onThisMachine
+                ? M("Offline voice / 離線語音")
+                : M("Cloud voice / 雲端語音");
+            cloudButton.preferredSize = [-1, cloudButton.preferredSize.height];
+            try { cloudButton.parent.layout.layout(true); } catch (noLayout) { /* not built yet */ }
         }
 
         function rememberProviderFields() {
@@ -6883,6 +6942,22 @@
              */
             if (cloudTable.length) {
                 var wanted = preferred;
+                /*
+                 * An id or an index, because the two callers know different
+                 * things. `restoreState()` remembers a number — that is what
+                 * the preference has always held — while a model that has just
+                 * been downloaded is known by its id and has just changed the
+                 * list it would be an index into. Resolving the id here is what
+                 * lets the manager leave the user on the source they came for.
+                 */
+                if (typeof wanted === "string") {
+                    var byId = -1;
+                    var named;
+                    for (named = 0; named < cloudTable.length; named += 1) {
+                        if (cloudTable[named].id === wanted) { byId = named; }
+                    }
+                    wanted = byId < 0 ? undefined : byId;
+                }
                 if (wanted === undefined) {
                     wanted = 0;
                     var pick;
@@ -6929,53 +7004,159 @@
          * every file that is already there at the right length is skipped, so
          * pressing this again after a failure costs only what is missing.
          */
-        modelButton.onClick = function () {
+        /*
+         * The offline models, as a place rather than as a button.
+         *
+         * 3.2.0 had a "Get model" button that fetched whichever offline row was
+         * selected in the voice-source menu — and that menu only lists models
+         * that are *already installed*, on purpose, so that nothing in it fails
+         * when pressed. Which meant the first press anybody ever made answered
+         * "choose an offline model in the menu first" and there was nothing to
+         * choose. A dead end, and one nobody could get out of.
+         *
+         * So the button opens a window that lists every model the tool knows
+         * about, installed or not, with its size, what it sounds like, and one
+         * action each. The menu is unchanged: it still offers only what runs
+         * today. The catalogue and the menu are two different questions and
+         * they now have two different answers.
+         */
+        function showOfflineModels() {
             var local = toolFile(LOCAL_TOOL_NAME);
             if (!local) {
                 alert(M("{0} is missing. Reinstall Island Chatter. / 找不到 {0}，請重新安裝 Island Chatter。",
                     LOCAL_TOOL_NAME));
                 return;
             }
-            /*
-             * Which model, and what it has to say for itself.
-             *
-             * The menu holds every source the two tools reported, so the one
-             * to fetch is whichever offline row is selected — and when a cloud
-             * row is selected there is nothing to fetch, which is worth saying
-             * rather than silently installing Chinese.
-             */
-            var picked = cloudTable[providerList.selection ? providerList.selection.index : 0];
-            var wanted = picked && picked.onThisMachine ? picked.id : "";
-            if (!wanted) {
-                wanted = offlineSourceId(cloudTable);
-                if (!wanted) {
-                    alert(M("Choose which offline model to download in the source menu. / 請先在來源清單選一個要下載的離線模型。"));
+            var catalogue;
+            try {
+                catalogue = parseVoiceReply(
+                    system.callSystem(quoted(local.fsName) + " --models")).models;
+            } catch (error) {
+                alert(String(error.message || error));
+                return;
+            }
+            if (!catalogue.length) {
+                alert(M("This build knows about no offline models. / 這個版本沒有任何離線模型。"));
+                return;
+            }
+
+            var dialog = new Window("dialog", M("Offline models / 離線模型"));
+            dialog.orientation = "column";
+            dialog.alignChildren = "fill";
+            dialog.margins = 16;
+            dialog.spacing = 10;
+
+            var rows = [];
+            var index;
+            for (index = 0; index < catalogue.length; index += 1) {
+                rows.push(addModelRow(dialog, catalogue[index], local));
+            }
+
+            var footer = dialog.add("statictext", undefined, M(
+                "Models live in your own user folder, so removing Island Chatter leaves them alone. After Effects stops responding while one downloads. / 模型放在你自己的使用者資料夾，所以移除 Island Chatter 不會動到它們。下載時 After Effects 會沒有反應。"),
+                { multiline: true });
+            footer.preferredSize = [420, 32];
+
+            var closeRow = dialog.add("group");
+            closeRow.alignment = "right";
+            var closeButton = closeRow.add("button", undefined, M("Close / 關閉"),
+                { name: "ok" });
+            closeButton.onClick = function () { dialog.close(); };
+            dialog.show();
+        }
+
+        /*
+         * One model, and everything a person needs to decide about it.
+         *
+         * The size and the state come from the tool; the sentence about what it
+         * sounds like comes from `IC_SOURCE_NOTES`, because it has to be
+         * translated and a string the tool sent could not be (invariant 8i).
+         * A model this panel has no note for still appears and still downloads:
+         * an unknown row must not be unusable because a table was not updated.
+         */
+        function addModelRow(dialog, model, tool) {
+            var box = dialog.add("panel", undefined, model.label);
+            box.orientation = "column";
+            box.alignChildren = "fill";
+            box.margins = 12;
+            box.spacing = 6;
+
+            var note = IC_SOURCE_NOTES[model.id];
+            if (note && note.caveat) {
+                var caveat = box.add("statictext", undefined, M(note.caveat), { multiline: true });
+                caveat.preferredSize = [400, 32];
+            }
+
+            var row = box.add("group");
+            row.orientation = "row";
+            var state = row.add("statictext", undefined, "", { truncate: "end" });
+            state.preferredSize.width = 250;
+            var action = row.add("button", undefined, M("Download / 下載"));
+            action.preferredSize.width = 110;
+
+            function refreshRow(installed, megabytes) {
+                state.text = installed
+                    ? M("Installed · {0} MB / 已安裝 · {0} MB", Math.round(megabytes))
+                    : M("Not downloaded · {0} MB / 尚未下載 · {0} MB", Math.round(megabytes));
+                action.text = installed ? M("Remove / 移除") : M("Download / 下載");
+                // Invariant 8z: a control keeps the width it was measured at,
+                // so a label written afterwards is drawn into the old box and
+                // After Effects renders the overflow as an ellipsis. Both of
+                // these change at run time, so both are re-measured.
+                state.preferredSize = [250, state.preferredSize.height];
+                action.preferredSize = [110, action.preferredSize.height];
+                dialog.layout.layout(true);
+            }
+            refreshRow(model.installed, model.bytes / 1048576);
+
+            action.onClick = function () {
+                var megabytes = Math.round(model.bytes / 1048576);
+                if (model.installed) {
+                    if (!confirm(M(
+                            "Remove {0}?\n\nIt frees about {1} MB. You can download it again at any time. / 要移除{0}嗎？\n\n會空出大約 {1} MB。之後隨時可以再下載一次。",
+                            model.label, megabytes))) {
+                        return;
+                    }
+                    try {
+                        parseVoiceReply(system.callSystem(
+                            quoted(tool.fsName) + " --remove --provider " + model.id));
+                        model.installed = false;
+                        refreshRow(false, megabytes);
+                        refreshProviders(rememberedProvider);
+                        status.text = M("Removed {0} / 已移除 {0}", model.label);
+                    } catch (error) {
+                        alert(String(error.message || error));
+                    }
                     return;
                 }
-            }
-            var note = IC_SOURCE_NOTES[wanted] || { megabytes: LOCAL_MODEL_MEGABYTES, caveat: "" };
-            var question = M(
-                "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n下載時 After Effects 會沒有反應。",
-                Math.round(note.megabytes));
-            // The caveat belongs to the model, not to the button, so a model
-            // that has nothing to warn about does not borrow another's warning.
-            if (note.caveat) { question = M(note.caveat) + "\n\n" + question; }
-            if (!confirm(question)) { return; }
-            cloudReadout.text = M("Downloading… / 下載中…");
-            try {
-                var answer = parseVoiceReply(
-                    system.callSystem(quoted(local.fsName) + " --install --provider " + wanted));
-                // The list is asked again rather than assumed: the tool decides
-                // whether the model counts as installed, and it checks sizes.
-                refreshProviders(rememberedProvider);
-                cloudReadout.text = M("Model ready / 模型已就緒");
-                status.text = M("Offline model installed ({0} MB) / 離線模型已安裝（{0} MB）",
-                    Math.round(answer.bytes / 1048576));
-            } catch (error) {
-                cloudReadout.text = M("Download failed / 下載失敗");
-                alert(String(error.message || error));
-            }
-        };
+                if (!confirm(M(
+                        "Download {0}?\n\nAbout {1} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nAfter Effects will not respond while it downloads. / 要下載{0}嗎？\n\n大約 {1} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n下載時 After Effects 會沒有反應。",
+                        model.label, megabytes))) {
+                    return;
+                }
+                cloudReadout.text = M("Downloading… / 下載中…");
+                try {
+                    var answer = parseVoiceReply(system.callSystem(
+                        quoted(tool.fsName) + " --install --provider " + model.id));
+                    model.installed = true;
+                    refreshRow(true, answer.bytes / 1048576);
+                    // Asked again rather than assumed: the tool decides whether
+                    // a model counts as installed, and it checks every size.
+                    // Then the new source is *selected*, so the next thing the
+                    // user presses is the one they came here for.
+                    refreshProviders(model.id);
+                    cloudReadout.text = M("Model ready / 模型已就緒");
+                    status.text = M("Offline model installed ({0} MB) / 離線模型已安裝（{0} MB）",
+                        Math.round(answer.bytes / 1048576));
+                } catch (error) {
+                    cloudReadout.text = M("Download failed / 下載失敗");
+                    alert(String(error.message || error));
+                }
+            };
+            return box;
+        }
+
+        modelButton.onClick = showOfflineModels;
 
         cloudButton.onClick = function () {
             var comp = activeComp();

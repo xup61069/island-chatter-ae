@@ -905,7 +905,7 @@ for (const bpm of [60, 90, 120, 174]) {
    */
   const identicalInBothScripts = new Set(Array.from(
     "一三上下不中之也了二五些亮人什介仍代以件任份伴但位低何作你例依保修候倦值停" +
-    "普女授播特足我振他" +
+    "普女授播特足我振他英日假窗" +
     "像元先免入全八六共其再冒出分切列判到制前剛加勾十升半危即厚原去取受口句只叫" +
     "可台右吃合同名向否含吼和咪咬哪唱四回因固在地型填增多大太失奏套奶好始子字存" +
     "它安完定害容射小少尚就尾左巨差己已巴常幕平年序度延建式弦形影往很律得心怕性" +
@@ -2714,32 +2714,53 @@ for (const releaseFile of [
       "zips them. Reading about a dependency is what let 3.0.0 be built");
   }
   /*
-   * Two offline models, and neither may be fetched by accident.
+   * The offline models can be found before they exist, and neither is fetched
+   * by accident.
    *
-   * Get model downloads 170-odd MB, so it has to fetch the row the user is
-   * looking at: without `--provider` the tool takes its first model, which
-   * means pressing the button on the Japanese row spends twenty minutes on the
-   * Chinese one and then still cannot speak Japanese.
+   * 3.2.0's download button fetched whichever offline row was selected in the
+   * voice-source menu — and that menu deliberately lists only models that are
+   * already installed, so the first press anybody ever made answered "choose
+   * one in the menu first" with nothing to choose. The manager reads the
+   * *catalogue* instead, which is what `--models` is for, so this checks that
+   * it asks the question that has an answer before anything is installed.
    *
-   * And the caveat has to belong to the model rather than to the button. The
-   * accent warning is true of the Chinese model and false of the Japanese one,
-   * and a warning that is attached to the press rather than to the thing being
-   * pressed is how the wrong model gets the wrong sentence.
+   * The rest is unchanged: a download names the model it is fetching, because
+   * without `--provider` the tool takes its first one and the Japanese row
+   * spends twenty minutes on the Chinese model; and the caveat belongs to the
+   * model rather than to the button, because the accent warning is true of one
+   * and false of the other.
    */
   {
-    // A handler, not a named function, so it is read as the slice from its
-    // assignment to the end of the block it opens.
-    const handlerAt = nativePanelSource.indexOf("modelButton.onClick = function");
-    if (handlerAt < 0) throw new Error("Get model has no handler");
-    const downloading = nativePanelSource.slice(handlerAt,
-      nativePanelSource.indexOf("cloudButton.onClick", handlerAt));
-    if (!/" --install --provider " \+ wanted/.test(downloading)) {
+    const managerAt = nativePanelSource.indexOf("function showOfflineModels");
+    if (managerAt < 0) throw new Error("There is no offline-model manager");
+    const manager = takeFunction("showOfflineModels") + takeFunction("addModelRow");
+    if (!/" --models"/.test(manager)) {
       throw new Error(
-        "Get model must name the model it is fetching. Without --provider the tool takes " +
+        "The manager must list the catalogue, not the menu. The menu holds only what is " +
+        "installed, which is why asking it what to install was a dead end");
+    }
+    if (!/" --install --provider " \+ model\.id/.test(manager)) {
+      throw new Error(
+        "A download must name the model it is fetching. Without --provider the tool takes " +
         "its first one, and the Japanese row would download the Chinese model");
     }
-    if (!/IC_SOURCE_NOTES\[wanted\]/.test(downloading)) {
-      throw new Error("Get model must take the size and the caveat from the source's own note");
+    if (!/" --remove --provider " \+ model\.id/.test(manager)) {
+      throw new Error("Removing a model must name it too");
+    }
+    if (!/refreshProviders\(model\.id\)/.test(manager)) {
+      throw new Error(
+        "After a download the new source must be selected. Leaving the user on whatever was " +
+        "selected before is how somebody downloads 177 MB and then presses a cloud provider");
+    }
+    if (!/IC_SOURCE_NOTES\[model\.id\]/.test(manager)) {
+      throw new Error("Each model must show its own note, not the button's");
+    }
+    // A removal asks first: 177 MB is twenty minutes to get back.
+    // The whole condition, not a mention of it: written as a search for
+    // `confirm(` this passed with `if (false && !confirm(...))`, which is the
+    // shape of the bug — a confirmation that is asked and then not obeyed.
+    if (!/if \(!confirm\(M\([\s\S]{0,40}"Remove \{0\}\?/.test(manager)) {
+      throw new Error("Removing a model must be confirmed before the files go");
     }
     const notes = nativePanelSource.slice(nativePanelSource.indexOf("var IC_SOURCE_NOTES"));
     if (!/"local-melo":\s*{[\s\S]{0,200}caveat:\s*"[^"]{40,}"/.test(notes)) {
@@ -2751,6 +2772,24 @@ for (const releaseFile of [
       throw new Error(
         "The Japanese offline model must not inherit the Chinese model's accent caveat");
     }
+    /*
+     * And the button that speaks says which kind of voice it will use.
+     *
+     * "Cloud voice" over an offline model contradicts the one thing that
+     * matters about it — that nothing leaves the machine — on the control the
+     * user is about to press.
+     */
+    const fields = takeFunction("showProviderFields");
+    if (!/cloudButton\.text = picked\.onThisMachine/.test(fields)) {
+      throw new Error(
+        "The speak button must follow the selected source: an offline model pressed under a " +
+        "button marked Cloud voice says the opposite of what happens");
+    }
+    if (!/cloudButton\.preferredSize = \[-1, cloudButton\.preferredSize\.height\]/.test(fields)) {
+      throw new Error(
+        "A control relabelled at run time must have its width reset, or the longer label is " +
+        "drawn into the shorter one's box and comes back as an ellipsis (invariant 8z)");
+    }
     // And the tool refuses an id it does not serve rather than quietly serving
     // the first model, for the reason parse_arguments() refuses --key.
     const localTool = fs.readFileSync(
@@ -2761,6 +2800,15 @@ for (const releaseFile of [
         "island_chatter_local must refuse an unknown model by name. Falling back to the " +
         "first one renders Japanese text with the Chinese model, which reads as the model " +
         "being bad rather than as the wrong model");
+    }
+    // Removing only the files it fetched, and only then the folder if it is
+    // empty: a wildcard delete of a path built from a string is how the wrong
+    // folder gets emptied.
+    if (!/for \(const auto& file : model\.files\) {[\s\S]{0,400}std::filesystem::remove\(path, failed\)/
+      .test(localTool) || !/std::filesystem::is_empty\(root, failed\)/.test(localTool)) {
+      throw new Error(
+        "Removing a model must delete the files it knows about and leave anything else, " +
+        "including the folder if somebody put something of their own in it");
     }
   }
   // And the offline tool has to be *in* the package, with the one DLL it needs

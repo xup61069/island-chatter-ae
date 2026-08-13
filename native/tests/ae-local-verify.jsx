@@ -117,6 +117,28 @@
         check(picked.label.length > 0, "it has a name a person can read: " + picked.label);
 
         /*
+         * The catalogue, which is the question 3.2.0 could not ask.
+         *
+         * The manager window itself is modal and cannot be opened by a suite
+         * that has to finish, but what it *reads* can be: `--models` has to
+         * answer for models that are not installed, because the whole dead end
+         * was asking the installed-only menu what there was to install.
+         */
+        var catalogue = parseVoiceReply(
+            system.callSystem(quoted(local.fsName) + " --models")).models;
+        check(catalogue.length >= 2,
+            "the catalogue lists every model this build knows about, got " + catalogue.length);
+        var described = 0;
+        var known;
+        for (known = 0; known < catalogue.length; known += 1) {
+            if (catalogue[known].id && catalogue[known].label && catalogue[known].bytes > 0) {
+                described += 1;
+            }
+        }
+        check(described === catalogue.length,
+            "each one arrives with an id, a name and a size, so the window can offer it");
+
+        /*
          * A local source is never asked for an account.
          */
         check(storedKey(picked.id) === "" || picked.onThisMachine,
