@@ -2424,7 +2424,7 @@
      *
      * Azure, because its default voice is `zh-TW-HsiaoChenNeural` — Taiwan
      * Mandarin — and this product is Traditional Chinese first. The others
-     * default to mainland-accented Chinese, which is the wrong first
+     * default to China-accented Chinese, which is the wrong first
      * impression for the audience this is built for. Not a reordering of the
      * table: the remembered choice is an index, so moving rows would switch
      * anybody who had already picked one.
@@ -3628,8 +3628,8 @@
         "Cloud voice / 雲端語音": "クラウド音声",
         "API key / 金鑰": "APIキー",
         "Get model / 下載模型": "モデルを入手",
-        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is a woman speaking Mandarin with a mainland accent. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是大陸口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。":
-            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。\n\n声は大陸なまりの標準中国語を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。\n\nダウンロード中は After Effects が応答しなくなります。",
+        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is Mandarin as it is spoken in China, by a woman. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。":
+            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。\n\n声は中国の標準中国語（普通話）を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。\n\nダウンロード中は After Effects が応答しなくなります。",
         "This voice has no sound for these characters, so they were left out: {0} / 這個語音沒有這些字的發音，所以沒有唸出來：{0}":
             "この音声には次の文字の読みがないため、読み上げられませんでした：{0}",
         "Downloading… / 下載中…": "ダウンロード中…",
@@ -3916,7 +3916,7 @@
      *
      * Two passes, and the order matters. Converting character by character
      * alone gives Simplified characters spelling *Taiwan* terminology: 算圖佇列
-     * comes out as 算图伫列, which nobody in mainland China says. The terms go
+     * comes out as 算图伫列, which nobody in China says. The terms go
      * first and fix the vocabulary; the characters then fix the script.
      *
      * Longest term first, because 專案檔 has to become 项目文件 before 專案
@@ -3927,7 +3927,7 @@
         // The cloud voice brought four more, and every one of them is a word
         // that a character map alone would leave reading as Taiwan usage:
         // 执行绪, 网路, 命令列 and 偏好设置 are all correct Simplified spellings
-        // of terms nobody in mainland China says. 偏好設定 has to precede the
+        // of terms nobody in China says. 偏好設定 has to precede the
         // bare 設定 or it becomes 偏好设置 before this line is ever reached.
         ["偏好設定", "首选项"], ["執行緒", "线程"], ["暫存檔", "临时文件"],
         ["專案檔", "项目文件"], ["資料夾", "文件夹"], ["空物件", "空对象"],
@@ -4276,7 +4276,7 @@
     help("getModel",
         "Download the offline voice model, once, so a voice source can run on" +
         " this computer instead of on somebody else's." +
-        "\n\nThe voice is a woman speaking Mandarin with a mainland accent." +
+        "\n\nThe voice is Mandarin as it is spoken in China, by a woman." +
         " It is the only Chinese model with a licence that allows it to be" +
         " shipped with a product like this one, and no offline model with a" +
         " Taiwanese accent exists at any licence. For Taiwan Mandarin, use the" +
@@ -4292,7 +4292,7 @@
         " Files, so it needs no administrator rights and an uninstall leaves" +
         " it alone.",
         "下載離線語音模型，只下載一次，之後就有一個在你自己電腦上跑的語音來源。" +
-        "\n\n這個聲音是大陸口音的普通話女聲。可商用授權、能跟著這種產品一起出貨的中文模型" +
+        "\n\n這個聲音是中國口音的普通話女聲。可商用授權、能跟著這種產品一起出貨的中文模型" +
         "\n只有這一個；台灣國語的離線模型，不管什麼授權都不存在。要台灣國語請用內建的聲音，" +
         "\n或雲端的 Azure zh-TW 音色。" +
         "\n\n大約 177 MB。這是這個產品唯一會下載的東西，而且按下去並確認之前什麼都不會抓。" +
@@ -4303,7 +4303,7 @@
         "\n移除程式也不會動到它。",
         "オフライン音声モデルを一度だけダウンロードします。以後は、他人のサーバーではなく" +
         "\nこのパソコンの中で動く音声が使えます。" +
-        "\n\n声は大陸なまりの標準中国語を話す女性です。この種の製品に同梱できるライセンスの" +
+        "\n\n声は中国の標準中国語（普通話）を話す女性です。この種の製品に同梱できるライセンスの" +
         "\n中国語モデルはこれだけで、台湾なまりのオフラインモデルはライセンスを問わず" +
         "\n存在しません。台湾の中国語には内蔵の音声か、クラウドの Azure zh-TW をお使いください。" +
         "\n\n約 177 MB。この製品がダウンロードするのはこれだけで、ここを押して確認するまで" +
@@ -5583,7 +5583,7 @@
          * It is not, in the releases that ship this: the offline voice is
          * finished code held back for two reasons written up in the changelog —
          * the sherpa-onnx build links espeak-ng (GPL v3+), and the only
-         * permissively licensed Chinese model available is mainland-accented,
+         * permissively licensed Chinese model available is China-accented,
          * which is the wrong voice for a Traditional Chinese product. A button
          * that is present and fails reads as breakage; a button that is present
          * and greyed reads as "not yet", which is the truth.
@@ -6596,7 +6596,7 @@
              * is the only source in the table whose default voice is actually
              * Taiwan Mandarin (`zh-TW-HsiaoChenNeural`). Leaving the default on
              * whichever vendor happens to be first in the tool's list hands a
-             * Taiwanese user a mainland accent on the very first press.
+             * Taiwanese user a China accent on the very first press.
              *
              * Chosen by id rather than by moving the row, because the remembered
              * choice is stored as an index: reordering the table would silently
@@ -6658,7 +6658,7 @@
                 return;
             }
             if (!confirm(M(
-                    "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is a woman speaking Mandarin with a mainland accent. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是大陸口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。",
+                    "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is Mandarin as it is spoken in China, by a woman. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。",
                     Math.round(LOCAL_MODEL_MEGABYTES)))) {
                 return;
             }

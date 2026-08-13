@@ -941,7 +941,7 @@ for (const bpm of [60, 90, 120, 174]) {
     ["算圖佇列", "渲染队列"],
     ["專案檔旁邊的資料夾", "项目文件旁边的文件夹"],
     ["關鍵影格", "关键帧"],
-    // Script and vocabulary, not grammar: a mainland writer would say 一帧
+    // Script and vocabulary, not grammar: a writer in China would say 一帧
     // rather than 一个帧, but rewording is a translator's job and this is a
     // converter. Everything it produces has to be *correct*, not idiomatic.
     ["一個影格", "一个帧"],

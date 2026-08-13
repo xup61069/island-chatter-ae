@@ -19,7 +19,7 @@
 - **也可以下載一個神經模型，在自己的電腦上跑。** 按一次「下載模型」抓 177 MB，之後那個聲音
   不連網、不用帳號、不用金鑰，打的字一個都不會離開這台機器。它讀的是**跟內建聲音同一套**
   中文讀音——詞組、變調、注音、`[重|chong2]` 這種發音覆寫都算數。
-  **要先知道：那是大陸口音的普通話女聲。** 可商用授權的中文模型只有這一個，台灣國語的離線模型
+  **要先知道：那是中國口音的普通話女聲。** 可商用授權的中文模型只有這一個，台灣國語的離線模型
   不存在。要台灣國語請用內建的聲音，或雲端 Azure 的 zh-TW 音色。
 - **試聽不用先套到圖層上。** 調完音色按一下就聽得到，專案不會多出任何東西。
 - **音檔可以直接轉成口型。** 真人配音、自己錄的、雲端回來的都一樣：引擎讀出裡面的音節，
@@ -65,7 +65,7 @@ you hear. Built for Chinese first; it speaks Japanese and English too.
   after that the voice needs no network, no account and no key, and nothing you type leaves the
   computer. It reads Chinese with **the same reader the built-in voice uses**, so phrases, tone
   sandhi, Zhuyin and inline `[重|chong2]` pronunciation overrides all count.
-  **Know before you fetch it: it is a woman speaking Mandarin with a mainland accent.** It is
+  **Know before you fetch it: it is Mandarin as it is spoken in China, by a woman.** It is
   the only Chinese model with a licence that allows this, and no Taiwanese-accented offline
   model exists. For Taiwan Mandarin, use the built-in voice or Azure's zh-TW voice.
 - **Hear a voice before you apply it.** Preview plays the line straight from the panel and
@@ -126,7 +126,7 @@ After Effects のテキストレイヤーにそのままの声を持たせます
   取得すれば、以後はネットワークもアカウントもキーも不要で、入力した文字がこのパソコンの外に
   出ることはありません。中国語の読みは**内蔵音声とまったく同じ**仕組みで、熟語・声調変化・
   注音・`[重|chong2]` の読み指定がそのまま効きます。
-  **取得前にご確認を：声は大陸なまりの標準中国語を話す女性です。** 商用利用できるライセンスの
+  **取得前にご確認を：声は中国の標準中国語（普通話）を話す女性です。** 商用利用できるライセンスの
   中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。
 - **適用する前に試聴できます。** パネルからそのまま再生され、プロジェクトには何も残りません。
 - **台本をまるごと貼れば 1 行が 1 レイヤー**になり、声が乗って順番に並びます。

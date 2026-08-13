@@ -124,7 +124,7 @@ const wchar_t* kModelPathPrefix = L"/csukuangfj/vits-melo-tts-zh_en/resolve/main
 const cloud::Provider& local_provider() {
     static const cloud::Provider row{
         "local-melo",
-        "Local model (zh mainland + en)",
+        "Local model (zh-CN + en)",
         "-",                       // no host; it never leaves this machine
         "-",
         "",
