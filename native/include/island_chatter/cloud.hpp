@@ -207,6 +207,19 @@ std::vector<unsigned char> wav_from_reply(const Provider& provider,
                                           const std::vector<unsigned char>& body);
 
 /*
+ * The WAV header, in one place.
+ *
+ * `wav_from_reply` calls this, and so does island_chatter_local, whose samples
+ * come out of a model rather than off a socket but need exactly the same
+ * sixteen-bit mono container. Writing it a third time — bake_cli.cpp already
+ * has the engine's own — is how two of them end up disagreeing about the byte
+ * rate field. The rate is a parameter rather than a provider's because a local
+ * model states its own at runtime.
+ */
+std::vector<unsigned char> wav_from_pcm16(const std::vector<unsigned char>& pcm,
+                                          std::uint32_t rate);
+
+/*
  * Say what the provider said.
  *
  * Invariant 8k is about this exact failure: a real error wrapped in one

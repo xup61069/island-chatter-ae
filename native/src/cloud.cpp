@@ -553,6 +553,31 @@ std::string cache_file_name(const Provider& provider, const Params& params) {
     return std::string(provider.id) + "-" + cache_key(provider, params).substr(0, 32) + ".wav";
 }
 
+std::vector<unsigned char> wav_from_pcm16(const std::vector<unsigned char>& pcm,
+                                          std::uint32_t rate) {
+    // An odd byte count cannot be whole 16-bit samples. The half sample at the
+    // end is dropped rather than read past the end of the buffer.
+    const auto frames = static_cast<std::uint32_t>(pcm.size() / 2U);
+    const std::uint32_t data_bytes = frames * 2U;
+    std::string header;
+    header += "RIFF";
+    write_u32(header, 36U + data_bytes);
+    header += "WAVE";
+    header += "fmt ";
+    write_u32(header, 16U);
+    write_u16(header, 1U);                    // PCM
+    write_u16(header, 1U);                    // mono
+    write_u32(header, rate);
+    write_u32(header, rate * 2U);
+    write_u16(header, 2U);
+    write_u16(header, 16U);
+    header += "data";
+    write_u32(header, data_bytes);
+    std::vector<unsigned char> out(header.begin(), header.end());
+    out.insert(out.end(), pcm.begin(), pcm.begin() + data_bytes);
+    return out;
+}
+
 std::vector<unsigned char> wav_from_reply(const Provider& provider,
                                           const std::vector<unsigned char>& body) {
     if (body.empty()) {
@@ -562,27 +587,7 @@ std::vector<unsigned char> wav_from_reply(const Provider& provider,
         if (body.size() < 2) {
             throw std::runtime_error("the provider returned too few bytes to be audio");
         }
-        // An odd byte count cannot be whole 16-bit samples, which means what
-        // arrived is not the format that was asked for.
-        const auto frames = static_cast<std::uint32_t>(body.size() / 2U);
-        const std::uint32_t data_bytes = frames * 2U;
-        std::string header;
-        header += "RIFF";
-        write_u32(header, 36U + data_bytes);
-        header += "WAVE";
-        header += "fmt ";
-        write_u32(header, 16U);
-        write_u16(header, 1U);                    // PCM
-        write_u16(header, 1U);                    // mono
-        write_u32(header, provider.rate);
-        write_u32(header, provider.rate * 2U);
-        write_u16(header, 2U);
-        write_u16(header, 16U);
-        header += "data";
-        write_u32(header, data_bytes);
-        std::vector<unsigned char> out(header.begin(), header.end());
-        out.insert(out.end(), body.begin(), body.begin() + data_bytes);
-        return out;
+        return wav_from_pcm16(body, provider.rate);
     }
     // A WAV is checked, not trusted. Everything downstream — the analyser, and
     // After Effects itself — treats the extension as a promise.

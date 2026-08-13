@@ -78,6 +78,32 @@ if(WIN32)
     endif()
 endif()
 
+# The offline model, 3.0.0. Referenced by path rather than vendored, exactly as
+# the After Effects SDK is: sherpa-onnx ships prebuilt Windows x64 libraries and
+# this repository has no business carrying 21 MB of somebody else's binaries.
+# Point ISLAND_CHATTER_SHERPA_ROOT at an unpacked
+# sherpa-onnx-vX.Y.Z-win-x64-shared-MD-Release-lib and the target appears.
+set(ISLAND_CHATTER_SHERPA_ROOT "" CACHE PATH
+    "Unpacked sherpa-onnx Windows x64 shared release (lib/ and include/)")
+if(WIN32 AND ISLAND_CHATTER_SHERPA_ROOT)
+    add_executable(island_chatter_local tools/local_cli.cpp)
+    target_include_directories(island_chatter_local PRIVATE
+        "${ISLAND_CHATTER_SHERPA_ROOT}/include")
+    target_link_libraries(island_chatter_local PRIVATE
+        island_chatter_cloud
+        "${ISLAND_CHATTER_SHERPA_ROOT}/lib/sherpa-onnx-c-api.lib")
+    if(MSVC)
+        target_compile_options(island_chatter_local PRIVATE /W4 /permissive- /EHsc)
+    endif()
+    # The DLLs have to sit beside the executable, both here and once installed.
+    add_custom_command(TARGET island_chatter_local POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ISLAND_CHATTER_SHERPA_ROOT}/lib/sherpa-onnx-c-api.dll"
+            "${ISLAND_CHATTER_SHERPA_ROOT}/lib/onnxruntime.dll"
+            $<TARGET_FILE_DIR:island_chatter_local>
+        VERBATIM)
+endif()
+
 enable_testing()
 add_test(NAME island_chatter_native_tests COMMAND island_chatter_native_tests)
 add_test(NAME island_chatter_midi_tests COMMAND island_chatter_midi_tests)
