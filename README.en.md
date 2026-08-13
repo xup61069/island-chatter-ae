@@ -36,6 +36,10 @@ pronunciation adjustable.
 - Pitch (0.10–4.00), Speed (0.10–10.00), Volume (0–200%), Consonant strength (0–6.00), Clarity, Cuteness and a fixed random seed
 - Locks to a BPM so every syllable lands exactly on the beat
 - One-click Bake to audio; playback then costs nothing to compute
+- Optionally have a cloud model speak the line instead, with your own OpenAI, ElevenLabs or
+  Azure key: one press, one file, and the mouth is read straight out of it. **That feature
+  sends the selected lines' text to the provider you chose**, after a confirmation stating how
+  many characters. The built-in voice never touches a network
 - Batch apply across several selected text layers
 - Import a MIDI file and the character sings: one layer per lyric line, one note per syllable,
   placed at the times the file says
@@ -378,6 +382,33 @@ The panel adds a zero-level built-in After Effects Tone to the same text layer a
 source, and `Island Chatter Native` then replaces its output samples. This exists to avoid a
 host crash path in After Effects 26 around third-party audio synthesis on text layers; no
 carrier layer and no external WAV is created.
+
+## Cloud voice (bring your own API key)
+
+Select the lines, press **Cloud voice** on the Import tab, and OpenAI, ElevenLabs or Azure
+speaks them. The returned audio lands beside the project, is imported onto the timeline, and
+the mouth is read out of it by the same analyser that reads any other recording — so you get
+**a real voice with a mouth that matches it**.
+
+**This feature uses the network and sends those lines' text off the machine.** Before anything
+is sent, a dialog states how many lines, how many characters and which provider; cancel and
+nothing goes anywhere. The key is yours, the bill is yours, and no credit of any kind is
+included. **The built-in voice never uses a network** and works with the machine offline.
+
+- **It is one press, one file, not a live effect.** An audio callback cannot wait on a network
+  without hanging After Effects, so this takes the same road Bake already takes.
+- **Editing the line does not re-fetch it.** The recording is muted, the built-in voice comes
+  back, and the layer is marked `(stale)` until you press the button again — a keystroke should
+  not spend money. The mouth returns to the engine's timing at the same instant, so what you
+  hear and what the mouth does never disagree.
+- **Nothing is paid for twice.** The file is named after a hash of the text, voice, model and
+  settings; an unchanged line reuses the file and makes no request at all.
+- **The key is typed hidden** and kept in this computer's After Effects preferences in plain
+  text — there is no key store in ExtendScript, and saying so plainly beats implying otherwise
+  — and it **never appears on a command line**. Forget is in the same dialog.
+- **Errors are the provider's own words**: a refused key, a rate limit, an exhausted quota and
+  an unreachable host are four different problems.
+- 2000 characters a line.
 
 ## Japanese
 

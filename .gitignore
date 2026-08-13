@@ -17,5 +17,7 @@ ae-audio-render-result.txt
 ae-audio-render-output.*
 ae-bake-test-result.txt
 ae-language-verify-result.txt
-ae-width-probe-result.txt
+ae-size-probe-result.txt
 ae-close-project.txt
+ae-lipsync-verify-result.txt
+ae-cloud-verify-result.txt

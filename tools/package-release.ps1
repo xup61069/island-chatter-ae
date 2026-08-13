@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "2.1.0",
+    [string]$Version = "2.4.0",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = ""
 )
@@ -58,12 +58,21 @@ if ($newestSource -and $newestSource.LastWriteTime -gt $aexTime) {
 }
 # The bake tool is built from the same sources and must come from the same
 # build directory as the plug-in, never from a stale one elsewhere.
-$resolvedBake = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $resolvedAex))) "Release\island_chatter_bake.exe"
+$buildRelease = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $resolvedAex))) "Release"
+$resolvedBake = Join-Path $buildRelease "island_chatter_bake.exe"
 if (-not (Test-Path -LiteralPath $resolvedBake -PathType Leaf)) {
     throw "Build island_chatter_bake first. Missing: $resolvedBake"
 }
+# The cloud voice is the same story: the panel's button finds nothing and says
+# so, but it says so at the moment somebody presses it, which is the worst place
+# to discover that a release was packaged incompletely.
+$resolvedVoice = Join-Path $buildRelease "island_chatter_voice.exe"
+if (-not (Test-Path -LiteralPath $resolvedVoice -PathType Leaf)) {
+    throw "Build island_chatter_voice first. Missing: $resolvedVoice"
+}
 Write-Host "Packaging plug-in: $resolvedAex ($aexTime)"
 Write-Host "Packaging bake tool: $resolvedBake"
+Write-Host "Packaging voice tool: $resolvedVoice"
 
 $distRoot = Join-Path $repoRoot "dist"
 $stageRoot = Join-Path $distRoot "Island-Chatter-AE-$Version-Windows-x64"
@@ -88,6 +97,7 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $
 
 Copy-Item -LiteralPath $resolvedAex -Destination (Join-Path $resources "IslandChatterNative.aex")
 Copy-Item -LiteralPath $resolvedBake -Destination (Join-Path $resources "island_chatter_bake.exe")
+Copy-Item -LiteralPath $resolvedVoice -Destination (Join-Path $resources "island_chatter_voice.exe")
 Copy-Item -LiteralPath (Join-Path $repoRoot "native/panel/IslandChatterNativePanel.jsx") `
     -Destination (Join-Path $resources "IslandChatterNativePanel.jsx")
 Copy-Item -LiteralPath (Join-Path $repoRoot "installer/Install-IslandChatter.ps1") `

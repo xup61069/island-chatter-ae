@@ -1,15 +1,23 @@
 # Gumroad 商品說明（繁體中文／English／日本語）
 
 貼到 Gumroad 商品頁的 description 欄位。價格和封面在後台另外設定。
-改版時記得更新最後一行的版本號。詳細功能留在 GitHub 的 README，這裡只放買之前要知道的。
+改版時記得更新最後一行的版本號——`npm test` 會核對它跟 package.json 是否一致。
+詳細功能留在 GitHub 的 README，這裡只放買之前要知道的。
 
 ---
 
 ## 繁體中文
 
-讓 After Effects 的文字圖層自己講話。不輸出音檔、不裝取樣包，聲音在 AE 裡即時算出來，
-改一個字馬上就聽得到。以中文為主，日文和英文也能唸。
+讓 After Effects 的文字圖層自己講話。內建的聲音是在 After Effects 裡即時算出來的，
+不裝取樣包、不用先輸出音檔，改一個字馬上就聽得到。以中文為主，日文和英文也能唸。
 
+- **內建的聲音完全在本機。** 不連網、不上傳、不需要帳號，關掉網路照樣工作。
+- **想用雲端大模型的聲音也可以，但那一半要連網。** 你自己帶 OpenAI／ElevenLabs／Azure
+  的 API 金鑰，按一次「雲端語音」，那一句的文字會送到你選的那家、回傳一個音檔。
+  **文字會離開這台電腦，帳單也是你的。** 按下去之前會先跳出「這次會送出幾句、幾個字、
+  送去哪裡」讓你確認；沒按就什麼都不會送。同樣的文字和設定不會重送第二次。
+- **音檔可以直接轉成口型。** 真人配音、自己錄的、雲端回來的都一樣：引擎讀出裡面的音節，
+  寫出跟講話的句子一模一樣的控制器，嘴型切換、逐字標記、頭部晃動全部照舊。
 - **匯入 MIDI，角色就會唱歌。** 貼歌詞、選一軌，一個字一個音，落在 MIDI 自己的時間上。
   長音撐得住，聲調讓位給旋律，抖音會慢慢浮上來。歌詞打一個 `-` 就是拖腔。
   不給歌詞就唱唱名 do re mi，固定調首調都可以。力度照 MIDI 走，強弱有起伏。
@@ -29,15 +37,28 @@
   滑鼠停著跳出來的說明，全部都翻。
 
 **需要 Windows 10／11 x64，以及 After Effects 2025 或 2026。沒有 macOS 版。**
+**雲端語音需要你自己的 API 金鑰，本產品不含任何額度。**
 
 ---
 
 ## English
 
-Give an After Effects text layer its own voice. No audio files to export, no sample pack to
-install: the sound is generated inside After Effects, so changing a word changes what you hear.
-Built for Chinese first; it speaks Japanese and English too.
+Give an After Effects text layer its own voice. The built-in voice is generated inside After
+Effects: no sample pack to install, no file to export first, and changing a word changes what
+you hear. Built for Chinese first; it speaks Japanese and English too.
 
+- **The built-in voice is entirely local.** No network, no upload, no account. It works with
+  the machine offline.
+- **A cloud model can speak the line instead, and that half does use the network.** Bring your
+  own OpenAI, ElevenLabs or Azure API key, press Cloud voice, and that line's text is sent to
+  the provider you chose, which returns an audio file. **The text leaves your computer and the
+  bill is yours.** Before anything is sent you are shown how many lines, how many characters
+  and which provider; nothing goes anywhere until you confirm. The same text with the same
+  settings is never paid for twice.
+- **Any recording can drive the mouth.** A real voice actor, something you recorded yourself,
+  or the file a cloud model just sent back — the engine finds the syllables in it and writes
+  exactly the controls a spoken line writes, so mouth shapes, per-syllable markers and the head
+  bounce all work unchanged.
 - **Import a MIDI file and the character sings.** Paste the lyrics, pick a track, and every
   syllable takes a note at the time the file says. Long notes are held, tones give way to the
   melody, and vibrato grows in. A `-` in the lyric holds a syllable over. Give it no
@@ -60,15 +81,28 @@ Built for Chinese first; it speaks Japanese and English too.
   tooltip, not just the buttons.
 
 **Requires Windows 10/11 x64 and After Effects 2025 or 2026. There is no macOS build.**
+**Cloud voices need your own API key; no credit of any kind is included.**
 
 ---
 
 ## 日本語
 
-After Effects のテキストレイヤーにそのままの声を持たせます。音声ファイルの書き出しも、
-サンプル素材のインストールも不要。音は After Effects の中で生成されるので、
+After Effects のテキストレイヤーにそのままの声を持たせます。内蔵の声は After Effects の中で
+生成されるので、サンプル素材のインストールも、先に音声ファイルを書き出す必要もありません。
 文字を直せば聞こえ方もその場で変わります。中国語が主軸で、日本語と英語もしゃべります。
 
+- **内蔵の声は完全にこのパソコンの中だけで動きます。** 通信なし、アップロードなし、
+  アカウントも不要。ネットワークを切ったままでも使えます。
+- **クラウドのモデルにしゃべらせることもできますが、そちら半分は通信します。**
+  OpenAI・ElevenLabs・Azure の APIキーはご自身のものをお使いください。「クラウド音声」を
+  押すと、その行の文字が選んだサービスに送られ、音声ファイルが返ってきます。
+  **文字はこのパソコンの外に出ますし、料金もあなたに請求されます。** 送信の前に
+  「何行・何文字・どこへ」が表示され、確認するまで何も送られません。
+  同じ文字と同じ設定なら二度は課金されません。
+- **どんな録音からでも口を動かせます。** プロの声優でも、自分で録った声でも、
+  クラウドから返ってきたファイルでも同じです。エンジンが音節を見つけ、
+  しゃべらせた行とまったく同じ制御を書くので、口の形も文字ごとのマーカーも頭の揺れも
+  そのまま動きます。
 - **MIDI を読み込めばキャラクターが歌います。** 歌詞を貼ってトラックを選ぶだけで、
   1 文字が 1 音を取り、MIDI 自身の時間に並びます。長い音は伸び、声調はメロディーに譲り、
   ビブラートがふくらみます。歌詞の `-` で同じ音節を次の音まで伸ばせます。
@@ -89,11 +123,13 @@ After Effects のテキストレイヤーにそのままの声を持たせます
   警告も、マウスを乗せると出る説明もすべて日本語になります。
 
 **Windows 10／11 x64 と After Effects 2025 または 2026 が必要です。macOS 版はありません。**
+**クラウド音声にはご自身の APIキーが必要で、利用枠は一切含まれません。**
 
 ---
 
 Source-available: read the code, build it, use it commercially. Redistributing the compiled
 build is not permitted. An original procedural synthesizer containing no audio assets and no
-Nintendo or *Animal Crossing* audio; not affiliated with Adobe or Nintendo.
+Nintendo or *Animal Crossing* audio; not affiliated with Adobe, Nintendo, OpenAI, ElevenLabs
+or Microsoft.
 
-Version 2.1.0
+Version 2.4.0

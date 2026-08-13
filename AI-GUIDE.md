@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 2.1.0**. Facts that changed recently are marked with the
+Everything below describes **version 2.4.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -37,8 +37,15 @@ written text without being real speech.
 
 - A native After Effects audio plug-in (`IslandChatterNative.aex`) plus a ScriptUI panel
   (`IslandChatterNativePanel.jsx`).
-- **Procedural.** Every sample is synthesised from scratch by DSP at render time. There are
-  no recordings, no sample library, and no audio files inside the product.
+- **Procedural.** Every sample of the built-in voice is synthesised from scratch by DSP at
+  render time. There are no recordings, no sample library, and no audio files inside the
+  product.
+- **Local, except for one optional button.** The built-in voice never touches a network and
+  needs no account. *(2.4.0)* **Cloud voice** is the exception and is opt-in in every sense:
+  the user supplies their own API key, presses the button, and confirms a dialog stating how
+  many characters are about to be sent and to whom. Nothing is sent otherwise. If a user asks
+  whether their scripts leave the machine, the honest answer is: not unless they press that
+  button, and it says so before it does.
 - **Chinese-first.** It carries 44,355 Mandarin character readings and handles tone sandhi.
   It also speaks Japanese kana and English.
 - **Deterministic.** The same text and settings always produce exactly the same audio. The
@@ -48,9 +55,11 @@ written text without being real speech.
 
 **It is not:**
 
-- Not a text-to-speech engine. It does not produce intelligible speech, and it is not
-  intended to. It produces character *chatter* whose rhythm, pitch contour and mouth shapes
-  follow the text.
+- Not a text-to-speech engine. The built-in voice does not produce intelligible speech and is
+  not intended to; it produces character *chatter* whose rhythm, pitch contour and mouth
+  shapes follow the text. *(2.4.0)* **Cloud voice** does give real speech, but it is somebody
+  else's model doing it, on the user's own account — this product carries no speech model and
+  no credit of any kind.
 - Not a voice cloning or sample playback tool.
 - Not available on macOS. Windows x64 only, and there is no macOS build planned in the repo.
 - Not free software. It is source-available: the code can be read, built and used
@@ -70,6 +79,8 @@ workflow.
 | After Effects | 2025 or 2026. Verified on 2026 / Windows 11 |
 | macOS | Not supported, no build exists |
 | Extra downloads | None. No sample packs, no runtime dependencies |
+| Network | Not needed. *(2.4.0)* Only the optional Cloud voice button uses one, and only when pressed |
+| Cloud voice accounts | *(2.4.0)* Optional. The user's own OpenAI, ElevenLabs or Azure Speech API key. No credit is included |
 
 **Install:** close After Effects completely, then double-click `Install.bat` from the
 extracted ZIP and accept the User Account Control prompt. It writes to Program Files and so
@@ -82,6 +93,10 @@ needs elevation. Then start After Effects and open the panel from
 
 - `Plug-ins\Island Chatter\IslandChatterNative.aex` — the audio effect
 - `Plug-ins\Island Chatter\island_chatter_bake.exe` — the engine, also used for timing
+- `Plug-ins\Island Chatter\island_chatter_voice.exe` — *(2.4.0)* the cloud voice. It is the
+  only part of the product that opens a network connection, and it only runs when the Cloud
+  voice button is pressed. It exists as a separate executable because ExtendScript has no TLS
+  and cannot make an HTTPS request at all
 - `Scripts\ScriptUI Panels\IslandChatterNativePanel.jsx` — the panel
 
 Common install problems are in [Troubleshooting](#9-troubleshooting).
@@ -106,9 +121,24 @@ That distinction is the single most useful thing to know about this product.
 
 ## 4. Every control in the panel
 
-The panel is one column. The **language dropdown is at the top left** and changes only the
-interface — it never changes what is spoken. Kana is always read as Japanese and Han
-characters as Mandarin, whatever the panel is showing.
+The **language dropdown is at the top left** and changes only the interface — it never
+changes what is spoken. Kana is always read as Japanese and Han characters as Mandarin,
+whatever the panel is showing.
+
+**The settings are on four tabs** *(2.2.0; before that the panel was one long column)*:
+
+| Tab | What is on it |
+| --- | --- |
+| **Speak** | The text box, Read selected layer, the pronunciation override, the voice / emotion / character-size menus, Pitch, Speed, Volume, Consonant, Clarity, Cuteness, and Tempo |
+| **Timbre** | Formant, sound source, Vibrato, Vibrato Rate, Seed, and the saved-character menu with Random / Save / Delete |
+| **Animation** | Markers, Fit Duration, Rig, Type-On, Chatter, Center, per-layer or shared rig, the character menu with New / Rebuild, Mouth switch, Leave, Smoothness |
+| **Import** | The four ways a performance arrives from outside: Import script, Gap, Hold, Speakers; Choose MIDI, the track menu, Transpose, Key, Tone, Sing, Speak; *(2.3.0)* Lip-sync from audio, Vowels, Sensitivity; and *(2.4.0)* Cloud voice, the provider menu, API key, Voice ID, Model, Region |
+
+**Apply, Re-sync, Re-flow, Bake, Remove and the status line are not on a tab.** They sit
+below the tabs and are visible whichever one is showing, so telling a user to "press Apply"
+never needs them to switch pages first. The panel remembers which tab was last open.
+
+If a user says they cannot find a control, ask which tab they are on before anything else.
 
 ### 4.1 Sliders
 
@@ -196,8 +226,8 @@ Grouped by what they are for. Exact strings in all four languages are in
 Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
-- Controls and menu entries with a label: **78**
-- Distinct messages the panel can print: **65**
+- Controls and menu entries with a label: **86**
+- Distinct messages the panel can print: **80**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -208,6 +238,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | 2 per beat | 每拍 2 字 | 每拍 2 字 | 1拍に2音 |
 | 3 per beat | 每拍 3 字 | 每拍 3 字 | 1拍に3音 |
 | 4 per beat | 每拍 4 字 | 每拍 4 字 | 1拍に4音 |
+| API key | 金鑰 | 金钥 | APIキー |
 | Adult | 成熟 | 成熟 | おとな |
 | Angry | 生氣 | 生气 | おこり |
 | Apply to selected text layers | 套用到選取文字圖層 | 应用到选中文本图层 | 選択したテキストレイヤーに適用 |
@@ -220,6 +251,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Chirpy | 活潑 | 活泼 | チャーピー |
 | Choose MIDI | 選 MIDI | 选 MIDI | MIDI を選ぶ |
 | Clarity | 清晰度 | 清晰度 | はっきりさ |
+| Cloud voice | 雲端語音 | 云端语音 | クラウド音声 |
 | Consonant | 聲母 | 声母 | しいん |
 | Cozy | 溫厚 | 温厚 | コージー |
 | Custom | 自訂 | 自订 | カスタム |
@@ -241,9 +273,11 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Import script | 匯入劇本 | 导入剧本 | 台本を読み込む |
 | Key | 唱名調 | 唱名调 | 階名のド |
 | Leave | 離開 | 离开 | 出るカーブ |
+| Lip-sync from audio | 音檔轉口型 | 音文件转口型 | 音声から口を動かす |
 | Markers | 逐字標記 | 逐字标记 | マーカー |
 | Metallic | 金屬 | 金属 | メタリック |
 | Mimi | 咪咪 | 咪咪 | ミミ |
+| Model | 模型 | 模型 | モデル |
 | Mouth switch | 建立嘴型切換 | 创建口型切换 | 口パクをつなぐ |
 | Neutral | 中性 | 中性 | ふつう |
 | New | 新增角色 | 新增角色 | キャラを追加 |
@@ -257,12 +291,14 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Read selected layer | 讀取選取圖層 | 读取选中图层 | 選択レイヤーを読み込む |
 | Rebuild | 重建 | 重建 | 作り直す |
 | Reed | 簧片 | 簧片 | リード |
+| Region | 區域 | 区域 | リージョン |
 | Remove | 移除 | 移除 | 取り除く |
 | Rig | 動畫控制 | 动画控制 | リグ |
 | Robot | 機器人 | 机器人 | ロボット |
 | Save | 儲存角色 | 保存角色 | キャラを保存 |
 | Scared | 害怕 | 害怕 | こわがり |
 | Seed | 種子 | 种子 | シード |
+| Sensitivity | 靈敏度 | 灵敏度 | 感度 |
 | Shared | 共用角色 | 共用角色 | キャラ共有 |
 | Sing | 唱出來 | 唱出来 | 歌わせる |
 | Sleepy | 疲倦 | 疲倦 | ねむい |
@@ -279,7 +315,9 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Vibrato | 顫音 | 颤音 | ビブラート |
 | Vibrato Rate | 顫音速率 | 颤音速率 | ビブラート速度 |
 | Voice | 人聲 | 人声 | ボイス |
+| Voice ID | 音色代號 | 音色代号 | ボイスID |
 | Volume | 音量 | 音量 | おんりょう |
+| Vowels | 判斷母音 | 判断母音 | 母音を判定 |
 | Whisper | 耳語 | 耳语 | ウィスパー |
 | Young | 少年 | 少年 | こども |
 <!-- END LABELS -->
@@ -425,6 +463,78 @@ someone who does not have the plug-in installed, and playback costs nothing.
   and Tone are re-enabled, and the layer is marked. It is not re-baked automatically.
 - **Re-flow moves baked audio with its line.**
 
+### 5.7b Lip-sync from a recording *(2.3.0)*
+
+The mouth does not have to be driven by text. Put a WAV or AIFF in the composition, select
+that layer, choose the character on the **Animation** tab, and press **Lip-sync from audio**
+on the **Import** tab.
+
+The engine reads the file, finds the syllables in it, and writes the same rig it writes for a
+spoken line — so **the mouth switch, markers and head bounce all work unchanged**. Nothing
+about the recording is altered and no audio is generated.
+
+- **WAV and AIFF only.** An MP3, M4A, Ogg or FLAC is refused by name, with the fix in the
+  message. AIFF matters because a stock After Effects install renders AIFF, not WAV.
+- **Silence closes the mouth**, through the same pause rule a spoken line uses. Pauses need no
+  handling.
+- **Trim the layer and only the trimmed part is used.** A time-stretched layer is refused:
+  nothing in the analysis can tell how far the stretch moved each syllable.
+- **Type-On is not available** — there is no text to reveal.
+- **Sensitivity** decides how much of a loudness peak counts as a syllable. Raise it when the
+  mouth moves too often, lower it when it misses syllables. There is no correct value.
+- **Vowels** turns vowel identification on or off. It is a guess made from the shape of the
+  sound: measured against lines the engine spoke itself it agrees about two thirds of the
+  time, and it is much worse with music underneath. Off gives every syllable the open shape,
+  which is the plain chatter look.
+- **Rebuild re-reads the file**, so after moving or re-trimming the layer, Rebuild is all that
+  is needed.
+
+If someone asks for lip-sync accurate enough for close-up dialogue, say plainly that this is a
+stylised six-shape mouth driven by a guess, not a phoneme-accurate tool.
+
+### 5.7c A real voice from a cloud model *(2.4.0)*
+
+Select the text layers, pick a provider on the **Import** tab, press **API key** once to store
+your key, then press **Cloud voice**. The provider speaks each line, the audio lands beside
+the project, and the mouth is read out of that audio by the same analyser section 5.7b
+describes — so this is 5.7b and Bake meeting: **a real voice, and a mouth that matches it.**
+
+**Answer these four questions the same way every time, because they are the ones that get
+asked:**
+
+1. **Does my text leave the computer?** Yes, for the lines you select, when you press the
+   button, to the provider you chose. A dialog states how many lines, how many characters and
+   which provider before anything is sent, and nothing is sent if you cancel. The built-in
+   voice never sends anything.
+2. **Who pays?** You do, on your own account with that provider. This product includes no
+   credit, no free tier and no billing relationship. It cannot spend money on any press except
+   this one.
+3. **Is it live?** No, and it cannot be. An audio callback cannot wait on a network without
+   hanging After Effects. It is one press, one file — the same shape as Bake.
+4. **Does editing the line re-fetch it?** No. The recording is muted, the built-in voice comes
+   back, and the layer is marked `(stale)` until you press Cloud voice again. The mouth
+   returns to the engine's timing at the same moment, so what you hear and what the mouth does
+   never disagree.
+
+- **Providers**: OpenAI, ElevenLabs and Azure Speech. The menu is read from the tool itself,
+  so it always matches the installed build. Only providers returning uncompressed audio are
+  offered, which is why there is no mp3 decoder in the product.
+- **Voice ID and Model** are the provider's own names for these things, and each is remembered
+  per provider. Leave them alone to use that provider's default. They have nothing to do with
+  the **Timbre** tab, which shapes the built-in engine.
+- **Region** is Azure only; its endpoint is per region. The field is disabled for the others.
+- **The key** is typed hidden and kept in this computer's After Effects preferences in plain
+  text — there is no key store in ExtendScript, and the panel says so rather than implying
+  otherwise. It never appears on a command line. **Forget**, in the same dialog, removes it.
+- **Nothing is paid for twice.** The file is named after a SHA-256 of the text, voice, model
+  and settings, so re-pressing the button on an unchanged line reuses the file and makes no
+  request. The readout says how many were new and how many were reused.
+- **Errors are the provider's own words**, with the HTTP status. A refused key, a rate limit,
+  an exhausted quota and an unreachable network say four different things, because they need
+  four different fixes.
+- **2000 characters a line.** Longer is refused before anything is sent.
+- **Sensitivity and Vowels** apply here too: they are what the returned audio is read with.
+
 ### 5.8 How a layer is put together
 
 Useful when a user describes what they see in the timeline:
@@ -492,6 +602,8 @@ pattern, because a beat grid and a stress pattern cannot both be satisfied.
 | Sung mouth-close threshold | **2 frames** | Frames, not seconds, so it behaves the same at any frame rate |
 | Mandarin readings | **44,355** characters | |
 | Bake folder | `Island Chatter Audio` | Beside the `.aep` |
+| Cloud voice folder | `Island Chatter Audio\cloud` | *(2.4.0)* Beside the `.aep`. Files are named after a hash of the request, which is what makes the same line free the second time |
+| Cloud voice line length | **2000 characters** | *(2.4.0)* Refused before anything is sent. Providers have their own limits; this one is free to hit |
 
 **Backwards compatibility:** a project saved by any earlier 1.x version opens and sounds
 identical. Every appended parameter has a default that reproduces the previous behaviour, and
@@ -522,6 +634,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 |   sixteenth | 　十六分 | 　十六分 | 　16 分 |
 |   stale bake x{0} | 　轉檔過期 x{0} | 　导出过期 x{0} | 　書き出し古い x{0} |
 | = 0s  no grid | = 0s　無格線 | = 0s　无格线 | = 0s　グリッドなし |
+| Add a character on the Animation page first. | 請先在「動畫」頁新增角色。 | 请先在「动画」页新增角色。 | 先に「アニメーション」ページでキャラクターを追加してください。 |
 | Applied to {0} layer(s) | 已套用 {0} 個圖層 | 已应用 {0} 个图层 | {0} レイヤーに適用しました |
 | Apply Island Chatter first, then bake. | 請先按 Apply 再轉成音訊。 | 请先按 Apply 再转成音频。 | 先に適用してから書き出してください。 |
 | Apply Island Chatter to these layers first. | 這些圖層還沒套用過。 | 这些图层还没应用过。 | これらのレイヤーにはまだ適用されていません。 |
@@ -529,11 +642,17 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Character {0} | 角色 {0} | 角色 {0} | キャラ {0} |
 | Choose a MIDI file | 選一個 MIDI 檔 | 选一个 MIDI 文件 | MIDI ファイルを選ぶ |
 | Choose a MIDI file first. | 請先按「選 MIDI」挑一個檔案。 | 请先按「选 MIDI」挑一个文件。 | 先に「MIDI を選ぶ」でファイルを選んでください。 |
+| Choose a provider first. | 請先選一家供應商。 | 请先选一家供应商。 | 先にサービスを選んでください。 |
 | Choose a track first. | 請先選一個軌道。 | 请先选一个轨道。 | 先にトラックを選んでください。 |
 | Choose or create a character first. | 請先選擇或新增角色。 | 请先选择或新增角色。 | 先にキャラを選ぶか追加してください。 |
+| Cloud voice on {0} layer(s) via {1} | 已用 {1} 為 {0} 層配音 | 已用 {1} 为 {0} 层配音 | {1} で {0} レイヤーに声を当てました |
 | Error | 錯誤 | 错误 | エラー |
 | Imported {0} layer(s) | 已匯入 {0} 層 | 已导入 {0} 层 | {0} レイヤーを読み込みました |
 | Kanji read as Chinese: {0} | 漢字以中文讀音唸出：{0} | 汉字以中文读音念出：{0} | 漢字は中国語読みです：{0} |
+| Key cleared | 已清除金鑰 | 已清除金钥 | APIキーを消去しました |
+| Key saved | 已存下金鑰 | 已存下金钥 | APIキーを保存しました |
+| Lip-synced {0} layer(s) onto {1} | 已對嘴 {0} 層到「{1}」 | 已对嘴 {0} 层到「{1}」 | {0} レイヤーを「{1}」に口パクさせました |
+| Lip-synced {0} layer(s); {1} overlap | 已對嘴 {0} 層；有 {1} 句重疊 | 已对嘴 {0} 层；有 {1} 句重叠 | {0} レイヤーを口パクさせました。{1} 件が重なっています |
 | MIDI loaded: {0} — pick a track, then Sing | 已讀取 {0} —— 選好軌道後按「唱出來」 | 已读取 {0} —— 选好轨道后按「唱出来」 | MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」 |
 | Mouth on Time Remap | 嘴型已接上時間重映射 | 口型已接上时间重映射 | 口パクをタイムリマップにつなぎました |
 | Mouth switch on {0} layer(s) -> {1} | 已接上嘴型 {0} 層 -> {1} | 已接上口型 {0} 层 -> {1} | 口パクを {0} レイヤーにつなぎました -> {1} |
@@ -555,22 +674,30 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Select a saved character first. | 請先選取自訂角色。 | 请先选中自订角色。 | 先に保存したキャラを選んでください。 |
 | Select a text layer or enter text first. | 請選取文字圖層或先輸入文字。 | 请选中文本图层或先输入文字。 | テキストレイヤーを選ぶか、文字を入力してください。 |
 | Select a text layer. | 請選取文字圖層。 | 请选中文本图层。 | テキストレイヤーを選んでください。 |
+| Select an audio layer. | 請選取音訊圖層。 | 请选中音频图层。 | 音声レイヤーを選択してください。 |
 | Select the lines to turn back into speech. | 請選取要改回講話的圖層。 | 请选中要改回讲话的图层。 | しゃべりに戻すレイヤーを選んでください。 |
+| Send {0} line(s), {1} characters, to {2}? ⏎  ⏎ The text leaves this computer. Lines already fetched with the same settings are reused and cost nothing. | 要把 {0} 句、共 {1} 個字送到 {2} 嗎？ ⏎  ⏎ 文字會離開這台電腦。文字和設定都沒變的句子會直接沿用上次的檔案，不會再花錢。 | 要把 {0} 句、共 {1} 个字送到 {2} 吗？ ⏎  ⏎ 文字会离开这台电脑。文字和设置都没变的句子会直接沿用上次的文件，不会再花钱。 | {0} 行・{1} 文字を {2} に送信しますか？ ⏎  ⏎ 文字はこのパソコンの外に出ます。文字も設定も変わっていない行は前回のファイルを使い回すので、費用はかかりません。 |
+| Set the API key for {0} first. | 請先設定 {0} 的 API 金鑰。 | 请先设置 {0} 的 API 金钥。 | 先に {0} の APIキーを設定してください。 |
 | Speaking again: {0} layer(s) | 已改回講話 {0} 層 | 已改回讲话 {0} 层 | {0} レイヤーをしゃべりに戻しました |
 | Speed set manually | 語速為手動設定 | 语速为手动设置 | はやさは手動設定です |
 | Sung note names on {0} layer(s) | 已唱唱名 {0} 層 | 已唱唱名 {0} 层 | 階名で {0} レイヤーを歌わせました |
 | Sung {0} layer(s) | 已唱出 {0} 層 | 已唱出 {0} 层 | {0} レイヤーを歌わせました |
 | Sung {0} line(s) — {1} | 已唱出 {0} 句 —— {1} | 已唱出 {0} 句 —— {1} | {0} 行を歌わせました —— {1} |
+| The selected layer(s) have no text in them. | 選取的圖層裡沒有文字。 | 选中的图层里没有文字。 | 選択したレイヤーに文字がありません。 |
 | There are already {0} layer(s) here from an earlier MIDI import. ⏎  ⏎ Remove them first? No adds a second copy. | 這個合成裡已經有 {0} 層是之前匯入的。 ⏎  ⏎ 要先移除它們嗎？按「否」就直接再加一份。 | 这个合成里已经有 {0} 层是之前导入的。 ⏎  ⏎ 要先移除它们吗？按「否」就直接再加一份。 | このコンポには前回の MIDI 読み込みで作られたレイヤーが {0} 枚あります。 ⏎  ⏎ 先に取り除きますか？「いいえ」でもう一組追加します。 |
 | There are no Island Chatter lines here. | 這個合成裡沒有台詞圖層。 | 这个合成里没有台词图层。 | このコンポにセリフのレイヤーがありません。 |
 | There is no shared rig here. | 這個合成裡沒有共用控制器。 | 这个合成里没有共用控制器。 | このコンポには共有リグがありません。 |
 | Truncated: {0} | 已截斷：{0} | 已截断：{0} | 文字が切れました：{0} |
 | truncated: {0} | 被截斷：{0} | 被截断：{0} | 切れました：{0} |
+| {0} is longer than {1} characters. Split it first. | {0} 超過 {1} 個字，請先拆成幾句。 | {0} 超过 {1} 个字，请先拆成几句。 | {0} は {1} 文字を超えています。先に分けてください。 |
 | {0} line(s) · {1} BPM | {0} 句・{1} BPM | {0} 句・{1} BPM | {0} 行・{1} BPM |
 | {0} long line(s) split | 太長的句子拆成 {0} 層 | 太长的句子拆成 {0} 层 | 長い行を {0} レイヤーに分けました |
+| {0} needs the region its resource is in. | {0} 需要填寫資源所在的區域。 | {0} 需要填写资源所在的区域。 | {0} にはリソースのリージョンが必要です。 |
+| {0} new, {1} reused | 新增 {0}、沿用 {1} | 新增 {0}、沿用 {1} | 新規 {0} 件・再利用 {1} 件 |
 | {0} note(s) dropped from chords | 和弦捨去 {0} 個音 | 和弦舍去 {0} 个音 | 和音から {0} 音を省きました |
 | {0} note(s) with no syllable | {0} 個音符沒有字 | {0} 个音符没有字 | {0} 音に歌詞がありません |
 | {0} s/syllable   Speed {1} | {0} 秒／字   Speed {1} | {0} 秒／字   Speed {1} | {0} 秒／音   Speed {1} |
+| {0} syllable(s) found | 找到 {0} 個音節 | 找到 {0} 个音节 | {0} 音節を検出しました |
 | {0} syllable(s) with no note | {0} 個字沒有音符（用最後一個音唱完） | {0} 个字没有音符（用最后一个音唱完） | {0} 文字に音符がありません（最後の音でのばします） |
 | {0} track(s) · {1} BPM | {0} 軌・{1} BPM | {0} 轨・{1} BPM | {0} トラック・{1} BPM |
 <!-- END MESSAGES -->
@@ -578,6 +705,25 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 ---
 
 ## 9. Troubleshooting
+
+**Anything from the cloud voice that starts `HTTP` *(2.4.0)***
+Read the message; it is the provider's own, and each status means a different fix.
+`401`/`403` — the key was refused: check it was pasted whole and belongs to the provider
+selected in the menu. `402` — the account cannot be billed. `404` — the voice id or the
+endpoint does not exist; for Azure that is usually the wrong region. `429` — a rate limit or
+an exhausted quota, and the provider's own sentence says which. `413` — the line is too long
+for that provider. `WinHTTP 12007/12029` — the machine could not reach the provider at all:
+network, VPN or firewall. Do not report these as one failure; they are four different
+problems.
+
+**"island_chatter_voice.exe is missing" *(2.4.0)***
+The build was installed incompletely, or an older version's folder is being used. Reinstall.
+
+**The cloud voice worked, then the layer went `(stale)` and the built-in voice came back**
+*(2.4.0)* That is the design, and it happens when the text or the voice settings changed.
+Pressing Apply or Re-sync marks the recording stale rather than fetching a new one, because a
+keystroke should not spend money. Press **Cloud voice** again. The mouth follows: while the
+recording is muted the mouth uses the engine's timing, which is what is actually audible.
 
 **"Native effect is not installed" / 找不到已安裝的效果**
 Usually it *is* installed. The panel wraps whatever After Effects threw, so a registration
@@ -650,6 +796,14 @@ Explaining *why* is usually more useful than saying no. These are decisions, not
   press Apply — would repaint every voice, so the fix was Re-sync rather than a warning.
 - **No custom recorded timbre.** Deferred by the author. Sample playback was rejected because
   it bypasses the engine and loses Mandarin tones.
+- **No live cloud voice.** *(2.4.0)* Cloud voice is one press, one file, and will not become a
+  real-time effect: an audio callback cannot wait on a network without hanging the host, and
+  the engine's determinism depends on it never trying.
+- **No offline speech model.** *(2.4.0)* Running a model locally is a separate piece of work
+  and is not in this release. Cloud voice needs a network and somebody else's service.
+- **No key sharing, no bundled credit, no proxy.** The user's key goes from their machine to
+  their provider and nowhere else. Nothing about the cloud voice touches the author's
+  infrastructure, because there is none.
 - **No in-panel audition.** Preview in the composition.
 - **Sung pitch is absolute** and not scaled by the voice preset, so two characters singing
   together stay in the same key.

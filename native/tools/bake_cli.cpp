@@ -8,6 +8,7 @@
 //
 // Text arrives as hex-encoded UTF-8 so nothing depends on the console code page.
 
+#include "island_chatter/analysis.hpp"
 #include "island_chatter/dsp.hpp"
 #include "island_chatter/midi.hpp"
 #include "island_chatter/song.hpp"
@@ -80,6 +81,36 @@ void print_plan(const island_chatter::Settings& settings) {
     // The caller checks this count: callSystem() gives no exit status, so a
     // truncated read would otherwise look like a short utterance.
     std::cout << "END " << plan.event_count << "\n";
+}
+
+/*
+ * The same plan, from a recording instead of from text.
+ *
+ * Byte for byte the format print_plan() emits, and that is the whole design:
+ * the panel's parser, its markers, the rig, the mouth switch and Fit Duration
+ * were all written against this and none of them had to learn anything. The
+ * only thing that changed is where the syllables came from.
+ *
+ * A reading of "a5" through "o5" carries the mouth shape, because that is the
+ * path a spoken syllable already takes to reach one. Tone 5 is the neutral
+ * tone: nothing here measured anybody's pitch, so IC Pitch stays flat rather
+ * than inventing a contour that was never heard.
+ */
+void print_analysis(const island_chatter::analysis::Result& result, std::uint32_t rate) {
+    std::cout << "PLAN 1\n"
+              << "RATE " << rate << "\n"
+              << "SAMPLES "
+              << static_cast<std::size_t>(result.duration_seconds * rate) << "\n";
+    for (const auto& event : result.events) {
+        std::cout << "E " << static_cast<std::size_t>(event.start_seconds * rate)
+                  << " " << static_cast<std::size_t>(event.length_seconds * rate)
+                  << " " << event.vowel << "5"
+                  // One codepoint, so a marker reads "IC:a|a5|M1" rather than
+                  // "IC:|a5|M1". A recording has no text to name a syllable
+                  // after, and the shape is the only true thing there is to say.
+                  << " " << static_cast<std::uint32_t>(event.vowel) << "\n";
+    }
+    std::cout << "END " << result.events.size() << "\n";
 }
 
 // Decimal codepoints, for the same reason print_plan() uses them: stdout comes
@@ -212,6 +243,9 @@ void print_song(const island_chatter::song::Assignment& assignment) {
         "  [--melody slot,slot,...] [--melody-bpm F] [--transpose N]\n"
         "  [--tone-blend F] [--portamento F] [--vibrato-delay F]\n"
         "\n"
+        "island_chatter_bake --analyse-hex <hex-utf8-path> [--rate N]\n"
+        "                    [--sensitivity 0..1] [--vowels 0|1]\n"
+        "\n"
         "island_chatter_bake --midi-hex <hex-utf8-path> --list-tracks\n"
         "island_chatter_bake --midi-hex <hex-utf8-path> --track N\n"
         "                    --lyrics <hex-utf8> --dump-song\n"
@@ -238,6 +272,9 @@ int main(int argc, char** argv) {
         bool plan_only = false;
         bool list_tracks = false;
         bool dump_song = false;
+        std::string analyse_path;
+        double sensitivity = 0.5;
+        bool identify_vowels = true;
 
         for (int index = 1; index < argc; ++index) {
             const std::string flag = argv[index];
@@ -248,7 +285,10 @@ int main(int argc, char** argv) {
             if (flag == "--dump-song") { dump_song = true; continue; }
             if (index + 1 >= argc) usage();
             const std::string value = argv[++index];
-            if (flag == "--midi-hex") midi_path = decode_hex(value);
+            if (flag == "--analyse-hex") analyse_path = decode_hex(value);
+            else if (flag == "--sensitivity") sensitivity = std::atof(value.c_str());
+            else if (flag == "--vowels") identify_vowels = std::atoi(value.c_str()) != 0;
+            else if (flag == "--midi-hex") midi_path = decode_hex(value);
             else if (flag == "--lyrics") lyrics = decode_hex(value);
             else if (flag == "--track") track = std::strtoul(value.c_str(), nullptr, 10);
             else if (flag == "--tonic") tonic = std::atoi(value.c_str());
@@ -303,6 +343,17 @@ int main(int argc, char** argv) {
                 return 0;
             }
             print_song(island_chatter::song::assign(file, track, lyrics, tonic));
+            return 0;
+        }
+        // A recording is not an utterance, so this runs before text is asked
+        // for, exactly as the MIDI modes do.
+        if (!analyse_path.empty()) {
+            const auto audio = island_chatter::analysis::read_wav(read_all(analyse_path));
+            island_chatter::analysis::Settings how;
+            how.sensitivity = sensitivity;
+            how.identify_vowels = identify_vowels;
+            print_analysis(island_chatter::analysis::analyse(audio, how),
+                           settings.sample_rate);
             return 0;
         }
         if (!have_text) usage();

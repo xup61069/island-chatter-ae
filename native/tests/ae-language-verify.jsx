@@ -275,10 +275,30 @@
          * a translation is not, because the row was already too wide in Chinese.
          */
         var WIDEST_ROW = 460;
+        /*
+         * And how tall.
+         *
+         * Nothing measured this until 2.2.0, by which point the panel was one
+         * column of forty rows wanting 1354 px. A docked ScriptUI panel in
+         * After Effects does not scroll, it clips, so on any ordinary dock the
+         * bottom third was not there — and the bottom third was Apply, Re-sync,
+         * Re-flow, Bake, Remove and the status line.
+         *
+         * Both limits come from what a dock can give. A 1080p screen leaves
+         * After Effects roughly 900 px of column, so the panel stays under 800;
+         * a page is that less the strip of tab titles and the fixed row of verbs
+         * underneath, which is 570. A page that will not fit is split into
+         * another page — the same answer a row that will not fit gets, and for
+         * the same reason: shortening the words never reaches the number.
+         */
+        var TALLEST_PANEL = 800;
+        var TALLEST_PAGE = 570;
         var tooWide = [];
-        var wideStep;
+        var tooTall = [];
         var widestSeen = 0;
         var widestWhere = "";
+        var tallestSeen = 0;
+        var tallestWhere = "";
         /*
          * The readouts are built empty, and an empty statictext collapses: the
          * preferredSize.width set beside them is silently ignored — which is a
@@ -306,6 +326,86 @@
         findBlanks(built);
         note("readouts still blank after the build: " + blanks.length);
 
+        function sizeOn(node, axis) {
+            var value = 0;
+            try { value = node.preferredSize[axis]; } catch (skip) { value = 0; }
+            return value > 0 ? value : 0;
+        }
+        // margins is a number where one was assigned and a Margins object where
+        // ScriptUI made it; a group given none has neither.
+        function margin(node, side) {
+            var value = node.margins;
+            if (value === undefined || value === null) { return 0; }
+            if (typeof value === "number") { return value; }
+            return typeof value[side] === "number" ? value[side] : 0;
+        }
+        function noteWidth(content, where, language) {
+            if (content > widestSeen) {
+                widestSeen = content;
+                widestWhere = language + " " + where;
+            }
+            if (content > WIDEST_ROW) {
+                tooWide.push(language + " " + where + " needs " +
+                    Math.round(content) + " px");
+            }
+        }
+        /*
+         * Walked, not iterated once.
+         *
+         * From 2.2.0 a row sits two levels below the panel — panel, tabbedpanel,
+         * tab, row. The version of this that looped over built.children would
+         * have found a language row, a tabbed panel and three buttons, measured
+         * those, found nothing over 460 and passed. It would have been checking
+         * nothing, which is the same shape as every other guard in this project
+         * that quietly stopped working: it still ran, and it still said yes.
+         *
+         * Returns how tall the column wants to be, and checks the width of every
+         * row it holds on the way. A tabbed panel is not a row — it is several
+         * columns behind one strip of titles, as tall as its tallest page and as
+         * wide as the wider of that page and the strip. Measuring the control
+         * itself is the only way the strip gets measured at all, and the strip
+         * is a width that did not exist before there were tabs.
+         */
+        function measureColumn(column, where, language) {
+            var height = margin(column, "top") + margin(column, "bottom");
+            var index;
+            for (index = 0; index < column.children.length; index += 1) {
+                var child = column.children[index];
+                height += sizeOn(child, 1);
+                if (child.type === "tabbedpanel") {
+                    var page;
+                    for (page = 0; page < child.children.length; page += 1) {
+                        var tab = child.children[page];
+                        var title = String(tab.text);
+                        var tall = measureColumn(tab, where + "[" + title + "]/", language);
+                        if (tall > tallestSeen) {
+                            tallestSeen = tall;
+                            tallestWhere = language + " the " + title + " page";
+                        }
+                        if (tall > TALLEST_PAGE) {
+                            tooTall.push(language + " the " + title + " page needs " +
+                                Math.round(tall) + " px");
+                        }
+                    }
+                    noteWidth(sizeOn(child, 0) + 24, where + index + " (the tabs)", language);
+                    continue;
+                }
+                if (!child.children || !child.children.length) { continue; }
+                // preferredSize on the row itself reports the column's own width,
+                // because alignChildren stretches every row to fill; what decides
+                // whether it fits is the sum of what is inside it.
+                var content = 24;
+                var kidStep;
+                for (kidStep = 0; kidStep < child.children.length; kidStep += 1) {
+                    content += sizeOn(child.children[kidStep], 0);
+                }
+                content += (child.children.length - 1) * (child.spacing || 0);
+                noteWidth(content, where + index, language);
+            }
+            height += (column.children.length - 1) * (column.spacing || 0);
+            return height;
+        }
+
         for (at = 0; at < languages.length; at += 1) {
             UI_LANGUAGE = languages[at];
             relabelUI();
@@ -318,28 +418,13 @@
                 blanks[fillStep].preferredSize = [-1, -1];
             }
             built.layout.layout(true);
-            for (wideStep = 0; wideStep < built.children.length; wideStep += 1) {
-                var rowNode = built.children[wideStep];
-                if (!rowNode.children || !rowNode.children.length) { continue; }
-                // preferredSize on the row itself reports the panel's own width,
-                // because alignChildren stretches every row to fill; what decides
-                // whether it fits is the sum of what is inside it.
-                var content = 24;
-                var kidStep;
-                for (kidStep = 0; kidStep < rowNode.children.length; kidStep += 1) {
-                    var kidWide = 0;
-                    try { kidWide = rowNode.children[kidStep].preferredSize[0]; } catch (skip) { }
-                    if (kidWide > 0) { content += kidWide; }
-                }
-                content += (rowNode.children.length - 1) * (rowNode.spacing || 0);
-                if (content > widestSeen) {
-                    widestSeen = content;
-                    widestWhere = languages[at] + " row " + wideStep;
-                }
-                if (content > WIDEST_ROW) {
-                    tooWide.push(languages[at] + " row " + wideStep + " needs " +
-                        Math.round(content) + " px");
-                }
+            var whole = measureColumn(built, "", languages[at]);
+            if (whole > tallestSeen) {
+                tallestSeen = whole;
+                tallestWhere = languages[at] + " the panel";
+            }
+            if (whole > TALLEST_PANEL) {
+                tooTall.push(languages[at] + " the panel needs " + Math.round(whole) + " px");
             }
         }
         note("the widest row in any language is " + widestWhere + " at " +
@@ -347,6 +432,12 @@
         check(tooWide.length === 0,
             "no row needs more than " + WIDEST_ROW + " px in any language" +
             (tooWide.length ? " (" + tooWide[0] + ")" : ""));
+        note("the tallest thing in any language is " + tallestWhere + " at " +
+            Math.round(tallestSeen) + " px, against " + TALLEST_PANEL +
+            " for the panel and " + TALLEST_PAGE + " for a page");
+        check(tooTall.length === 0,
+            "the panel fits under " + TALLEST_PANEL + " px and every page under " +
+            TALLEST_PAGE + (tooTall.length ? " (" + tooTall[0] + ")" : ""));
 
         // And the control that changes the language has to stay put, or a
         // reader who switches to a longer language cannot switch back.

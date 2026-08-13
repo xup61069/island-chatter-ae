@@ -524,8 +524,8 @@
                     reading: reading,
                     mouth: mouthForReading(reading),
                     tone: readingTone(reading),
-                    time: parseInt(fields[1], 10) / ENGINE_SAMPLE_RATE,
-                    duration: parseInt(fields[2], 10) / ENGINE_SAMPLE_RATE
+                    startSamples: parseInt(fields[1], 10),
+                    lengthSamples: parseInt(fields[2], 10)
                 });
             }
         }
@@ -535,6 +535,21 @@
             throw new Error(
                 M("Island Chatter could not read the timing plan. / Island Chatter 無法讀取時間規劃。") +
                 "\n\n" + reply);
+        }
+        /*
+         * Seconds come from the rate the plan states, not from the constant the
+         * panel happens to ask for, and not until the whole reply has been read.
+         *
+         * They are the same number for a spoken line, because the panel is what
+         * passed it. They are not for an analysed recording: that answers about
+         * a file whose rate nobody here chose, and a plan reading 44100 divided
+         * by a hardcoded 48000 would put every mouth shape 9% early, drifting
+         * further the longer the line, with nothing on screen to say why.
+         */
+        var at;
+        for (at = 0; at < events.length; at += 1) {
+            events[at].time = events[at].startSamples / rate;
+            events[at].duration = events[at].lengthSamples / rate;
         }
         return { events: events, duration: samples / rate };
     }
@@ -1111,12 +1126,154 @@
         if (valuesDiffer(pointer.value, rigLayer.index)) { pointer.setValue(rigLayer.index); }
     }
 
+    /*
+     * Driving the mouth from a recording.
+     *
+     * A line the engine speaks and a line somebody recorded reach the rig by
+     * exactly the same road: the engine is asked for a plan, and the plan says
+     * where each syllable falls and which mouth shape it wears. `--analyse`
+     * prints that format from a WAV, so nothing between here and the face knows
+     * or cares which of the two it is looking at.
+     *
+     * What an audio line does not have is a native effect, which is what
+     * everything else in this file uses to recognise one of its own. So it
+     * carries two sliders instead — the settings the analysis was run with, so
+     * Rebuild can reproduce exactly the same plan rather than quietly making a
+     * different one when the panel's controls have since been moved.
+     */
+    var AUDIO_LINE_NAME = "IC Audio Line";
+    var AUDIO_VOWELS_NAME = "IC Audio Vowels";
+
+    function isAudioLine(layer) {
+        return findNamedEffect(layer, AUDIO_LINE_NAME) !== null;
+    }
+
+    // The file behind a footage layer, or null for a solid, a precomp, a camera
+    // or anything else that has no file of its own.
+    function audioSourceFile(layer) {
+        try {
+            if (!layer.source || !(layer.source instanceof FootageItem)) { return null; }
+            var main = layer.source.mainSource;
+            if (!main || !(main instanceof FileSource)) { return null; }
+            return main.file;
+        } catch (notFootage) { return null; }
+    }
+
+    function layerHasAudio(layer) {
+        try { return layer.hasAudio === true; } catch (noAudio) { return false; }
+    }
+
+    function audioSettingsFromLayer(layer) {
+        var control = findNamedEffect(layer, AUDIO_LINE_NAME);
+        var vowels = findNamedEffect(layer, AUDIO_VOWELS_NAME);
+        return {
+            sensitivity: control ? clamp(control.property(1).value, 0, 100) / 100 : 0.5,
+            vowels: vowels ? Math.round(vowels.property(1).value) !== 0 : true
+        };
+    }
+
+    function planFromAudio(file, settings) {
+        var tool = requireEngineTool();
+        return parseEnginePlan(system.callSystem(
+            quoted(tool.fsName) +
+            " --analyse-hex " + hexUtf8(file.fsName) +
+            " --rate " + ENGINE_SAMPLE_RATE +
+            " --sensitivity " + settings.sensitivity +
+            " --vowels " + (settings.vowels ? 1 : 0)));
+    }
+
+    /*
+     * The plan describes the whole file; the layer may be using part of it.
+     *
+     * Trimming a layer is the ordinary thing to do to a recording, and the
+     * events outside the trim belong to audio nobody can hear. Left in, they
+     * would open the mouth before the line starts and hold it open after the
+     * line ends — and because the rig is keyframes rather than an expression,
+     * that would look like a bug in the face rather than in the trim.
+     */
+    function planWithinLayer(plan, layer) {
+        var from = layer.inPoint - layer.startTime;
+        var until = layer.outPoint - layer.startTime;
+        var kept = [];
+        var index;
+        for (index = 0; index < plan.events.length; index += 1) {
+            var event = plan.events[index];
+            var finish = event.time + event.duration;
+            if (finish <= from || event.time >= until) { continue; }
+            var start = Math.max(event.time, from);
+            kept.push({
+                character: event.character,
+                reading: event.reading,
+                mouth: event.mouth,
+                tone: event.tone,
+                time: start,
+                duration: Math.max(0, Math.min(finish, until) - start)
+            });
+        }
+        return { events: kept, duration: Math.min(plan.duration, until) };
+    }
+
+    // Everything an audio line contributes to a merge, from the layer alone, so
+    // Rebuild needs nothing the panel happens to be showing.
+    function audioLineFor(comp, layer, order) {
+        var file = audioSourceFile(layer);
+        if (!file || !file.exists) { return null; }
+        var plan = planWithinLayer(planFromAudio(file, audioSettingsFromLayer(layer)), layer);
+        return {
+            name: layer.name,
+            // The plan counts from the start of the file, and startTime is where
+            // the file's first sample sits on the timeline. inPoint is where the
+            // trim begins, which is not the same thing and is already accounted
+            // for by planWithinLayer().
+            start: layer.startTime,
+            plan: plan,
+            order: order,
+            // A recording is neither sung nor chatter: the mouth closes where
+            // the sound stops, which is what the pause rule already does and
+            // what makes silence in the file close the mouth for free.
+            sung: false,
+            chatter: false
+        };
+    }
+
+    /*
+     * Hand a recording to a character.
+     *
+     * Everything that can be wrong here is something the user can see and fix,
+     * so each of them is named rather than folded into one failure. Refusing a
+     * time-stretched layer is the one that matters: nothing in the analysis
+     * measures the stretch, so accepting it would put every mouth shape wrong
+     * by the stretch factor and look exactly like the feature not working.
+     */
+    function lipSyncLayer(comp, layer, settings, rigLayer) {
+        var file = audioSourceFile(layer);
+        if (!file || !layerHasAudio(layer)) {
+            throw new Error(M("{0} is not an audio layer. / {0} 不是音訊圖層。", layer.name));
+        }
+        if (!file.exists) {
+            throw new Error(M("The file for {0} is missing. / 找不到 {0} 的檔案。", layer.name));
+        }
+        if (Math.abs(layer.stretch - 100) > 0.01) {
+            throw new Error(M(
+                "{0} is time-stretched; set it back to 100% first. / {0} 有時間伸縮，請先改回 100%。",
+                layer.name));
+        }
+        var plan = planWithinLayer(planFromAudio(file, settings), layer);
+        // Written after the analysis succeeded, so a layer that could not be
+        // read does not end up marked as one that was.
+        ensureSlider(layer, AUDIO_LINE_NAME, Math.round(settings.sensitivity * 100));
+        ensureSlider(layer, AUDIO_VOWELS_NAME, settings.vowels ? 1 : 0);
+        ensureRigTarget(layer, rigLayer);
+        return plan;
+    }
+
     function rigMembers(comp, rigLayer) {
         var output = [];
         var index;
         for (index = 1; index <= comp.numLayers; index += 1) {
             var candidate = comp.layer(index);
-            if (!isTextLayer(candidate)) { continue; }
+            // A text layer the engine speaks, or a recording that was analysed.
+            if (!isTextLayer(candidate) && !isAudioLine(candidate)) { continue; }
             var target = rigTargetLayer(comp, candidate);
             if (target && target.index === rigLayer.index) { output.push(candidate); }
         }
@@ -1139,6 +1296,15 @@
         var index;
         var at;
         for (index = 0; index < members.length; index += 1) {
+            // A recording carries no effect to read a voice off, so it answers
+            // for itself. Its plan is re-made rather than remembered, because a
+            // trimmed or moved layer changes which part of the file is heard
+            // and only the layer knows that.
+            if (isAudioLine(members[index])) {
+                var recorded = audioLineFor(comp, members[index], index);
+                if (recorded) { lines.push(recorded); }
+                continue;
+            }
             var effect = findNativeEffect(members[index]);
             // A member whose voice was taken off contributes nothing, but stays
             // bound: taking Island Chatter off a line is what Remove is for.
@@ -1147,7 +1313,11 @@
             for (at = 0; planned && at < planned.length; at += 1) {
                 if (planned[at].layer.index === members[index].index) { plan = planned[at].plan; }
             }
-            if (!plan) { plan = planFromEngine(effect); }
+            // planForLayer(), not planFromEngine(): a line whose voice came
+            // back from a cloud model has its plan read out of that recording,
+            // and a rebuild that reached for the engine instead would put the
+            // mouth back on timings nobody can hear.
+            if (!plan) { plan = planForLayer(comp, members[index], effect); }
             lines.push({
                 name: members[index].name,
                 start: members[index].inPoint,
@@ -1648,7 +1818,11 @@
         // The pointer at a shared rig goes too. Rebuilding that rig without this
         // line is the caller's job, because it has to happen after every layer
         // in the selection has been dealt with.
-        var names = RIG_TRACK_NAMES.concat([RIG_TARGET_NAME, BAKE_POINTER_NAME]);
+        // CLOUD_VOICE_NAME is on this list because it is on the text layer; the
+        // two sliders that record how the recording was read are on the audio
+        // layer, which the block above has already taken away whole.
+        var names = RIG_TRACK_NAMES.concat(
+            [RIG_TARGET_NAME, BAKE_POINTER_NAME, CLOUD_VOICE_NAME]);
         var effects = layer.property("ADBE Effect Parade");
         var index;
         // Downward: removing an effect renumbers everything above it.
@@ -1711,22 +1885,23 @@
      */
     var BAKE_FOLDER_NAME = "Island Chatter Audio";
 
-    // Ships beside the .aex, in Support Files/Plug-ins/Island Chatter/.
+    // Both tools ship beside the .aex, in Support Files/Plug-ins/Island Chatter/.
     //
     // Deriving that from the panel's own location only works while the panel is
     // where the installer put it. Folder.startup is After Effects' Support Files
     // directory whatever is running, which covers a panel opened from somewhere
     // else through File > Scripts > Run Script File, and the host test suites,
     // which load the panel body out of the repository.
-    var TOOL_RELATIVE_PATH = "/Plug-ins/Island Chatter/island_chatter_bake.exe";
+    var TOOL_FOLDER_PATH = "/Plug-ins/Island Chatter/";
 
-    function bakeToolFile() {
+    function toolFile(name) {
         var candidates = [];
         try {
-            candidates.push(new File($.fileName).parent.parent.parent.fsName + TOOL_RELATIVE_PATH);
+            candidates.push(
+                new File($.fileName).parent.parent.parent.fsName + TOOL_FOLDER_PATH + name);
         } catch (locationError) { /* $.fileName is not always a real path */ }
         try {
-            candidates.push(Folder.startup.fsName + TOOL_RELATIVE_PATH);
+            candidates.push(Folder.startup.fsName + TOOL_FOLDER_PATH + name);
         } catch (startupError) { /* not running inside After Effects */ }
         var index;
         for (index = 0; index < candidates.length; index += 1) {
@@ -1735,6 +1910,8 @@
         }
         return null;
     }
+
+    function bakeToolFile() { return toolFile("island_chatter_bake.exe"); }
 
     // UTF-8 bytes as hex, so the text survives the command line whatever the
     // console code page is.
@@ -1918,11 +2095,32 @@
         var previous = bakedLayerFor(comp, layer);
         var names = [layer.name + " (baked)"];
         if (previous) { names.push(String(previous.name)); }
+        /*
+         * The index is read once, here, and the Layer object is never asked
+         * again.
+         *
+         * Written as `previous.index` inside the loop it throws
+         * "ReferenceError: Object is invalid" on the *second* bake of a layer,
+         * every time: the loop removes that very layer and then goes on
+         * dereferencing it on every remaining iteration, and there is always at
+         * least one remaining iteration because the text layer itself is below
+         * it. A first bake never noticed, because there is no previous bake to
+         * hold on to — which is why this survived from 1.6.0 until
+         * ae-bake-test.jsx was run against it.
+         *
+         * Comparing numbers is safe here only because the walk goes downward:
+         * removing a layer renumbers the ones *below* it, and those have
+         * already been visited. Anything above keeps the index it had.
+         */
+        var previousIndex = previous ? previous.index : 0;
         var index;
         var at;
         for (index = comp.numLayers; index >= 1; index -= 1) {
             var candidate = comp.layer(index);
-            if (previous && candidate.index === previous.index) { candidate.remove(); continue; }
+            if (previousIndex && candidate.index === previousIndex) {
+                candidate.remove();
+                continue;
+            }
             for (at = 0; at < names.length; at += 1) {
                 if (candidate.name === names[at]) { candidate.remove(); break; }
             }
@@ -1958,6 +2156,319 @@
         var tone = findToneBootstrap(layer);
         if (tone) { tone.enabled = false; }
         return file;
+    }
+
+    /*
+     * A voice from somebody else's model.
+     *
+     * This is Bake with a different renderer, and saying it that way is the
+     * design rather than a description. Everything the bake path already knows
+     * how to do — write a file beside the project, release the previous one,
+     * import it, point the line at it, silence the live effect, go stale when
+     * the text changes — is exactly what a cloud voice needs, and none of it is
+     * written twice. What arrives is a WAV, and from the WAV onwards this is
+     * 2.3.0's job: the analyser reads it and prints the same plan the engine
+     * prints, so the mouth moves without anything downstream being told where
+     * the sound came from. The two features meet here and that is the whole of
+     * the feature.
+     *
+     * What it is emphatically not is a live effect. An audio callback that
+     * waits on a network is a hung host, so this is one press, one file, and
+     * invariant 8's determinism is left alone. Editing the text does not
+     * silently re-fetch it either — that would be spending money on a keystroke.
+     */
+    var VOICE_TOOL_NAME = "island_chatter_voice.exe";
+    // Beside the bakes, one level down, because these are named after a hash
+    // rather than after a line and a folder of them is not worth reading.
+    var CLOUD_FOLDER_NAME = "cloud";
+    var CLOUD_SUFFIX = " (voice)";
+    /*
+     * On the *text* layer, not on the audio.
+     *
+     * It says one thing: this line's plan comes back from a file rather than
+     * from the engine. That is the only downstream difference a cloud voice
+     * makes, and putting the mark on the line keeps the line as the rig member,
+     * so Type-On, markers, overlap resolution and Fit Duration go on working
+     * exactly as they do for a spoken line.
+     */
+    var CLOUD_VOICE_NAME = "IC Cloud Voice";
+    // Under 2000 characters a line. Providers have their own limits and would
+    // refuse politely, but this refusal is free and the one that is not is a
+    // bill. A line of dialogue is never this long by accident.
+    var MAX_CLOUD_CHARACTERS = 2000;
+
+    function requireVoiceTool() {
+        var tool = toolFile(VOICE_TOOL_NAME);
+        if (!tool) {
+            throw new Error(M("{0} is missing. Reinstall Island Chatter. / 找不到 {0}，請重新安裝 Island Chatter。",
+                VOICE_TOOL_NAME));
+        }
+        return tool;
+    }
+
+    // Everything the tool says comes back through the console code page, so the
+    // parts a person reads travel as hex. The first line is checked because
+    // callSystem() reports no exit status: a tool that never ran returns an
+    // empty string, which must not read as an empty answer.
+    function parseVoiceReply(reply) {
+        var lines = String(reply).split(/[\r\n]+/);
+        if (!lines.length || lines[0].indexOf("VOICE ") !== 0) {
+            throw new Error(
+                M("Island Chatter could not run the cloud voice tool. / Island Chatter 無法執行雲端語音工具。") +
+                "\n\n" + reply);
+        }
+        var answer = { providers: [], path: "", bytes: 0, cached: false };
+        var index;
+        for (index = 1; index < lines.length; index += 1) {
+            var fields = lines[index].split(" ");
+            if (fields[0] === "ERROR") {
+                // The provider's own words, not a sentence of ours wrapped
+                // round them. Invariant 8k is the reason.
+                throw new Error(utf8FromHex(fields[1]));
+            }
+            if (fields[0] === "P") {
+                answer.providers.push({
+                    id: fields[1],
+                    label: utf8FromHex(fields[2]),
+                    host: fields[3],
+                    model: fields[4] === "2d" ? "" : utf8FromHex(fields[4]),
+                    voice: utf8FromHex(fields[5]),
+                    needsRegion: fields[6] === "1"
+                });
+            } else if (fields[0] === "PATH") {
+                answer.path = utf8FromHex(fields[1]);
+            } else if (fields[0] === "OK") {
+                answer.path = utf8FromHex(fields[1]);
+                answer.bytes = parseInt(fields[2], 10);
+                answer.cached = fields[3] === "1";
+            }
+        }
+        return answer;
+    }
+
+    // Asked for, never written down here. A second copy of the provider table
+    // in the panel is the mistake invariant 8b is about: it would drift the
+    // first time a default model changed, and it would drift silently.
+    function cloudProviders() {
+        var tool = requireVoiceTool();
+        return parseVoiceReply(system.callSystem(quoted(tool.fsName) + " --providers")).providers;
+    }
+
+    function cloudFolder() {
+        var folder = new Folder(bakeFolder().fsName + "/" + CLOUD_FOLDER_NAME);
+        if (!folder.exists && !folder.create()) {
+            throw new Error(M("Could not create {0} / 無法建立 {0}", folder.fsName));
+        }
+        return folder;
+    }
+
+    /*
+     * Where the key lives, and what that costs.
+     *
+     * app.settings is After Effects' own preference file, in plain text, in the
+     * user's profile. That is not a secret store and the panel says so rather
+     * than implying otherwise: there is no key ring in ExtendScript, and
+     * inventing an encryption whose key would have to ship in this same file
+     * would be theatre. One key per provider, because they are separate
+     * accounts with separate bills.
+     */
+    function keySettingName(providerId) { return "cloudKey_" + providerId; }
+
+    function storedKey(providerId) {
+        var name = keySettingName(providerId);
+        if (!app.settings.haveSetting(SCRIPT_NAME, name)) { return ""; }
+        return trim(String(app.settings.getSetting(SCRIPT_NAME, name)));
+    }
+
+    function rememberKey(providerId, key) {
+        app.settings.saveSetting(SCRIPT_NAME, keySettingName(providerId), key);
+    }
+
+    /*
+     * The key reaches the tool through a file, and the file exists for
+     * milliseconds.
+     *
+     * A command line is readable by every process on the machine: Task Manager
+     * shows it to anyone who turns the column on. So the key is written to the
+     * temp directory and the path is what travels. The tool deletes the file as
+     * soon as it has read it, before the socket is opened; this deletes it
+     * again afterwards, because two attempts cost nothing and one missed one
+     * leaves a credential on disk.
+     */
+    function writeKeyFile(key) {
+        var name = "island-chatter-key-" +
+            new Date().getTime().toString(36) +
+            Math.floor(Math.random() * 0x10000).toString(36) + ".tmp";
+        var file = new File(Folder.temp.fsName + "/" + name);
+        file.encoding = "UTF-8";
+        if (!file.open("w")) {
+            throw new Error(M("Could not write the temporary key file. / 無法寫入暫存金鑰檔。"));
+        }
+        file.write(key);
+        file.close();
+        return file;
+    }
+
+    /*
+     * Asking for a key without putting it on screen.
+     *
+     * ScriptUI's edittext takes noecho, which is the one thing a plain prompt()
+     * cannot do, and a billing credential typed into a shared screen recording
+     * is worth the extra twenty lines. Forget is in the same dialog because
+     * "how do I take it off this machine" is a question that deserves an answer
+     * a button away rather than a paragraph in a README.
+     *
+     * The dialog is built with M() rather than through localiseTree(), because
+     * it is created on demand, after the language is already known.
+     */
+    function askForCloudKey(providerLabel, existing) {
+        var dialog = new Window("dialog", SCRIPT_NAME);
+        dialog.orientation = "column";
+        dialog.alignChildren = ["fill", "top"];
+        dialog.margins = 14;
+        dialog.spacing = 8;
+        dialog.add("statictext", undefined,
+            M("API key for {0} / {0} 的 API 金鑰", providerLabel));
+        var field = dialog.add("edittext", undefined, existing, { noecho: true });
+        field.characters = 44;
+        // Said plainly rather than implied. There is no key store in
+        // ExtendScript, and an encryption whose key shipped in this same file
+        // would be theatre.
+        dialog.add("statictext", undefined,
+            M("Kept in this computer's After Effects preferences, in plain text. / 會存在這台電腦的 After Effects 偏好設定裡，是明碼。"));
+        var buttons = dialog.add("group");
+        buttons.orientation = "row";
+        buttons.alignment = ["right", "top"];
+        var saveButton = buttons.add("button", undefined, M("Save / 儲存"));
+        var forgetButton = buttons.add("button", undefined, M("Forget / 清除"));
+        var cancelButton = buttons.add("button", undefined, M("Cancel / 取消"));
+        var answer = null;
+        saveButton.onClick = function () {
+            answer = { key: trim(String(field.text)) };
+            dialog.close();
+        };
+        forgetButton.onClick = function () { answer = { key: "" }; dialog.close(); };
+        cancelButton.onClick = function () { answer = null; dialog.close(); };
+        dialog.show();
+        return answer;
+    }
+
+    function cloudArguments(settings) {
+        return " --provider " + settings.provider +
+            " --text " + hexUtf8(settings.text) +
+            (settings.voice ? " --voice " + hexUtf8(settings.voice) : "") +
+            (settings.model ? " --model " + hexUtf8(settings.model) : "") +
+            (settings.region ? " --region " + hexUtf8(settings.region) : "");
+    }
+
+    /*
+     * One line of speech, from the cache or from the provider.
+     *
+     * The tool decides which, because the tool owns the cache key: the panel
+     * computing a hash of its own would be a second copy of the thing that
+     * decides whether money is spent, and the two copies would disagree the
+     * first time a field was added to either. All the panel does is say where
+     * the folder is and report which of the two happened.
+     */
+    function speakToFile(settings) {
+        var tool = requireVoiceTool();
+        var folder = cloudFolder();
+        var keyFile = writeKeyFile(settings.key);
+        var answer;
+        try {
+            answer = parseVoiceReply(system.callSystem(quoted(tool.fsName) +
+                " --speak" + cloudArguments(settings) +
+                " --key-file " + hexUtf8(keyFile.fsName) +
+                " --cache-dir " + hexUtf8(folder.fsName)));
+        } finally {
+            if (keyFile.exists) { keyFile.remove(); }
+        }
+        var file = new File(answer.path);
+        if (!file.exists) {
+            throw new Error(M("The cloud voice reported success but wrote no file. / 雲端語音回報成功卻沒有寫出檔案。") +
+                "\n\n" + answer.path);
+        }
+        return { file: file, cached: answer.cached };
+    }
+
+    /*
+     * Which audio a line's plan should be read from, or none.
+     *
+     * A stale recording answers "none", and that is not an oversight: going
+     * stale mutes the audio and turns the live effect back on, so what is heard
+     * is the engine again — and the mouth has to follow what is heard. One
+     * check keeps the two from ever disagreeing.
+     */
+    function cloudVoiceLayer(comp, layer) {
+        if (!findNamedEffect(layer, CLOUD_VOICE_NAME)) { return null; }
+        var audioLayer = bakedLayerFor(comp, layer);
+        if (!audioLayer) { return null; }
+        var live = false;
+        try { live = audioLayer.audioEnabled === true; } catch (notAudio) { live = false; }
+        if (!live) { return null; }
+        var file = audioSourceFile(audioLayer);
+        return file && file.exists ? audioLayer : null;
+    }
+
+    /*
+     * The plan for a line, whoever made it.
+     *
+     * This is the one place that decides, and everything else — markers, the
+     * rig, the mouth switch, Type-On, Fit Duration — keeps asking for "the
+     * plan" exactly as it did in 1.0.10. That is invariant 8aa's promise being
+     * collected: because a recording prints the format the engine prints, a
+     * line whose sound came from a cloud model needed no new code anywhere
+     * downstream of here.
+     */
+    function planForLayer(comp, layer, effect) {
+        var voiced = cloudVoiceLayer(comp, layer);
+        if (voiced) {
+            return planWithinLayer(
+                planFromAudio(audioSourceFile(voiced), audioSettingsFromLayer(voiced)), voiced);
+        }
+        return planFromEngine(effect);
+    }
+
+    function cloudVoiceToLayer(comp, layer, settings) {
+        var spoken = speakToFile(settings);
+        // Only after the file is in hand. Everything below changes the project,
+        // and a failed request must leave it exactly as it was.
+        releasePreviousBake(comp, layer);
+        var imported = app.project.importFile(new ImportOptions(spoken.file));
+        imported.name = layer.name + CLOUD_SUFFIX;
+        var audioLayer = comp.layers.add(imported);
+        audioLayer.startTime = layer.inPoint;
+        audioLayer.name = layer.name + CLOUD_SUFFIX;
+        audioLayer.moveAfter(layer);
+        pointAtBake(layer, audioLayer);
+        // The settings the mouth was read with, on the layer that was read, so
+        // a later Rebuild reproduces this plan rather than making a different
+        // one out of whatever the panel happens to be showing. Same reasoning,
+        // and the same two controls, as an analysed recording.
+        ensureSlider(audioLayer, AUDIO_LINE_NAME, Math.round(settings.sensitivity * 100));
+        ensureSlider(audioLayer, AUDIO_VOWELS_NAME, settings.vowels ? 1 : 0);
+        ensureSlider(layer, CLOUD_VOICE_NAME, 1);
+        var effect = findNativeEffect(layer);
+        if (effect) { effect.enabled = false; }
+        var tone = findToneBootstrap(layer);
+        if (tone) { tone.enabled = false; }
+        return { audioLayer: audioLayer, cached: spoken.cached };
+    }
+
+    /*
+     * One line, from the button to a moving mouth.
+     *
+     * The plan is fetched back through planForLayer() rather than from the
+     * analysis directly, which looks like a detour and is not: it is the same
+     * switch every later Rebuild will go through, so if that switch is ever
+     * wrong the button shows it immediately instead of the next time somebody
+     * moves an unrelated line.
+     */
+    function cloudVoiceLine(comp, layer, settings, options) {
+        var made = cloudVoiceToLayer(comp, layer, settings);
+        var plan = planForLayer(comp, layer, findNativeEffect(layer));
+        retimeToPlan(comp, layer, plan, options);
+        return { plan: plan, cached: made.cached, audioLayer: made.audioLayer };
     }
 
     function createOrUpdate(text, pronunciation, settings, options) {
@@ -2569,21 +3080,21 @@
      * The length is always refitted, because a text change that does not move
      * the layer's out point leaves every timing after it wrong.
      */
-    function resyncLayer(comp, layer, options) {
-        var effect = findNativeEffect(layer);
-        if (!effect) { return null; }
-        var voice = settingsFromEffect(effect);
-        var text = textFromLayer(layer);
-        var truncated = text.length > MAX_TEXT_UNITS ? layer.name : "";
-        var unmarked = unmarkedKanji(text) ? layer.name : "";
-        var previousRig = rigTargetLayer(comp, layer);
+    /*
+     * Put a line back on a plan, rebuilding only what it already had.
+     *
+     * Pulled out of resyncLayer() rather than copied, because the cloud voice
+     * needs precisely this and needs it to behave identically: a new plan
+     * arrives, the line is refitted, and whatever the layer was already
+     * carrying — markers, its own rig, Type-On — is rewritten while nothing new
+     * is added. That last part is invariant 8o's rule, and it now has one
+     * implementation instead of two that could drift.
+     */
+    function retimeToPlan(comp, layer, plan, options) {
         var hadMarkers = hasTimingMarkers(layer);
-        var hadTypeOn = !!findNamedProperty(
-            layer.property("ADBE Text Properties").property("ADBE Text Animators"),
-            "Island Chatter Type-On");
+        var animators = layer.property("ADBE Text Properties").property("ADBE Text Animators");
+        var hadTypeOn = !!findNamedProperty(animators, "Island Chatter Type-On");
         var hadOwnRig = !!findNamedEffect(layer, RIG_TRACK_NAMES[0]);
-        setEffectParameters(effect, text, voice, comp.time);
-        var plan = planFromEngine(effect);
         // An edit that made the line longer can push it past the end of the
         // composition, where the out point is clamped and the line is squashed
         // to whatever room was left. Growing first is the same reason Import
@@ -2600,12 +3111,27 @@
         if (hadTypeOn) {
             updateTypeOn(layer, plan, comp.time,
                 typeOnCurve(options.typeOnLeave), options.typeOnSmoothness);
-            if (findNamedProperty(
-                layer.property("ADBE Text Properties").property("ADBE Text Animators"),
-                CENTER_ANIMATOR_NAME)) {
+            if (findNamedProperty(animators, CENTER_ANIMATOR_NAME)) {
                 updateTypeOnCentering(comp, layer, plan, typeOnCurve(options.typeOnLeave));
             }
         }
+    }
+
+    function resyncLayer(comp, layer, options) {
+        var effect = findNativeEffect(layer);
+        if (!effect) { return null; }
+        var voice = settingsFromEffect(effect);
+        var text = textFromLayer(layer);
+        var truncated = text.length > MAX_TEXT_UNITS ? layer.name : "";
+        var unmarked = unmarkedKanji(text) ? layer.name : "";
+        var previousRig = rigTargetLayer(comp, layer);
+        setEffectParameters(effect, text, voice, comp.time);
+        // The engine's, deliberately: re-syncing is what a text edit needs, and
+        // a text edit is exactly what makes a cloud recording say the wrong
+        // thing. markBakeStale() below mutes it and turns the live effect back
+        // on, so this plan is the one that matches what will be heard.
+        var plan = planFromEngine(effect);
+        retimeToPlan(comp, layer, plan, options);
         return {
             plan: plan,
             rig: previousRig,
@@ -2785,7 +3311,66 @@
     var UI_LANGUAGE = "zh";
     var UI_LANGUAGE_SETTING = "uiLanguage";
     var IC_JAPANESE_UI = {
+        "Speak / 說話": "話す",
+        "Timbre / 音色": "音色",
+        "Animation / 動畫": "アニメーション",
+        "Import / 匯入": "読み込み",
+        "Lip-sync from audio / 音檔轉口型": "音声から口を動かす",
+        "Sensitivity / 靈敏度": "感度",
+        "Vowels / 判斷母音": "母音を判定",
+        "{0} syllable(s) found / 找到 {0} 個音節": "{0} 音節を検出しました",
+        "Select an audio layer. / 請選取音訊圖層。": "音声レイヤーを選択してください。",
+        "Add a character on the Animation page first. / 請先在「動畫」頁新增角色。":
+            "先に「アニメーション」ページでキャラクターを追加してください。",
+        "{0} is not an audio layer. / {0} 不是音訊圖層。": "{0} は音声レイヤーではありません。",
+        "The file for {0} is missing. / 找不到 {0} 的檔案。": "{0} のファイルが見つかりません。",
+        "{0} is time-stretched; set it back to 100% first. / {0} 有時間伸縮，請先改回 100%。":
+            "{0} はタイムストレッチされています。先に 100% に戻してください。",
+        "Lip-synced {0} layer(s) onto {1} / 已對嘴 {0} 層到「{1}」":
+            "{0} レイヤーを「{1}」に口パクさせました",
+        "Lip-synced {0} layer(s); {1} overlap / 已對嘴 {0} 層；有 {1} 句重疊":
+            "{0} レイヤーを口パクさせました。{1} 件が重なっています",
+        "Cloud voice / 雲端語音": "クラウド音声",
+        "API key / 金鑰": "APIキー",
+        // Not "Voice / 音色": the Timbre tab already carries that, and this is
+        // the provider's own identifier for a voice rather than a setting.
+        "Voice ID / 音色代號": "ボイスID",
+        "Model / 模型": "モデル",
+        "Region / 區域": "リージョン",
+        "API key for {0} / {0} 的 API 金鑰": "{0} の APIキー",
+        "Kept in this computer's After Effects preferences, in plain text. / 會存在這台電腦的 After Effects 偏好設定裡，是明碼。":
+            "このパソコンの After Effects 環境設定に、平文のまま保存されます。",
+        "Save / 儲存": "保存",
+        "Forget / 清除": "消去",
+        "Cancel / 取消": "キャンセル",
+        "Key saved / 已存下金鑰": "APIキーを保存しました",
+        "Key cleared / 已清除金鑰": "APIキーを消去しました",
+        "Choose a provider first. / 請先選一家供應商。":
+            "先にサービスを選んでください。",
+        "Set the API key for {0} first. / 請先設定 {0} 的 API 金鑰。":
+            "先に {0} の APIキーを設定してください。",
+        "{0} needs the region its resource is in. / {0} 需要填寫資源所在的區域。":
+            "{0} にはリソースのリージョンが必要です。",
+        "{0} is longer than {1} characters. Split it first. / {0} 超過 {1} 個字，請先拆成幾句。":
+            "{0} は {1} 文字を超えています。先に分けてください。",
+        "The selected layer(s) have no text in them. / 選取的圖層裡沒有文字。":
+            "選択したレイヤーに文字がありません。",
+        "Send {0} line(s), {1} characters, to {2}?\n\nThe text leaves this computer. Lines already fetched with the same settings are reused and cost nothing. / 要把 {0} 句、共 {1} 個字送到 {2} 嗎？\n\n文字會離開這台電腦。文字和設定都沒變的句子會直接沿用上次的檔案，不會再花錢。":
+            "{0} 行・{1} 文字を {2} に送信しますか？\n\n文字はこのパソコンの外に出ます。文字も設定も変わっていない行は前回のファイルを使い回すので、費用はかかりません。",
+        "{0} new, {1} reused / 新增 {0}、沿用 {1}": "新規 {0} 件・再利用 {1} 件",
+        "Cloud voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音":
+            "{1} で {0} レイヤーに声を当てました",
+        "{0} is missing. Reinstall Island Chatter. / 找不到 {0}，請重新安裝 Island Chatter。":
+            "{0} が見つかりません。Island Chatter を再インストールしてください。",
+        "Island Chatter could not run the cloud voice tool. / Island Chatter 無法執行雲端語音工具。":
+            "Island Chatter はクラウド音声ツールを実行できませんでした。",
+        "Could not write the temporary key file. / 無法寫入暫存金鑰檔。":
+            "一時的なキーファイルを書き込めませんでした。",
+        "The cloud voice reported success but wrote no file. / 雲端語音回報成功卻沒有寫出檔案。":
+            "クラウド音声は成功と答えましたが、ファイルが作られていません。",
         "Direct text-layer voice / 文字圖層直接發聲": "テキストレイヤーが直接しゃべる",
+        // What a character saved by 1.0.2 is called: it had one unnamed slot.
+        "Saved / 已儲存": "保存済み",
         "Read selected layer / 讀取選取圖層": "選択レイヤーを読み込む",
         "Pronunciation override (optional) / 讀音覆寫（可留空）": "読み方の指定（省略可）",
         "Sunny / 明亮": "サニー",
@@ -3032,8 +3617,15 @@
      */
     var IC_SIMPLIFIED_TERMS = [
         ["關鍵影格", "关键帧"], ["文字圖層", "文本图层"],
+        // The cloud voice brought four more, and every one of them is a word
+        // that a character map alone would leave reading as Taiwan usage:
+        // 执行绪, 网路, 命令列 and 偏好设置 are all correct Simplified spellings
+        // of terms nobody in mainland China says. 偏好設定 has to precede the
+        // bare 設定 or it becomes 偏好设置 before this line is ever reached.
+        ["偏好設定", "首选项"], ["執行緒", "线程"], ["暫存檔", "临时文件"],
         ["專案檔", "项目文件"], ["資料夾", "文件夹"], ["空物件", "空对象"],
         ["選取器", "选择器"], ["文字框", "文本框"], ["轉檔", "导出"],
+        ["命令列", "命令行"], ["網路", "网络"],
         ["影格", "帧"], ["佇列", "队列"], ["算圖", "渲染"], ["專案", "项目"],
         ["檔案", "文件"], ["滑桿", "滑块"], ["音訊", "音频"], ["匯入", "导入"],
         ["貼進", "粘贴到"], ["字元", "字符"], ["介面", "界面"], ["選取", "选中"],
@@ -3077,7 +3669,17 @@
         "隨": "随", "險": "险", "離": "离", "電": "电", "靜": "静", "響": "响",
         "項": "项", "預": "预", "頓": "顿", "題": "题", "顫": "颤", "顯": "显",
         "風": "风", "飄": "飘", "餘": "余", "馬": "马", "驅": "驱", "鳴": "鸣",
-        "麼": "么", "點": "点", "齊": "齐", "寫": "写"
+        "麼": "么", "點": "点", "齊": "齐", "寫": "写",
+        // Added with the audio lip-sync page. 乾 is only ever 乾淨 here, which
+        // is 干净; the other sense (乾坤) has no place in a panel about mouths.
+        "靈": "灵", "頁": "页", "錄": "录", "頭": "头", "運": "运", "訴": "诉",
+        "絕": "绝", "乾": "干", "淨": "净", "樂": "乐", "環": "环", "頻": "频",
+        "確": "确", "應": "应", "單": "单", "純": "纯", "狀": "状", "約": "约",
+        // Added with the cloud voice. 係 is only ever 關係 here, which is 关系.
+        "雲": "云", "鑰": "钥", "區": "区", "腦": "脑", "錢": "钱", "傳": "传",
+        "帳": "账", "認": "认", "網": "网", "辦": "办", "執": "执", "緒": "绪",
+        "報": "报", "壓": "压", "碼": "码", "務": "务", "暫": "暂", "給": "给",
+        "係": "系", "價": "价", "欄": "栏"
     };
 
     function simplify(text) {
@@ -3187,6 +3789,198 @@
         "讓已顯示的文字保持置中並平滑滑動，而不是從左邊長出來。適用於置中對齊的文字。",
         "表示済みの文字を中央にそろえたまま滑らせます。" +
         "\n左端から伸びていく代わりです。中央ぞろえのテキスト向け。");
+
+    help("lipSync",
+        "Drive a character's mouth from a recording instead of from text." +
+        " Select an audio layer, pick the character on the Animation page, and" +
+        " press this." +
+        "\n\nThe engine reads the file, finds the syllables in it, and writes" +
+        " the same rig it writes for a spoken line — so the mouth switch, the" +
+        " markers and the head bounce all work exactly as they already do." +
+        " Nothing about the recording is changed and no audio is generated." +
+        "\n\nUse it for your own voice, for a dub, or for anything else that" +
+        " arrived as a file. WAV and AIFF only: export an MP3 as one of those" +
+        " first, and the panel will say so if you forget." +
+        "\n\nSilence in the file closes the mouth, so pauses look after" +
+        " themselves. Trim the layer and only the trimmed part is used." +
+        " A time-stretched layer is refused, because nothing here can tell how" +
+        " far the stretch moved each syllable." +
+        "\n\nType-On is not available for a recording: there is no text to" +
+        " reveal. Rebuild re-reads the file, so moving or re-trimming the layer" +
+        " and pressing Rebuild is all it takes to put the mouth right again.",
+        "用一段錄音來驅動角色的嘴巴，而不是用文字。選一個音訊圖層，在「動畫」頁選好角色，" +
+        "然後按這裡。" +
+        "\n\n引擎會讀那個檔案、找出裡面的音節，寫出跟講話的句子一模一樣的控制器——" +
+        "\n所以嘴型切換、逐字標記、頭部晃動全部照常運作。錄音本身不會被改動，也不會產生新的音檔。" +
+        "\n\n自己錄的聲音、配音、或任何別的地方來的檔案都可以。只收 WAV 和 AIFF：" +
+        "\nMP3 請先轉存成這兩種之一，忘了的話面板會告訴你。" +
+        "\n\n檔案裡的靜音會讓嘴巴閉起來，所以停頓不用另外處理。圖層剪過的話只會用剪過的那一段。" +
+        "\n有時間伸縮的圖層會被拒絕，因為這裡沒有東西知道伸縮把每個音節移動了多少。" +
+        "\n\n錄音沒有逐字顯示可用：沒有文字可以顯示。重建會重新讀一次檔案，" +
+        "\n所以圖層移動或重新剪過之後，按一下重建就會對回去。",
+        "テキストではなく録音からキャラクターの口を動かします。" +
+        "\n音声レイヤーを選び、「アニメーション」ページでキャラクターを選んでから押してください。" +
+        "\n\nエンジンがファイルを読んで音節を探し、しゃべる行と同じリグを書きます——" +
+        "\n口の切り替えもマーカーも頭の動きも、これまでどおりに働きます。" +
+        "\n録音そのものは変更されず、新しい音声も作られません。" +
+        "\n\n自分の声でも、吹き替えでも、ほかから来たファイルでも構いません。" +
+        "\nWAV と AIFF のみです。MP3 はどちらかに書き出してください。忘れても panel が知らせます。" +
+        "\n\nファイル中の無音で口が閉じるので、間は自動で処理されます。" +
+        "\nレイヤーをトリムすれば、その部分だけが使われます。" +
+        "\nタイムストレッチされたレイヤーは拒否されます。ずれ幅を測る手段がここには無いからです。" +
+        "\n\n録音では「1 文字ずつ表示」は使えません。表示する文字が無いためです。" +
+        "\nRebuild でファイルを読み直すので、移動やトリムのあとは Rebuild を押すだけで合い直します。");
+
+    help("sensitivity",
+        "How much of a peak in loudness has to be there before it counts as a" +
+        " syllable." +
+        "\n\nLow takes almost every bump, which is what a clean close-mic" +
+        " recording wants. High takes only the obvious ones, which is what you" +
+        " need when there is music or room noise underneath." +
+        "\n\nIf the mouth moves too often, raise it. If it misses syllables," +
+        " lower it. There is no correct value — it depends on the recording.",
+        "一個音量的高峰要多明顯，才算是一個音節。" +
+        "\n\n調低幾乎每個起伏都算，適合乾淨的近距離錄音。" +
+        "\n調高只算明顯的，適合底下還有音樂或環境噪音的時候。" +
+        "\n\n嘴巴動得太頻繁就調高，漏掉音節就調低。沒有正確的數值，看錄音而定。",
+        "どれくらいはっきりした音量の山を 1 音節と見なすかです。" +
+        "\n\n低くするとほとんどの起伏を拾います。近接マイクのきれいな録音向けです。" +
+        "\n高くすると目立つものだけを拾います。音楽や環境音が下にあるときはこちらです。" +
+        "\n\n口が動きすぎるなら上げ、音節を取りこぼすなら下げてください。" +
+        "\n正解の値はありません。録音によります。");
+
+    help("vowels",
+        "Work out which vowel is being said and use the matching mouth shape." +
+        "\n\nOn a clean voice this is usually right; with music underneath it" +
+        " often is not, and a wrong mouth shape is more distracting than a" +
+        " plain one. Turn it off and every syllable gets the open shape" +
+        " instead, which with the rig's own open-and-shut is the chatter look" +
+        " this product is named for." +
+        "\n\nIt is a guess either way, made from the shape of the sound rather" +
+        " than from knowing the words. Measured against lines the engine spoke" +
+        " itself, it agrees about two thirds of the time.",
+        "判斷正在發的是哪個母音，用對應的嘴型。" +
+        "\n\n乾淨的人聲通常判得對；底下有音樂的時候常常不對，" +
+        "\n而錯的嘴型比單純的開合更容易讓人分心。關掉的話每個音節都用張開的嘴型，" +
+        "\n配上控制器本來的開合，就是這個產品名字由來的那種碎嘴效果。" +
+        "\n\n不管開關都是猜的——是從聲音的形狀判斷，不是真的知道在講什麼。" +
+        "\n拿引擎自己唸出來的句子當標準答案量過，大約有三分之二會對。",
+        "どの母音を発音しているかを判定し、対応する口の形を使います。" +
+        "\n\nきれいな声ならたいてい当たりますが、音楽が下にあると外れがちです。" +
+        "\n間違った口の形は、単純な開閉よりも気が散ります。" +
+        "\nオフにすると全音節が開いた形になり、リグ自体の開閉と合わさって、" +
+        "\nこの製品の名前の由来である「おしゃべり」の見た目になります。" +
+        "\n\nどちらにしても推測です。言葉を知っているのではなく、音の形から判断しています。" +
+        "\nエンジン自身がしゃべった行を正解として測ると、約 3 分の 2 が一致します。");
+
+    help("cloudVoice",
+        "Have a cloud model speak the selected lines, then drive the mouth from" +
+        " what it sent back." +
+        "\n\nThe text leaves this computer: it is sent to the provider you" +
+        " chose, using your own API key, and they bill you for it. Nothing is" +
+        " sent until you press this and confirm the character count." +
+        "\n\nIt is not a live effect and cannot be: a voice that had to be" +
+        " fetched over a network could not be rendered on an audio thread. It" +
+        " is one press, one file, exactly like Bake — the audio lands beside the" +
+        " project and the mouth is read out of it by the same analyser that" +
+        " reads any other recording." +
+        "\n\nEditing the line afterwards does not fetch it again. The recording" +
+        " is muted, the built-in voice comes back, and the layer is marked" +
+        " (stale) until you press this again — because a keystroke should not" +
+        " spend money.",
+        "讓雲端模型唸出選取的句子，再用回傳的聲音驅動嘴型。" +
+        "\n\n文字會離開這台電腦：送到你選的那家供應商，用你自己的 API 金鑰，帳單也是你的。" +
+        "\n按下去並確認字數之前，什麼都不會送出。" +
+        "\n\n它不是即時效果，也不可能是：要等網路回來的聲音沒辦法在音訊執行緒上算。" +
+        "\n它就是「按一次、產出一個音檔」，跟轉成音訊一樣——檔案放在專案旁邊，" +
+        "\n嘴型由讀任何錄音的那個分析器讀出來。" +
+        "\n\n之後改字不會自動重新去要。錄音會被靜音、內建的聲音回來、圖層標上 (stale)，" +
+        "\n等你再按一次——因為敲一個鍵不應該花到錢。",
+        "選択した行をクラウドのモデルにしゃべらせ、返ってきた音声から口を動かします。" +
+        "\n\n文字はこのパソコンの外に出ます。選んだサービスに、あなた自身の APIキーで送られ、" +
+        "\n料金もあなたに請求されます。ここを押して文字数を確認するまで、何も送信されません。" +
+        "\n\nリアルタイム効果ではありませんし、あり得ません。" +
+        "\nネットワークを待つ音声はオーディオスレッドでは計算できないからです。" +
+        "\n「一度押す、ファイルが 1 つできる」——音声ファイルに書き出すのと同じです。" +
+        "\n\n後から文字を直しても取り直しはしません。録音はミュートされ、内蔵の声が戻り、" +
+        "\nレイヤーに (stale) が付きます。キーを 1 つ叩いただけでお金を使わないためです。");
+
+    help("provider",
+        "Which service speaks the line. The list comes from the tool itself, so" +
+        " it is always the one the installed build can actually reach." +
+        "\n\nOnly services that return uncompressed audio are offered, so no" +
+        " audio decoder ships with this product. Each one is a separate account" +
+        " with a separate key and a separate bill.",
+        "由哪一家唸出這一句。清單是工具自己回報的，所以永遠是這個版本真的連得上的那幾家。" +
+        "\n\n只收會回傳未壓縮音訊的供應商，這樣產品裡就不用夾一個音訊解碼器。" +
+        "\n每一家都是各自的帳號、各自的金鑰、各自的帳單。",
+        "どのサービスに読ませるかです。一覧はツール自身が返すので、" +
+        "\nインストールされている版が実際に接続できるものだけが並びます。" +
+        "\n\n非圧縮の音声を返すサービスだけを扱うので、この製品にデコーダーは入っていません。" +
+        "\nそれぞれ別のアカウント・別のキー・別の請求です。");
+
+    help("cloudKey",
+        "Your own API key for the chosen service. It is typed hidden and kept" +
+        " in this computer's After Effects preferences, in plain text — there is" +
+        " no key store in ExtendScript, and this is said plainly rather than" +
+        " implied." +
+        "\n\nIt never appears on a command line, where every process on the" +
+        " machine could read it: it is written to a temporary file that the" +
+        " tool deletes as soon as it has read it. Forget takes it off this" +
+        " machine.",
+        "你自己在那家服務的 API 金鑰。輸入時不會顯示出來，存在這台電腦的 After Effects" +
+        "\n偏好設定裡，是明碼——ExtendScript 沒有金鑰保管的地方，這件事直說比暗示好。" +
+        "\n\n它不會出現在命令列上（那裡機器上每一支程式都讀得到）：" +
+        "\n而是寫進一個暫存檔，工具讀完就把檔案刪掉。按「清除」就從這台電腦拿掉。",
+        "選んだサービスの、あなた自身の APIキーです。入力は伏せ字で、" +
+        "\nこのパソコンの After Effects 環境設定に平文で保存されます。" +
+        "\nExtendScript にキーの保管場所がないためで、隠さずそのまま書いています。" +
+        "\n\nコマンドラインには決して現れません（そこはマシン上のどのプロセスからも読めます）。" +
+        "\n一時ファイルに書き、ツールが読み終えた時点で削除します。" +
+        "\n「消去」でこのパソコンから取り除けます。");
+
+    help("cloudVoiceId",
+        "The provider's own name or id for the voice you want. Leave it as it" +
+        " is to use the default this provider ships." +
+        "\n\nIt is remembered per provider, so switching to another service and" +
+        " back does not lose the one you set." +
+        "\n\nThis has nothing to do with the Timbre page: those controls shape" +
+        " the built-in engine's voice, and a cloud model is not it.",
+        "那家供應商自己給這個聲音的名字或代號。不改就用它預設的那個。" +
+        "\n\n會分供應商記住，所以換過去再換回來，你設過的不會不見。" +
+        "\n\n這跟「音色」那一頁沒有關係：那些控制項調的是內建引擎的聲音，雲端模型不是它。",
+        "使いたい声について、そのサービス自身が付けている名前や ID です。" +
+        "\nそのままにしておけば、そのサービスの既定の声を使います。" +
+        "\n\nサービスごとに記憶されるので、別のサービスに切り替えて戻しても設定は残ります。" +
+        "\n\n「音色」ページとは無関係です。あちらは内蔵エンジンの声を作る操作で、" +
+        "\nクラウドのモデルはそれではありません。");
+
+    help("cloudModel",
+        "Which of the provider's models does the speaking. The default is" +
+        " whatever the tool reports for this provider, which is a model that" +
+        " works rather than the cheapest or the newest." +
+        "\n\nChanging it changes the price and the sound, and it is part of what" +
+        " decides whether a line is fetched again or reused.",
+        "由那家的哪一個模型來唸。預設是工具回報的那一個——那是「能用」的模型，" +
+        "\n不是最便宜或最新的。" +
+        "\n\n改了它，價錢和聲音都會變，而且它也算在「這句要不要重新去要」裡面。",
+        "そのサービスのどのモデルにしゃべらせるかです。既定はツールが返すもので、" +
+        "\n最安でも最新でもなく「動く」モデルです。" +
+        "\n\n変更すると料金も音も変わります。行を取り直すか使い回すかの判断にも含まれます。");
+
+    help("cloudRegion",
+        "Only Azure needs this: its endpoint is per region, so the region your" +
+        " Speech resource was created in is part of the address." +
+        "\n\nIt is the short form from the portal, such as eastasia or westus2." +
+        " The field is disabled for providers that have one address for" +
+        " everybody.",
+        "只有 Azure 需要：它的端點是分區域的，所以你的語音資源開在哪一區，也是位址的一部分。" +
+        "\n\n填入口網站上那個短名字，例如 eastasia 或 westus2。" +
+        "\n對所有人共用同一個位址的供應商，這一欄會是關掉的。",
+        "これが要るのは Azure だけです。エンドポイントがリージョンごとに分かれているため、" +
+        "\n音声リソースを作ったリージョンがアドレスの一部になります。" +
+        "\n\nポータルに出ている短い名前（eastasia、westus2 など）を入れてください。" +
+        "\n全員が同じアドレスを使うサービスでは、この欄は無効になります。");
 
     help("rigPerLayer",
         "Five sliders on each line, the way it has always worked.",
@@ -3574,6 +4368,17 @@
      */
     function remeasure(control) {
         if (control.icFixedWidth) { return; }
+        /*
+         * A tab is as tall as its page and a tabbed panel as tall as its
+         * tallest, plus the strip of titles. Neither is a deliberate number the
+         * way Apply's 34 px is, so both axes are asked for again — carrying the
+         * old height over would pin every page to whatever the language it was
+         * first built in happened to need.
+         */
+        if (control.type === "tab" || control.type === "tabbedpanel") {
+            control.preferredSize = [-1, -1];
+            return;
+        }
         var height = -1;
         try { height = control.preferredSize[1]; } catch (ignored) { height = -1; }
         control.preferredSize = [-1, height];
@@ -3679,10 +4484,57 @@
         var languagePicker = languageRow.add("dropdownlist", undefined,
             ["繁體中文", "简体中文", "English", "日本語"]);
         tip(languagePicker, "language");
-        panel.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
-        var textInput = panel.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });
+
+        /*
+         * Four pages of settings, and the verbs underneath them.
+         *
+         * Measured at 2.1.0 the panel wanted 414 x 1354 px, forty rows in one
+         * column. A docked ScriptUI panel in After Effects does not scroll, it
+         * clips, so on any ordinary dock the bottom third was simply not there
+         * — and the bottom third was Apply, Re-sync, Re-flow, Bake, Remove and
+         * the status line, which is to say everything anybody presses. The
+         * settings are what there are too many of, so the settings are what get
+         * paged; Apply and the rest stay outside the tabs, always reachable,
+         * whichever page is showing.
+         *
+         * A page is free to be short. Speak is the tall one and decides the
+         * height of the whole panel, which is why the timbre controls left it:
+         * they are the ones you set once per character rather than per line.
+         *
+         * ae-size-probe.jsx prints what each page costs, and
+         * ae-language-verify.jsx fails if any of them gets past its limit.
+         */
+        var tabs = panel.add("tabbedpanel");
+        tabs.alignChildren = ["fill", "top"];
+        function addTab(label) {
+            var tab = tabs.add("tab", undefined, label);
+            tab.orientation = "column";
+            tab.alignChildren = ["fill", "top"];
+            tab.margins = 10;
+            tab.spacing = 8;
+            return tab;
+        }
+        var speakTab = addTab("Speak / 說話");
+        var timbreTab = addTab("Timbre / 音色");
+        var animationTab = addTab("Animation / 動畫");
+        /*
+         * Four pages, not five, and the reason is measured.
+         *
+         * Audio lip-sync arrived in 2.3.0 as a fifth tab and the strip of
+         * titles went to 507 px against the 460 a dock can give — about 97 px
+         * per tab, most of it the tab's own padding rather than its words, so
+         * shortening the titles could not have reached it. The things on
+         * this page are the ways a whole performance arrives from outside the
+         * panel: a script file, a MIDI file, a recording, and from 2.4.0 a
+         * cloud model.
+         */
+        var scriptTab = addTab("Import / 匯入");
+        tabs.selection = speakTab;
+
+        speakTab.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
+        var textInput = speakTab.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });
         textInput.preferredSize = [390, 88];
-        var selectedButton = panel.add("button", undefined,
+        var selectedButton = speakTab.add("button", undefined,
             "Read selected layer / 讀取選取圖層");
         tip(selectedButton, "readLayer");
         selectedButton.onClick = function () {
@@ -3707,46 +4559,61 @@
             status.text = M("Read settings from {0} / 已讀取設定：{0}",
                 layer.name + (bound ? "  (" + rigCharacterName(bound) + ")" : ""));
         };
-        panel.add("statictext", undefined,
+        speakTab.add("statictext", undefined,
             "Pronunciation override (optional) / 讀音覆寫（可留空）");
-        var pronunciationInput = panel.add("edittext", undefined, "", { multiline: false });
+        var pronunciationInput = speakTab.add("edittext", undefined, "", { multiline: false });
         tip(pronunciationInput, "pronunciation");
-        var voice = panel.add("dropdownlist", undefined, [
+        /*
+         * Three dropdowns on one line rather than three lines of one.
+         *
+         * They were full-width and stacked, which cost 48 px of height to say
+         * nothing extra: none of the three has a label either way, and reading
+         * them left to right is no harder than reading them top to bottom. The
+         * row has to stay under the width limit in Japanese, which is what
+         * ae-language-verify.jsx is for — the answer if it ever stops fitting is
+         * to split it back, not to shorten a translation.
+         */
+        var characterRowTop = speakTab.add("group");
+        characterRowTop.orientation = "row";
+        var voice = characterRowTop.add("dropdownlist", undefined, [
             "Sunny / 明亮", "Tiny / 迷你", "Cozy / 溫厚", "Buzzy / 電子",
             "Chirpy / 活潑", "Whisper / 耳語", "Elder / 年長", "Droid / 機器"
         ]);
         voice.selection = 0;
-        var emotion = panel.add("dropdownlist", undefined, [
+        var emotion = characterRowTop.add("dropdownlist", undefined, [
             "Neutral / 中性", "Happy / 開心", "Angry / 生氣", "Scared / 害怕",
             "Question / 疑問", "Sleepy / 疲倦", "Robot / 機器人"
         ]);
         emotion.selection = 0;
-        var characterSize = panel.add("dropdownlist", undefined,
+        var characterSize = characterRowTop.add("dropdownlist", undefined,
             ["Tiny / 迷你", "Young / 少年", "Adult / 成熟", "Giant / 巨大"]);
         characterSize.selection = 2;
         // Ranges match the effect parameters in plugin/IslandChatterNative.cpp.
-        var pitch = addSlider(panel, "Pitch / 音高", 0.10, 4.00, 1.00);
-        var speed = addSlider(panel, "Speed / 速度", 0.10, 10.00, 1.00);
-        var volume = addSlider(panel, "Volume / 音量", 0.00, 2.00, 0.78);
-        var consonant = addSlider(panel, "Consonant / 聲母", 0.00, 6.00, 1.25);
-        var clarity = addSlider(panel, "Clarity / 清晰度", 0.00, 1.00, 0.78);
-        var cuteness = addSlider(panel, "Cuteness / 可愛度", 0.00, 1.00, 0.55);
-        // Timbre. Every default reproduces 1.0.x, so nothing here changes an
-        // existing layer until it is moved.
-        var formant = addSlider(panel, "Formant / 共鳴", 0.25, 4.00, 1.00);
+        var pitch = addSlider(speakTab, "Pitch / 音高", 0.10, 4.00, 1.00);
+        var speed = addSlider(speakTab, "Speed / 速度", 0.10, 10.00, 1.00);
+        var volume = addSlider(speakTab, "Volume / 音量", 0.00, 2.00, 0.78);
+        var consonant = addSlider(speakTab, "Consonant / 聲母", 0.00, 6.00, 1.25);
+        var clarity = addSlider(speakTab, "Clarity / 清晰度", 0.00, 1.00, 0.78);
+        var cuteness = addSlider(speakTab, "Cuteness / 可愛度", 0.00, 1.00, 0.55);
+        // Timbre, on its own page: these are set once for a character, not once
+        // per line, and Speak is the page that decides how tall the panel is.
+        // Every default reproduces 1.0.x, so nothing here changes an existing
+        // layer until it is moved.
+        var formant = addSlider(timbreTab, "Formant / 共鳴", 0.25, 4.00, 1.00);
         tip(formant, "formant");
-        var source = panel.add("dropdownlist", undefined, [
+        var source = timbreTab.add("dropdownlist", undefined, [
             "Voice / 人聲", "Reed / 簧片", "Chip / 電子", "Metallic / 金屬",
             "Granular / 破碎", "Growl / 低吼"
         ]);
         source.selection = 0;
         tip(source, "source");
-        var vibrato = addSlider(panel, "Vibrato / 顫音", 0.00, 4.00, 1.00);
-        var vibratoRate = addSlider(panel, "Vibrato Rate / 顫音速率", 0.00, 30.00, 9.20);
-        var seed = addSlider(panel, "Seed / 種子", 0, 999999, 0);
+        var vibrato = addSlider(timbreTab, "Vibrato / 顫音", 0.00, 4.00, 1.00);
+        var vibratoRate = addSlider(timbreTab, "Vibrato Rate / 顫音速率", 0.00, 30.00, 9.20);
+        var seed = addSlider(timbreTab, "Seed / 種子", 0, 999999, 0);
 
-        // Tempo. Speed stays the underlying control; these just drive it.
-        var tempoRow = panel.add("group");
+        // Tempo. Speed stays the underlying control; these just drive it, which
+        // is why they stay on the same page as the Speed slider they write to.
+        var tempoRow = speakTab.add("group");
         tempoRow.orientation = "row";
         var tempoOn = tempoRow.add("checkbox", undefined, "Tempo / 節拍");
         tip(tempoOn, "tempo");
@@ -3761,7 +4628,7 @@
                 "3 per beat / 每拍 3 字", "4 per beat / 每拍 4 字"]);
         perBeat.selection = 1;
         var perBeatValues = [1, 2, 3, 4];
-        var tempoReadout = panel.add("statictext", undefined, "");
+        var tempoReadout = speakTab.add("statictext", undefined, "");
         tempoReadout.alignment = ["fill", "top"];
 
         // refreshTempo() writes the Speed slider itself. Guard against that write
@@ -3839,7 +4706,8 @@
         };
         refreshTempo();
 
-        var characterRow = panel.add("group");
+        // Saved characters sit with the timbre they mostly carry.
+        var characterRow = timbreTab.add("group");
         var preset = characterRow.add("dropdownlist", undefined,
             ["Custom / 自訂", "Mimi / 咪咪", "Captain / 隊長", "Grandma / 奶奶", "Robot / 機器人"]);
         preset.selection = 0;
@@ -3963,7 +4831,7 @@
             writeSavedPresets(savedPresets);
             savedPresets = refreshPresetList();
         };
-        var workflowRow = panel.add("group");
+        var workflowRow = animationTab.add("group");
         var markers = workflowRow.add("checkbox", undefined, "Markers / 逐字標記");
         markers.value = true;
         var fitDuration = workflowRow.add("checkbox", undefined, "Fit Duration / 配合長度");
@@ -3975,12 +4843,12 @@
          * Japanese against the 414 the text box asks for. Splitting costs one
          * line of height and takes the row out of the running entirely.
          */
-        var animationRow = panel.add("group");
+        var animationRow = animationTab.add("group");
         var controllers = animationRow.add("checkbox", undefined, "Rig / 動畫控制");
         controllers.value = true;
         var typeOn = animationRow.add("checkbox", undefined, "Type-On / 逐字顯示");
         typeOn.value = false;
-        var animationRowTwo = panel.add("group");
+        var animationRowTwo = animationTab.add("group");
         var chatterOn = animationRowTwo.add("checkbox", undefined, "Chatter / 逐字開合");
         tip(chatterOn, "chatter");
         var typeOnCenter = animationRowTwo.add("checkbox", undefined, "Center / 維持置中");
@@ -3992,7 +4860,7 @@
          * and stays the default, because switching an existing project's twenty
          * layers over on the next Apply is not a thing to do without being asked.
          */
-        var rigRow = panel.add("group");
+        var rigRow = animationTab.add("group");
         rigRow.orientation = "row";
         var rigScope = rigRow.add("group");
         rigScope.orientation = "row";
@@ -4003,7 +4871,7 @@
         tip(rigShared, "rigShared");
         // Which character, on its own row: the two radio buttons and the three
         // controls that act on a character came to 569 px in Japanese together.
-        var rigRowTwo = panel.add("group");
+        var rigRowTwo = animationTab.add("group");
         rigRowTwo.orientation = "row";
         // Character names are the user's own words, so they are never put
         // through the interface translator.
@@ -4013,7 +4881,7 @@
         var rebuildButton = rigRowTwo.add("button", undefined, "Rebuild / 重建");
         tip(rebuildButton, "rebuild");
 
-        var mouthRow = panel.add("group");
+        var mouthRow = animationTab.add("group");
         mouthRow.orientation = "row";
         var mouthButton = mouthRow.add("button", undefined, "Mouth switch / 建立嘴型切換");
         tip(mouthButton, "mouth");
@@ -4021,13 +4889,13 @@
         // One influence shapes both the reveal and the recentring glide; the
         // arriving side is always full, so motion settles rather than stopping
         // dead. Low leaves at full speed, which is the fast-to-slow default.
-        var easeLeave = addSlider(panel, "Leave / 離開", MIN_INFLUENCE, MAX_INFLUENCE,
+        var easeLeave = addSlider(animationTab, "Leave / 離開", MIN_INFLUENCE, MAX_INFLUENCE,
             DEFAULT_LEAVE_INFLUENCE);
         tip(easeLeave, "leave");
-        var smoothness = addSlider(panel, "Smoothness / 平滑", 0, 100, DEFAULT_SMOOTHNESS);
+        var smoothness = addSlider(animationTab, "Smoothness / 平滑", 0, 100, DEFAULT_SMOOTHNESS);
         tip(smoothness, "smoothness");
 
-        var importRow = panel.add("group");
+        var importRow = scriptTab.add("group");
         importRow.orientation = "row";
         var importButton = importRow.add("button", undefined, "Import script / 匯入劇本");
         tip(importButton, "import");
@@ -4038,7 +4906,7 @@
         var gapReadout = importRow.add("statictext", undefined, "");
         gapReadout.preferredSize.width = 150;
         // The two options that change what an import does, on their own row.
-        var importRowTwo = panel.add("group");
+        var importRowTwo = scriptTab.add("group");
         importRowTwo.orientation = "row";
         var holdOn = importRowTwo.add("checkbox", undefined, "Hold / 接到下一句");
         tip(holdOn, "hold");
@@ -4055,7 +4923,7 @@
          * row that was already 350 px too wide. No amount of shorter wording
          * reaches 414 from 762, so the row is split instead.
          */
-        var singRow = panel.add("group");
+        var singRow = scriptTab.add("group");
         singRow.orientation = "row";
         var midiButton = singRow.add("button", undefined, "Choose MIDI / 選 MIDI");
         tip(midiButton, "chooseMidi");
@@ -4063,7 +4931,7 @@
         trackList.preferredSize.width = 150;
         tip(trackList, "track");
 
-        var singRowTwo = panel.add("group");
+        var singRowTwo = scriptTab.add("group");
         singRowTwo.orientation = "row";
         singRowTwo.add("statictext", undefined, "Transpose / 移調");
         var transposeField = singRowTwo.add("edittext", undefined, "0");
@@ -4080,7 +4948,7 @@
         toneBlendField.characters = 4;
         tip(toneBlendField, "toneBlend");
 
-        var singRowThree = panel.add("group");
+        var singRowThree = scriptTab.add("group");
         singRowThree.orientation = "row";
         var singButton = singRowThree.add("button", undefined, "Sing / 唱出來");
         tip(singButton, "sing");
@@ -4093,6 +4961,75 @@
         // reason — with the readout's own text, not another readout's.
         var songReadout = singRowThree.add("statictext", undefined, "");
         songReadout.preferredSize.width = 190;
+
+        /*
+         * A recording driving the same face.
+         *
+         * There is no voice to set here and no text to type: the sound already
+         * exists, and all the panel is being asked for is where the syllables
+         * are in it. Which character it belongs to is the character menu on the
+         * Animation page, the same one everything else binds to — a second copy
+         * of it here would be a second thing to keep in step.
+         */
+        var lipSyncButton = scriptTab.add("button", undefined,
+            "Lip-sync from audio / 音檔轉口型");
+        tip(lipSyncButton, "lipSync");
+        var audioRow = scriptTab.add("group");
+        audioRow.orientation = "row";
+        var vowelsOn = audioRow.add("checkbox", undefined, "Vowels / 判斷母音");
+        vowelsOn.value = true;
+        tip(vowelsOn, "vowels");
+        var audioReadout = audioRow.add("statictext", undefined, "");
+        audioReadout.preferredSize.width = 150;
+        var sensitivity = addSlider(scriptTab, "Sensitivity / 靈敏度", 0, 100, 50);
+        tip(sensitivity, "sensitivity");
+
+        /*
+         * A voice from a cloud model, on the page where performances arrive
+         * from outside.
+         *
+         * It belongs here rather than on Speak, and rather than on a fifth tab.
+         * The tab strip is already the widest thing in the panel at 447 px
+         * against a 460 limit — 2.3.0 measured a fifth tab at 507 px, about
+         * 97 px of which is the tab's own padding, so no amount of shortening a
+         * title would have fitted it. And it belongs *with* these three: a
+         * script, a MIDI file, a recording and a cloud voice are the four ways
+         * a performance gets into a project without being typed into Speak.
+         *
+         * Three rows because two would not fit under 460 px in Japanese, and
+         * because the region only means anything to one provider.
+         */
+        var cloudRow = scriptTab.add("group");
+        cloudRow.orientation = "row";
+        var cloudButton = cloudRow.add("button", undefined, "Cloud voice / 雲端語音");
+        tip(cloudButton, "cloudVoice");
+        var providerList = cloudRow.add("dropdownlist", undefined, []);
+        providerList.preferredSize.width = 110;
+        tip(providerList, "provider");
+        var keyButton = cloudRow.add("button", undefined, "API key / 金鑰");
+        tip(keyButton, "cloudKey");
+
+        var cloudRowTwo = scriptTab.add("group");
+        cloudRowTwo.orientation = "row";
+        cloudRowTwo.add("statictext", undefined, "Voice ID / 音色代號");
+        var cloudVoiceField = cloudRowTwo.add("edittext", undefined, "");
+        cloudVoiceField.characters = 13;
+        tip(cloudVoiceField, "cloudVoiceId");
+        cloudRowTwo.add("statictext", undefined, "Model / 模型");
+        var cloudModelField = cloudRowTwo.add("edittext", undefined, "");
+        cloudModelField.characters = 13;
+        tip(cloudModelField, "cloudModel");
+
+        var cloudRowThree = scriptTab.add("group");
+        cloudRowThree.orientation = "row";
+        cloudRowThree.add("statictext", undefined, "Region / 區域");
+        var cloudRegionField = cloudRowThree.add("edittext", undefined, "");
+        cloudRegionField.characters = 9;
+        tip(cloudRegionField, "cloudRegion");
+        // Empty until something has been fetched, and an empty statictext
+        // collapses: the width on the next line does nothing until it has text.
+        var cloudReadout = cloudRowThree.add("statictext", undefined, "");
+        cloudReadout.preferredSize.width = 170;
 
         var applyButton = panel.add("button", undefined,
             "Apply to selected text layers / 套用到選取文字圖層");
@@ -4123,6 +5060,13 @@
         // not be mistaken for the user picking a character, or every Apply would
         // quietly overwrite the settings they were in the middle of adjusting.
         var loadingCharacters = false;
+
+        // The cloud provider table and which row was last chosen. Both live up
+        // here because restoreState() reads the remembered index long before
+        // the table itself is fetched, which does not happen until the first
+        // time somebody presses something that needs it.
+        var cloudTable = [];
+        var rememberedProvider = 0;
 
         function refreshCharacters(preferred) {
             var comp = activeComp();
@@ -4261,8 +5205,19 @@
         var PANEL_STATE_SETTING = "panelState";
         var restoringState = false;
 
+        // A Tab is not a ListItem and carries no index of its own, so which one
+        // is showing is found rather than asked for.
+        function activeTabIndex() {
+            var index;
+            for (index = 0; index < tabs.children.length; index += 1) {
+                if (tabs.children[index] === tabs.selection) { return index; }
+            }
+            return 0;
+        }
+
         function panelState() {
             return {
+                tab: activeTabIndex(),
                 voice: voice.selection ? voice.selection.index : 0,
                 emotion: emotion.selection ? emotion.selection.index : 0,
                 characterSize: characterSize.selection ? characterSize.selection.index : 2,
@@ -4283,6 +5238,8 @@
                 chatter: chatterOn.value ? 1 : 0,
                 easeLeave: easeLeave.value,
                 smoothness: smoothness.value,
+                sensitivity: sensitivity.value,
+                vowels: vowelsOn.value ? 1 : 0,
                 gapBeats: currentGapBeats(),
                 speakers: speakersOn.value ? 1 : 0,
                 hold: holdOn.value ? 1 : 0,
@@ -4292,7 +5249,12 @@
                 // resolves is worse than an empty field.
                 transpose: currentTranspose(),
                 toneBlend: Math.round(currentToneBlend() * 100),
-                solfegeKey: currentSolfegeKey()
+                solfegeKey: currentSolfegeKey(),
+                // The provider menu is filled lazily, so for most of a session
+                // it is empty and its selection is null. Writing 0 in that case
+                // would quietly reset a remembered choice on the next time any
+                // other control moved.
+                provider: providerList.selection ? providerList.selection.index : rememberedProvider
             };
         }
 
@@ -4331,6 +5293,10 @@
                 if (!isNaN(parsed)) { state[chunks[index].substring(0, split)] = parsed; }
             }
             restoringState = true;
+            // A state written before 2.2.0 has no tab in it and opens on Speak,
+            // which is where the panel has always started.
+            tabs.selection = tabs.children[
+                clamp(Math.round(storedNumber(state, "tab", 0)), 0, tabs.children.length - 1)];
             voice.selection = clamp(Math.round(storedNumber(state, "voice", 0)), 0, voice.items.length - 1);
             emotion.selection = clamp(Math.round(storedNumber(state, "emotion", 0)), 0, emotion.items.length - 1);
             characterSize.selection = clamp(Math.round(storedNumber(state, "characterSize", 2)), 0, characterSize.items.length - 1);
@@ -4361,12 +5327,17 @@
             setSliderValue(easeLeave, clamp(storedNumber(state, "easeLeave", DEFAULT_LEAVE_INFLUENCE),
                 MIN_INFLUENCE, MAX_INFLUENCE));
             setSliderValue(smoothness, clamp(storedNumber(state, "smoothness", DEFAULT_SMOOTHNESS), 0, 100));
+            setSliderValue(sensitivity, clamp(storedNumber(state, "sensitivity", 50), 0, 100));
+            vowelsOn.value = storedNumber(state, "vowels", 1) !== 0;
             gapField.text = String(Math.max(0, storedNumber(state, "gapBeats", 1)));
             speakersOn.value = storedNumber(state, "speakers", 0) !== 0;
             holdOn.value = storedNumber(state, "hold", 0) !== 0;
             transposeField.text = String(clamp(Math.round(storedNumber(state, "transpose", 0)), -48, 48));
             toneBlendField.text = String(clamp(Math.round(storedNumber(state, "toneBlend", 15)), 0, 100));
             solfegeKey.selection = clamp(Math.round(storedNumber(state, "solfegeKey", 0)), 0, solfegeKey.items.length - 1);
+            // Kept as a number rather than applied: the menu has no items until
+            // the tool has been asked, which is the first time it is needed.
+            rememberedProvider = Math.max(0, Math.round(storedNumber(state, "provider", 0)));
             // Speed last, and behind the guard, so restoring it is not mistaken
             // for the user dragging it out of tempo mode.
             writingSpeed = true;
@@ -4929,13 +5900,269 @@
             }
         };
 
+        lipSyncButton.onClick = function () {
+            var comp = activeComp();
+            if (!comp) {
+                alert(M("Open an active composition first. / 請先開啟合成。"));
+                return;
+            }
+            var chosen = [];
+            var index;
+            for (index = 0; index < comp.selectedLayers.length; index += 1) {
+                var picked = comp.selectedLayers[index];
+                if (audioSourceFile(picked) && layerHasAudio(picked)) { chosen.push(picked); }
+            }
+            if (!chosen.length) {
+                alert(M("Select an audio layer. / 請選取音訊圖層。"));
+                return;
+            }
+            // A recording always joins a shared character, because the whole
+            // point of it is a face that several lines take turns driving.
+            var name = chosenCharacter();
+            if (!name) {
+                alert(M("Add a character on the Animation page first. / 請先在「動畫」頁新增角色。"));
+                return;
+            }
+            var how = {
+                sensitivity: clamp(sensitivity.value, 0, 100) / 100,
+                vowels: vowelsOn.value
+            };
+            app.beginUndoGroup(SCRIPT_NAME + " - Lip-sync from audio");
+            try {
+                var rigLayer = ensureRigLayer(comp, name);
+                var syllables = 0;
+                for (index = 0; index < chosen.length; index += 1) {
+                    var plan = lipSyncLayer(comp, chosen[index], how, rigLayer);
+                    syllables += plan.events.length;
+                    if (markers.value) { updateTimingMarkers(chosen[index], plan); }
+                }
+                var merged = rebuildSharedRig(comp, rigLayer, null);
+                rigShared.value = true;
+                rigPerLayer.value = false;
+                refreshCharacters(name);
+                audioReadout.text = M("{0} syllable(s) found / 找到 {0} 個音節", syllables);
+                status.text = merged.overlaps.length
+                    ? M("Lip-synced {0} layer(s); {1} overlap / 已對嘴 {0} 層；有 {1} 句重疊",
+                        chosen.length, merged.overlaps.length)
+                    : M("Lip-synced {0} layer(s) onto {1} / 已對嘴 {0} 層到「{1}」",
+                        chosen.length, name);
+            } catch (error) {
+                alert(String(error.message || error));
+            } finally {
+                app.endUndoGroup();
+            }
+        };
+
+        /*
+         * The provider menu, filled from the tool rather than written here.
+         *
+         * A second copy of the table in the panel would drift the first time a
+         * default model changed at a vendor, and it would drift silently — the
+         * menu would still work and still say the right names. It is fetched
+         * lazily and inside a try, because the panel has to build even where
+         * the tool is not installed: the host suites load this file straight out
+         * of the repository.
+         */
+        function cloudSettingName(providerId, field) {
+            return "cloud" + field + "_" + providerId;
+        }
+
+        // Per provider, because a voice id belongs to an account rather than to
+        // the panel: switching to ElevenLabs and back should not lose the
+        // OpenAI voice that was set an hour ago.
+        function storedProviderField(providerId, field, fallback) {
+            var name = cloudSettingName(providerId, field);
+            if (!app.settings.haveSetting(SCRIPT_NAME, name)) { return fallback; }
+            var value = trim(String(app.settings.getSetting(SCRIPT_NAME, name)));
+            return value ? value : fallback;
+        }
+
+        function chosenProvider() {
+            if (!providerList.selection) { return null; }
+            var at = providerList.selection.index;
+            return at >= 0 && at < cloudTable.length ? cloudTable[at] : null;
+        }
+
+        function showProviderFields() {
+            var picked = chosenProvider();
+            if (!picked) { return; }
+            cloudVoiceField.text = storedProviderField(picked.id, "Voice", picked.voice);
+            cloudModelField.text = storedProviderField(picked.id, "Model", picked.model);
+            cloudRegionField.text = storedProviderField(picked.id, "Region", "");
+            // Only one provider has a per-region endpoint. A field nobody needs
+            // is a field somebody fills in wrongly once.
+            cloudRegionField.enabled = picked.needsRegion;
+        }
+
+        function rememberProviderFields() {
+            var picked = chosenProvider();
+            if (!picked) { return; }
+            try {
+                app.settings.saveSetting(SCRIPT_NAME, cloudSettingName(picked.id, "Voice"),
+                    trim(String(cloudVoiceField.text)));
+                app.settings.saveSetting(SCRIPT_NAME, cloudSettingName(picked.id, "Model"),
+                    trim(String(cloudModelField.text)));
+                app.settings.saveSetting(SCRIPT_NAME, cloudSettingName(picked.id, "Region"),
+                    trim(String(cloudRegionField.text)));
+            } catch (error) { /* read-only preferences */ }
+        }
+
+        function refreshProviders(preferred) {
+            cloudTable = cloudProviders();
+            while (providerList.items.length > 0) {
+                providerList.remove(providerList.items[providerList.items.length - 1]);
+            }
+            var index;
+            for (index = 0; index < cloudTable.length; index += 1) {
+                // A vendor's name is a proper noun and never goes through the
+                // translation table.
+                providerList.add("item", cloudTable[index].label);
+            }
+            if (cloudTable.length) {
+                providerList.selection = clamp(
+                    Math.round(preferred === undefined ? 0 : preferred), 0, cloudTable.length - 1);
+            }
+            showProviderFields();
+            return cloudTable.length;
+        }
+
+        function requireProviders() {
+            if (!cloudTable.length) { refreshProviders(rememberedProvider); }
+            var picked = chosenProvider();
+            if (!picked) {
+                throw new Error(M("Choose a provider first. / 請先選一家供應商。"));
+            }
+            return picked;
+        }
+
+        providerList.onChange = function () { showProviderFields(); };
+
+        keyButton.onClick = function () {
+            try {
+                var picked = requireProviders();
+                var answer = askForCloudKey(picked.label, storedKey(picked.id));
+                if (!answer) { return; }
+                rememberKey(picked.id, answer.key);
+                cloudReadout.text = answer.key
+                    ? M("Key saved / 已存下金鑰")
+                    : M("Key cleared / 已清除金鑰");
+            } catch (error) {
+                alert(String(error.message || error));
+            }
+        };
+
+        cloudButton.onClick = function () {
+            var comp = activeComp();
+            if (!comp) {
+                alert(M("Open an active composition first. / 請先開啟合成。"));
+                return;
+            }
+            var layers = selectedTextLayers(comp);
+            if (!layers.length) {
+                alert(M("Select a text layer. / 請選取文字圖層。"));
+                return;
+            }
+            var picked;
+            try { picked = requireProviders(); }
+            catch (missing) { alert(String(missing.message || missing)); return; }
+            var key = storedKey(picked.id);
+            if (!key) {
+                alert(M("Set the API key for {0} first. / 請先設定 {0} 的 API 金鑰。", picked.label));
+                return;
+            }
+            if (picked.needsRegion && !trim(String(cloudRegionField.text))) {
+                alert(M("{0} needs the region its resource is in. / {0} 需要填寫資源所在的區域。",
+                    picked.label));
+                return;
+            }
+            /*
+             * Everything that will be sent is worked out before anything is.
+             *
+             * A batch that fails halfway through has already been paid for, so
+             * the refusals — an empty line, a line longer than any dialogue
+             * ever is — all happen up here where they cost nothing.
+             */
+            var ready = [];
+            var characters = 0;
+            var index;
+            for (index = 0; index < layers.length; index += 1) {
+                var line = trim(textFromLayer(layers[index]));
+                if (!line) { continue; }
+                if (line.length > MAX_CLOUD_CHARACTERS) {
+                    alert(M("{0} is longer than {1} characters. Split it first. / {0} 超過 {1} 個字，請先拆成幾句。",
+                        layers[index].name, MAX_CLOUD_CHARACTERS));
+                    return;
+                }
+                ready.push({ layer: layers[index], text: line });
+                characters += line.length;
+            }
+            if (!ready.length) {
+                alert(M("The selected layer(s) have no text in them. / 選取的圖層裡沒有文字。"));
+                return;
+            }
+            /*
+             * The two honest sentences, before the money is spent.
+             *
+             * Nothing here happens without this press. The text leaving the
+             * machine is said out loud because it is true and because nobody
+             * should find it out afterwards, and the count is said because a
+             * batch of twenty lines is a bill rather than a click.
+             */
+            if (!confirm(M(
+                    "Send {0} line(s), {1} characters, to {2}?\n\nThe text leaves this computer. Lines already fetched with the same settings are reused and cost nothing. / 要把 {0} 句、共 {1} 個字送到 {2} 嗎？\n\n文字會離開這台電腦。文字和設定都沒變的句子會直接沿用上次的檔案，不會再花錢。",
+                    ready.length, characters, picked.label + " · " + picked.host))) {
+                return;
+            }
+            app.beginUndoGroup(SCRIPT_NAME + " - Cloud voice");
+            try {
+                rememberProviderFields();
+                var options = currentOptions();
+                var how = {
+                    provider: picked.id,
+                    voice: trim(String(cloudVoiceField.text)),
+                    model: trim(String(cloudModelField.text)),
+                    region: trim(String(cloudRegionField.text)),
+                    key: key,
+                    sensitivity: clamp(sensitivity.value, 0, 100) / 100,
+                    vowels: vowelsOn.value
+                };
+                var reused = 0;
+                var touched = [];
+                var planned = [];
+                for (index = 0; index < ready.length; index += 1) {
+                    how.text = ready[index].text;
+                    var voiced = cloudVoiceLine(comp, ready[index].layer, how, options);
+                    if (voiced.cached) { reused += 1; }
+                    planned.push({ layer: ready[index].layer, plan: voiced.plan });
+                    var bound = rigTargetLayer(comp, ready[index].layer);
+                    if (bound) { touched.push(bound); }
+                }
+                // Once per rig at the end, not once per line: twenty lines on
+                // one face would otherwise rebuild it twenty times.
+                touched = uniqueLayers(touched);
+                for (index = 0; index < touched.length; index += 1) {
+                    rebuildSharedRig(comp, touched[index], planned);
+                }
+                cloudReadout.text = M("{0} new, {1} reused / 新增 {0}、沿用 {1}",
+                    ready.length - reused, reused);
+                status.text = M("Cloud voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音",
+                    ready.length, picked.label);
+            } catch (error) {
+                status.text = M("Error / 錯誤");
+                alert(String(error.message || error));
+            } finally {
+                app.endUndoGroup();
+            }
+        };
+
         // Every control that decides what Apply does. onChange fires when a
         // slider is released, not while it is dragged, so this is one write per
         // adjustment rather than one per pixel.
         var remembered = [voice, emotion, characterSize, source, perBeat, pitch, speed,
             volume, consonant, clarity, cuteness, formant, vibrato, vibratoRate, seed,
             markers, fitDuration, controllers, typeOn, typeOnCenter, rigPerLayer,
-            rigShared, easeLeave, smoothness, speakersOn, holdOn, chatterOn];
+            rigShared, easeLeave, smoothness, speakersOn, holdOn, chatterOn,
+            sensitivity, vowelsOn];
         var rememberAt;
         for (rememberAt = 0; rememberAt < remembered.length; rememberAt += 1) {
             alsoRemember(remembered[rememberAt], "onChange");
@@ -4950,11 +6177,28 @@
         }(chatterOn.onClick));
         alsoRemember(chatterOn, "onClick");
         alsoRemember(tempoOn, "onClick");
+        // Which page you were last on is worth keeping: without it every reopen
+        // lands on Speak and the timbre you were in the middle of is a click away.
+        alsoRemember(tabs, "onChange");
         alsoRemember(bpmField, "onChange");
         alsoRemember(gapField, "onChange");
         alsoRemember(transposeField, "onChange");
         alsoRemember(toneBlendField, "onChange");
         alsoRemember(solfegeKey, "onChange");
+        alsoRemember(providerList, "onChange");
+        // A voice id or a model name typed and not yet used is still worth
+        // keeping, and it belongs to the provider rather than to the panel, so
+        // it goes to its own setting rather than into the flat state string.
+        var cloudFields = [cloudVoiceField, cloudModelField, cloudRegionField];
+        var cloudFieldAt;
+        for (cloudFieldAt = 0; cloudFieldAt < cloudFields.length; cloudFieldAt += 1) {
+            cloudFields[cloudFieldAt].onChange = (function (existing) {
+                return function () {
+                    if (existing) { existing.call(this); }
+                    rememberProviderFields();
+                };
+            }(cloudFields[cloudFieldAt].onChange));
+        }
         // The gap is stated in beats, so its seconds move when either does.
         bpmField.onChange = (function (existing) {
             return function () { if (existing) { existing.call(this); } refreshGap(); };

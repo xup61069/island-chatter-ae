@@ -7,12 +7,13 @@ param(
 $ErrorActionPreference = "Stop"
 # Part of the release synchronisation list in CLAUDE.md; tests/validate-script.js
 # checks this against package.json.
-$IslandChatterVersion = "2.1.0"
+$IslandChatterVersion = "2.4.0"
 # After Effects releases this plug-in is built and verified against.
 $MinimumSupportedYear = 2025
 $requiredFiles = @(
     "IslandChatterNative.aex",
     "island_chatter_bake.exe",
+    "island_chatter_voice.exe",
     "IslandChatterNativePanel.jsx"
 )
 
@@ -98,6 +99,8 @@ foreach ($target in $targets) {
                 -Destination (Join-Path $pluginDirectory "IslandChatterNative.aex") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "island_chatter_bake.exe") `
                 -Destination (Join-Path $pluginDirectory "island_chatter_bake.exe") -Force
+            Copy-Item -LiteralPath (Join-Path $payloadRoot "island_chatter_voice.exe") `
+                -Destination (Join-Path $pluginDirectory "island_chatter_voice.exe") -Force
             Copy-Item -LiteralPath (Join-Path $payloadRoot "IslandChatterNativePanel.jsx") `
                 -Destination (Join-Path $panelDirectory "IslandChatterNativePanel.jsx") -Force
             # Shipped up to 1.0.10, when the panel stopped carrying its own copy

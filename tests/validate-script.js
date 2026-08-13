@@ -248,6 +248,62 @@ function stripLiterals(source) {
   return out;
 }
 
+/*
+ * The same walk, collecting the strings instead of blanking them, and saying
+ * where each one started.
+ *
+ * Written this way for the reason stripLiterals() is: a plain regex over the
+ * raw source pairs a quote inside a comment with a quote in code, and a scan
+ * run over three slices of the file spliced together goes out of step at every
+ * seam. Both were tried while writing the check below. The spliced version
+ * found twelve bilingual strings in a panel that has 168 and cheerfully
+ * reported that none of them were missing a translation.
+ */
+function stringLiterals(source) {
+  const found = [];
+  let index = 0;
+  let previous = "";
+  while (index < source.length) {
+    const here = source[index];
+    const next = source[index + 1];
+    if (here === "/" && next === "/") {
+      while (index < source.length && source[index] !== "\n") { index += 1; }
+    } else if (here === "/" && next === "*") {
+      const close = source.indexOf("*/", index + 2);
+      index = close < 0 ? source.length : close + 2;
+    } else if (here === '"' || here === "'") {
+      const opened = index;
+      index += 1;
+      let body = "";
+      while (index < source.length && source[index] !== here) {
+        if (source[index] === "\\") { body += source.slice(index, index + 2); index += 2; }
+        else { body += source[index]; index += 1; }
+      }
+      index += 1;
+      found.push({ at: opened, raw: body });
+      previous = "x";
+    } else if (here === "/" && /[(,=:[!&|?{};+\-*%~^<>]|^$/.test(previous)) {
+      index += 1;
+      let inClass = false;
+      while (index < source.length) {
+        const letter = source[index];
+        if (letter === "\\") { index += 2; continue; }
+        if (letter === "[") { inClass = true; }
+        else if (letter === "]") { inClass = false; }
+        else if (letter === "/" && !inClass) { break; }
+        else if (letter === "\n") { break; }
+        index += 1;
+      }
+      index += 1;
+      previous = "x";
+    } else {
+      if (!/\s/.test(here)) { previous = here; }
+      index += 1;
+    }
+  }
+  return found;
+}
+
 for (const filePath of extendScriptFiles) {
   const code = stripLiterals(fs.readFileSync(filePath, "utf8"));
   for (const word of es3ReservedWords) {
@@ -451,15 +507,18 @@ if ((dspSource.match(/kSyllableStride = ([\d.]+);/) || [])[1] !==
 // The panel's ScriptUI sliders must span the same range as the effect
 // parameters, and its Speed clamp must equal the engine's or the timings it
 // plans stop matching the audio at the ends of the range.
+// The parent is written as \w+ rather than `panel`: from 2.2.0 a slider is
+// added to whichever tab it lives on, and which page a slider sits on is a
+// layout decision that has nothing to do with the range being checked here.
 for (const [label, pluginPattern, panelPattern] of [
   ["Pitch", /PF_ADD_FLOAT_SLIDERX\("Pitch[^"]*", 0\.10, 4\.00,/,
-    /addSlider\(panel, "Pitch[^"]*", 0\.10, 4\.00,/],
+    /addSlider\(\w+, "Pitch[^"]*", 0\.10, 4\.00,/],
   ["Speed", /PF_ADD_FLOAT_SLIDERX\("Speed[^"]*", 0\.10, 10\.00,/,
-    /addSlider\(panel, "Speed[^"]*", 0\.10, 10\.00,/],
+    /addSlider\(\w+, "Speed[^"]*", 0\.10, 10\.00,/],
   ["Volume", /PF_ADD_FLOAT_SLIDERX\("Volume[^"]*", 0\.0, 200\.0,/,
-    /addSlider\(panel, "Volume[^"]*", 0\.00, 2\.00,/],
+    /addSlider\(\w+, "Volume[^"]*", 0\.00, 2\.00,/],
   ["Consonant", /PF_ADD_FLOAT_SLIDERX\("Initial[^"]*", 0\.00, 6\.00,/,
-    /addSlider\(panel, "Consonant[^"]*", 0\.00, 6\.00,/],
+    /addSlider\(\w+, "Consonant[^"]*", 0\.00, 6\.00,/],
 ]) {
   if (!pluginPattern.test(nativePluginSource)) {
     throw new Error(`${label} parameter range changed in the plug-in without updating the panel`);
@@ -495,7 +554,7 @@ vm.runInContext([
   takeVariable("ENGINE_SAMPLE_RATE"),
   ...["clamp", "mouthForReading", "readingTone", "characterFromCode", "trim",
     "parseEnginePlan", "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo",
-    "utf8FromHex", "parseTrackList", "parseSong"].map(takeFunction),
+    "utf8FromHex", "parseTrackList", "parseSong", "parseVoiceReply"].map(takeFunction),
 ].join("\n"), planner);
 
 // --- Reading what the engine says about a MIDI file -------------------------
@@ -565,6 +624,64 @@ vm.runInContext([
   }
 }
 
+/*
+ * What the cloud voice tool says back.
+ *
+ * The same rules as the two parsers above and one more that matters far more:
+ * an error from the provider has to arrive intact. Invariant 8k is the record
+ * of what it costs to replace a real error with a generic one, and a wrong key,
+ * a rate limit and an exhausted quota are three different things to do next.
+ */
+{
+  const listed = vm.runInContext(`parseVoiceReply(${JSON.stringify(
+    "VOICE 1\n" +
+    "P openai 4f70656e4149 api.openai.com 7474732d31 616c6c6f79 0\n" +
+    "P azure 417a757265 $REGION.tts.speech.microsoft.com 2d 78 1\n" +
+    "END 2\n")})`, planner);
+  if (listed.providers.length !== 2) {
+    throw new Error("parseVoiceReply() did not read the provider list");
+  }
+  if (listed.providers[0].label !== "OpenAI" || listed.providers[0].voice !== "alloy") {
+    throw new Error("parseVoiceReply() did not decode a provider's name and default voice");
+  }
+  // "2d" is a hex hyphen, the tool's way of saying a provider has no model to
+  // choose. Reading it as the literal text "-" would put a hyphen in the field.
+  if (listed.providers[1].model !== "" || listed.providers[1].needsRegion !== true) {
+    throw new Error("parseVoiceReply() misread the provider that has no model but needs a region");
+  }
+
+  const spoken = vm.runInContext(`parseVoiceReply(${JSON.stringify(
+    "VOICE 1\nOK 432e776176 96044 1\n")})`, planner);
+  if (spoken.path !== "C.wav" || spoken.bytes !== 96044 || spoken.cached !== true) {
+    throw new Error("parseVoiceReply() did not read a finished fetch");
+  }
+
+  /*
+   * The provider's own words, not a sentence of ours wrapped round them. This
+   * is the test that would have to fail before anyone could fold four
+   * different failures into one message again.
+   */
+  let said = "";
+  try {
+    vm.runInContext(`parseVoiceReply(${JSON.stringify(
+      "VOICE 1\nERROR " +
+      Buffer.from("HTTP 429: quota used up\n請求太多了", "utf8").toString("hex") + "\n")})`,
+    planner);
+  } catch (error) { said = String(error.message); }
+  if (!said.includes("429") || !said.includes("quota used up") || !said.includes("請求太多了")) {
+    throw new Error(
+      `parseVoiceReply() must pass the provider's message through intact, got: ${said}`);
+  }
+
+  // callSystem() reports no exit status, so a tool that never ran returns an
+  // empty string. Reading that as "no providers" would show an empty menu with
+  // nothing to say why.
+  let refusedVoice = false;
+  try { vm.runInContext(`parseVoiceReply("")`, planner); }
+  catch (error) { refusedVoice = true; }
+  if (!refusedVoice) throw new Error("parseVoiceReply() accepted a reply that never came");
+}
+
 // Tempo mode across every emotion and character size. The original version only
 // divided the tempo by the syllable slot and ignored the multiplier the engine
 // applies on top, so the beat drifted with the character: Sleepy ran 28% slow.
@@ -613,6 +730,51 @@ for (const bpm of [60, 90, 120, 174]) {
     if (key.indexOf(" / ") <= 0) {
       throw new Error(`Interface key "${key}" is not in the "English / 中文" form T() expects`);
     }
+  }
+  /*
+   * And now the other way round, which is the direction that was missing.
+   *
+   * The loop above walks the table and asks whether the panel still says each
+   * entry, so it catches a renamed label stranding its translation. It cannot
+   * catch a label that never had one, because a key that was never written is
+   * not in the table to be looped over — the same one-way check that let every
+   * status message stay Chinese until 2.0.0, and that let four tab titles be
+   * added in 2.2.0 with the guard reporting success either way.
+   *
+   * Every "English / 中文" literal outside the two translation tables is
+   * something T() will be asked to translate, so every one of them needs an
+   * entry. IC_HELP is excluded because a tooltip is three separate bodies
+   * rather than a bilingual pair and has its own check further down.
+   */
+  const helpFrom = nativePanelSource.indexOf("var IC_HELP = {}");
+  const helpTo = nativePanelSource.indexOf("function T(literal)");
+  if (helpFrom < 0 || helpTo < helpFrom) {
+    throw new Error("Cannot find the tooltip table; the interface checks would skip it");
+  }
+  const tableFrom = nativePanelSource.indexOf("var IC_JAPANESE_UI = {");
+  const tableTo = nativePanelSource.indexOf("\n    };", tableFrom) + 7;
+  // Compared as written rather than as decoded, because `keys` holds the raw
+  // source text of each key: a message carrying \n\n would otherwise never
+  // match its own entry, and every multi-line alert would read as untranslated.
+  const sayable = new Set();
+  const untranslated = new Set();
+  for (const { at, raw } of stringLiterals(nativePanelSource)) {
+    if (raw.indexOf(" / ") <= 0) continue;
+    if (at >= tableFrom && at < tableTo) continue;
+    if (at >= helpFrom && at < helpTo) continue;
+    sayable.add(raw);
+    if (!keys.includes(raw)) untranslated.add(raw);
+  }
+  // A bound on the scan, not on the panel. A walk that stopped finding strings
+  // would report nothing untranslated, which is exactly what passing looks like.
+  if (sayable.size < 150) {
+    throw new Error(
+      `Only ${sayable.size} bilingual strings found outside the tables; the scan is broken`);
+  }
+  if (untranslated.size) {
+    throw new Error(
+      "These \"English / 中文\" strings have no entry in IC_JAPANESE_UI, so a Japanese " +
+      `panel would show them in English:\n  ${[...untranslated].join("\n  ")}`);
   }
   const localiser = { String };
   vm.createContext(localiser);
@@ -717,7 +879,11 @@ for (const bpm of [60, 90, 120, 174]) {
     "明映是更最有期未本束板果架柔根格框案模次歌正此步段母每比永沿法注活消淡清源" +
     "滑照熟片物猜率理生用由界留疑疲白百的目直看真知短破碎碰示秒移程空立符第算管" +
     "簧置而耳腔自至般色若落表被覆角言超越距跟跨身近迷透逐速道那部都配重量金除隔" +
-    "需面音首高黑默嘴要器晰起行走西"));
+    "需面音首高黑默嘴要器晰起行走西" +
+    // Added with the audio lip-sync page.
+    "伸敏然引擎晃收忘告另外剪拒峰乎伏底境噪繁漏通易品答" +
+    // Added with the cloud voice.
+    "端域家供商送花能等路析敲工具版解各服偏事暗命令支住便宜且址站如"));
 
   const unclassified = new Set();
   const mapped = vm.runInContext("IC_SIMPLIFIED_CHARS", panelSimplifier);
@@ -1745,11 +1911,13 @@ const stepFor = (gapBeats, bpm) =>
   if (!/catch/.test(mouth)) {
     throw new Error("The mouth expression must survive a missing rig rather than error");
   }
-  // Remove has to take the pointer with it, or the line stays a member of a rig
-  // it no longer speaks for.
-  if (!/RIG_TRACK_NAMES\.concat\(\[RIG_TARGET_NAME, BAKE_POINTER_NAME\]\)/
+  // Remove has to take the pointers with it, or the line stays a member of a rig
+  // it no longer speaks for — and, since 2.4.0, keeps claiming its plan comes
+  // from a recording that has just been deleted.
+  if (!/RIG_TRACK_NAMES\.concat\(\s*\[RIG_TARGET_NAME, BAKE_POINTER_NAME, CLOUD_VOICE_NAME\]\)/
     .test(takeFunction("removeFromLayer"))) {
-    throw new Error("removeFromLayer() must strip the shared-rig and bake pointers as well");
+    throw new Error(
+      "removeFromLayer() must strip the shared-rig, bake and cloud-voice pointers as well");
   }
   // Removing effects invalidates every Property handle taken before it, so the
   // native effect must not be touched again after the rig block.
@@ -1818,29 +1986,42 @@ const stepFor = (gapBeats, bpm) =>
       /currentSettings\(/.test(resync)) {
     throw new Error("resyncLayer() takes a voice setting from the panel; it must use the layer's own");
   }
+  /*
+   * Refitting a line to a plan lives in retimeToPlan(), which 2.4.0 pulled out
+   * of resyncLayer() so the cloud voice could reuse it rather than grow a
+   * second copy that drifted. These guards followed it there, and one new guard
+   * holds the two together: extracting the mechanism a second time, or letting
+   * resyncLayer() grow its own refit again, has to fail here.
+   */
+  for (const caller of ["resyncLayer", "cloudVoiceLine"]) {
+    if (!/retimeToPlan\(comp, layer, plan, options\)/.test(takeFunction(caller))) {
+      throw new Error(`${caller}() must refit through retimeToPlan(), not with its own copy`);
+    }
+  }
+  const retime = takeFunction("retimeToPlan");
   // Only what the layer already has is rebuilt. Honouring the panel's
   // checkboxes here would add markers to a layer that deliberately has none.
   for (const [what, guard] of [
     ["markers", "hadMarkers"], ["its own rig", "hadOwnRig"], ["Type-On", "hadTypeOn"],
   ]) {
-    if (!new RegExp(`if \\(${guard}\\)`).test(resync)) {
-      throw new Error(`resyncLayer() must only rebuild ${what} when the layer already had it`);
+    if (!new RegExp(`if \\(${guard}\\)`).test(retime)) {
+      throw new Error(`retimeToPlan() must only rebuild ${what} when the layer already had it`);
     }
   }
-  if (/options\.markers|options\.controllers|options\.typeOn\b/.test(resync)) {
-    throw new Error("resyncLayer() must not take what to rebuild from the panel's checkboxes");
+  if (/options\.markers|options\.controllers|options\.typeOn\b/.test(retime + resync)) {
+    throw new Error("retimeToPlan() must not take what to rebuild from the panel's checkboxes");
   }
   // An edit that lengthens a line can push it past the end of the composition,
   // where After Effects clamps the out point and the line is squashed to
   // whatever room was left — which is the shape of every timing bug this
   // feature exists to remove.
-  if (/Math\.min\(comp\.duration/.test(resync)) {
-    throw new Error("resyncLayer() clamps the refitted line to the composition instead of growing it");
+  if (/Math\.min\(comp\.duration/.test(retime)) {
+    throw new Error("retimeToPlan() clamps the refitted line to the composition instead of growing it");
   }
-  const grewAt = resync.indexOf("comp.duration = layer.inPoint + plan.duration");
-  const fitAt = resync.indexOf("layer.outPoint =");
+  const grewAt = retime.indexOf("comp.duration = layer.inPoint + plan.duration");
+  const fitAt = retime.indexOf("layer.outPoint =");
   if (grewAt < 0 || fitAt < 0 || grewAt > fitAt) {
-    throw new Error("resyncLayer() must make room before it refits the line");
+    throw new Error("retimeToPlan() must make room before it refits the line");
   }
 
   /*
@@ -1983,6 +2164,7 @@ for (const [file, staged] of [
   ["LICENSE", "$stageRoot"],
   ["IslandChatterNative.aex", "$resources"],
   ["island_chatter_bake.exe", "$resources"],
+  ["island_chatter_voice.exe", "$resources"],
   ["IslandChatterNativePanel.jsx", "$resources"],
   ["Install-IslandChatter.ps1", "$resources"],
   ["Uninstall-IslandChatter.ps1", "$resources"],
@@ -2037,10 +2219,294 @@ for (const scriptName of ["installer/Install-IslandChatter.ps1",
 for (const releaseFile of [
   "IslandChatterNative.aex",
   "island_chatter_bake.exe",
+  "island_chatter_voice.exe",
   "IslandChatterNativePanel.jsx",
 ]) {
   if (!installerSource.includes(releaseFile)) {
     throw new Error(`Installer is missing release payload: ${releaseFile}`);
+  }
+}
+// Being in the copy list is not enough: the installer refuses to run at all
+// unless every required file is beside it, and a payload that is copied but not
+// required would install a build with half the tools and no complaint.
+{
+  const required = installerSource.match(/\$requiredFiles = @\(([\s\S]*?)\)/);
+  if (!required) throw new Error("Install-IslandChatter.ps1 has no $requiredFiles list");
+  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe"]) {
+    if (!required[1].includes(tool)) {
+      throw new Error(`Install-IslandChatter.ps1 does not require ${tool} to be present`);
+    }
+  }
+  const uninstallerSource = fs.readFileSync(
+    path.join(root, "installer", "Uninstall-IslandChatter.ps1"), "utf8");
+  if (!uninstallerSource.includes("island_chatter_voice.exe")) {
+    throw new Error("Uninstall-IslandChatter.ps1 leaves island_chatter_voice.exe behind");
+  }
+}
+
+/*
+ * The cloud voice, 2.4.0.
+ *
+ * Four things here can go wrong quietly, and each one costs somebody something
+ * real: a key on a command line, a request nobody asked for, a provider table
+ * that has drifted, and a storefront page that no longer describes what the
+ * product does with your text. All four are checked at the mechanism rather
+ * than at a symptom.
+ */
+{
+  // A plug-in with no voice tool beside it fails at the moment somebody presses
+  // the button, which is the worst place to find out. The packager refuses.
+  if (!/island_chatter_voice\.exe/.test(packager)) {
+    throw new Error("tools/package-release.ps1 does not package island_chatter_voice.exe");
+  }
+  if (!/throw "Build island_chatter_voice first/.test(packager)) {
+    throw new Error(
+      "tools/package-release.ps1 must refuse to package without island_chatter_voice.exe, " +
+      "the way it already refuses without the bake tool");
+  }
+  // Both tools have to come out of the same build directory as the .aex, or a
+  // release can ship a plug-in and a tool built from different sources — which
+  // is the mistake the "newest .aex" search above already exists to prevent.
+  if (!/\$buildRelease = Join-Path \(Split-Path[\s\S]*?\$resolvedAex/.test(packager)) {
+    throw new Error(
+      "tools/package-release.ps1 must derive the tools' directory from the plug-in it picked");
+  }
+  for (const tool of ["island_chatter_bake.exe", "island_chatter_voice.exe"]) {
+    if (!new RegExp(`Join-Path \\$buildRelease "${tool.replace(/\./g, "\\.")}"`).test(packager)) {
+      throw new Error(`tools/package-release.ps1 must take ${tool} from the plug-in's own build`);
+    }
+  }
+  if (!new RegExp('Join-Path \\$resources "island_chatter_voice\\.exe"').test(packager)) {
+    throw new Error("island_chatter_voice.exe is not staged into resources\\");
+  }
+
+  /*
+   * No provider table in the panel.
+   *
+   * A second copy of it would drift the first time a vendor changed a default,
+   * and it would drift silently: the menu would still work and still show the
+   * right names. So the panel is not allowed to know a host, an auth header or
+   * an endpoint — it asks the tool, which is the one place the table lives.
+   * This is invariant 8b applied to something other than the timing plan.
+   */
+  for (const secret of [
+    "api.openai.com", "api.elevenlabs.io", "tts.speech.microsoft.com",
+    "Bearer ", "xi-api-key", "Ocp-Apim-Subscription-Key", "/v1/audio/speech",
+  ]) {
+    if (nativePanelSource.includes(secret)) {
+      throw new Error(
+        `The panel contains "${secret}". The provider table lives in the tool; ` +
+        "the panel must ask for it with --providers rather than keep a second copy.");
+    }
+  }
+  if (!/--providers/.test(takeFunction("cloudProviders"))) {
+    throw new Error("cloudProviders() must fetch the table from the tool");
+  }
+
+  /*
+   * The key never reaches a command line.
+   *
+   * Task Manager shows a process's full command line to anyone who turns the
+   * column on. The tool refuses --key outright (native/tests/cloud_tests.cpp
+   * pins that end); this pins the panel's end, which is the one that would
+   * change if somebody simplified the temp-file dance away.
+   */
+  const speakToFile = takeFunction("speakToFile");
+  if (!/--key-file/.test(speakToFile)) {
+    throw new Error("speakToFile() must hand the key over as a file path");
+  }
+  if (/--key\s/.test(nativePanelSource) || /"\s*--key"/.test(nativePanelSource)) {
+    throw new Error("The panel puts the API key on a command line, where any process can read it");
+  }
+  if (/key/i.test(takeFunction("cloudArguments"))) {
+    throw new Error("cloudArguments() mentions the key; it builds the public half of the command");
+  }
+  // The panel deletes the temp file too. The tool deletes it as soon as it has
+  // read it, but a tool that never started leaves the file behind, and a
+  // credential on disk is not something to leave to one of two chances.
+  if (!/finally \{\s*if \(keyFile\.exists\) \{ keyFile\.remove\(\); \}/.test(speakToFile)) {
+    throw new Error("speakToFile() must remove the temporary key file even when the call fails");
+  }
+
+  /*
+   * Money is spent only on a press, and only after a confirmation that says how
+   * much and where it goes.
+   */
+  const handlerAt = nativePanelSource.indexOf("cloudButton.onClick = function ()");
+  if (handlerAt < 0) throw new Error("The panel has no cloud voice button");
+  const handler = nativePanelSource.slice(
+    handlerAt, nativePanelSource.indexOf("\n        };", handlerAt));
+  const confirmAt = handler.indexOf("confirm(");
+  const spendAt = handler.indexOf("cloudVoiceLine(");
+  if (confirmAt < 0 || spendAt < 0 || confirmAt > spendAt) {
+    throw new Error("The cloud voice must confirm before it sends anything to a provider");
+  }
+  // What the confirmation has to say: how many lines, how many characters, who
+  // is receiving them, and that they are leaving the machine.
+  for (const [fragment, why] of [
+    ["{1} characters", "the character count, which is what is billed"],
+    ["leaves this computer", "that the text goes somewhere else"],
+    ["文字會離開這台電腦", "the same, in Chinese"],
+  ]) {
+    if (!handler.includes(fragment)) {
+      throw new Error(`The cloud voice confirmation does not state ${why}`);
+    }
+  }
+  // Nothing else may reach a provider. Apply, Re-sync and a rig rebuild all run
+  // on ordinary keystrokes, and any of them calling this would turn editing a
+  // line into a purchase.
+  for (const quiet of ["applyToTextLayer", "resyncLayer", "rebuildSharedRig",
+    "reflowLayers", "importScript"]) {
+    const body = takeFunction(quiet);
+    if (/speakToFile\(|cloudVoiceLine\(|cloudVoiceToLayer\(/.test(body)) {
+      throw new Error(
+        `${quiet}() can reach a paid provider. Only the cloud voice button may spend money.`);
+    }
+  }
+
+  /*
+   * Which plan a line follows, and the rule that keeps the mouth honest.
+   *
+   * A cloud-voiced line's plan comes out of the recording, because the engine's
+   * plan describes audio nobody is going to hear. The moment the recording goes
+   * stale it is muted and the built-in voice comes back — so the plan has to go
+   * back to the engine at exactly the same moment, or the mouth moves to timings
+   * that are no longer audible. One check on audioEnabled is what ties the two
+   * together.
+   */
+  const planFor = takeFunction("planForLayer");
+  if (!/planFromAudio\(/.test(planFor) || !/planFromEngine\(effect\)/.test(planFor)) {
+    throw new Error("planForLayer() must choose between the recording and the engine");
+  }
+  if (!/audioEnabled/.test(takeFunction("cloudVoiceLayer"))) {
+    throw new Error(
+      "cloudVoiceLayer() must ignore a muted recording, or a stale cloud voice keeps " +
+      "driving the mouth after the built-in voice has come back");
+  }
+  if (!/planForLayer\(comp, members\[index\], effect\)/.test(takeFunction("rebuildSharedRig"))) {
+    throw new Error("rebuildSharedRig() must go through planForLayer(), not straight to the engine");
+  }
+
+  /*
+   * A layer that has been removed is not a layer any more.
+   *
+   * releasePreviousBake() removes the previous recording and then keeps walking
+   * the composition. Written as `previous.index` inside that loop it throws
+   * "Object is invalid" on every iteration after the removal — which means the
+   * second bake of any layer, and every regenerated cloud voice, because both
+   * go through here with a previous recording in hand. It survived from 1.6.0
+   * because a *first* bake has nothing to release and so never dereferences it.
+   * The index is read once, before anything is removed.
+   */
+  const release = takeFunction("releasePreviousBake");
+  const loopAt = release.indexOf("for (index = comp.numLayers");
+  if (loopAt < 0) throw new Error("releasePreviousBake() no longer walks the composition");
+  if (/\bprevious\./.test(release.slice(loopAt))) {
+    throw new Error(
+      "releasePreviousBake() asks the removed layer for something inside its own removal " +
+      "loop; read what it needs before the loop instead");
+  }
+}
+
+/*
+ * The storefront page has to describe what the product now does.
+ *
+ * Up to 2.3.0 it said, correctly, that nothing is exported and the sound is
+ * computed inside After Effects. Half of that is still true and half of it is
+ * not, and a page that keeps the old sentence is telling somebody their text
+ * stays on their machine when it does not.
+ */
+{
+  const listing = fs.readFileSync(path.join(root, "docs", "gumroad-listing.md"), "utf8");
+  for (const stale of ["不輸出音檔", "No audio files to export", "音声ファイルの書き出しも"]) {
+    if (listing.includes(stale)) {
+      throw new Error(
+        `docs/gumroad-listing.md still claims "${stale}", which stopped being the whole ` +
+        "truth when the cloud voice shipped");
+    }
+  }
+  for (const [language, mention] of [
+    ["繁體中文", "離開這台電腦"],
+    ["English", "leaves your computer"],
+    ["日本語", "パソコンの外"],
+  ]) {
+    if (!listing.includes(mention)) {
+      throw new Error(
+        `docs/gumroad-listing.md does not tell ${language} readers that the text leaves ` +
+        "their machine when they use a cloud voice");
+    }
+  }
+  // The listing was left at 2.1.0 through two releases, which nothing noticed
+  // because nothing was looking.
+  if (!new RegExp(`^Version ${version.replace(/\./g, "\\.")}\\s*$`, "m").test(listing)) {
+    throw new Error(
+      `docs/gumroad-listing.md does not end with "Version ${version}"; the page on Gumroad ` +
+      "is what buyers read before they buy");
+  }
+}
+
+/*
+ * The transport's two security properties, checked in the source because
+ * neither can be exercised without a provider and a paid account.
+ *
+ * A redirect re-sends the request headers to the new host, which here means the
+ * API key; and a read loop with no bound is read until the machine runs out of
+ * memory. Both are one line to write and one line to delete, so both are pinned.
+ */
+{
+  const transport = fs.readFileSync(
+    path.join(root, "native", "tools", "voice_cli.cpp"), "utf8");
+  if (!/WINHTTP_DISABLE_REDIRECTS/.test(transport)) {
+    throw new Error(
+      "island_chatter_voice does not disable redirects; WinHTTP would re-send the API key " +
+      "to whatever host a 3xx names");
+  }
+  if (!/if \(!WinHttpSetOption\(call\.value, WINHTTP_OPTION_DISABLE_FEATURE/.test(transport)) {
+    throw new Error(
+      "the redirect setting is applied without checking it took; a security option that " +
+      "silently failed is worse than one never set");
+  }
+  // In the call, not in the comment above it. Searching for the bare identifier
+  // passed happily with the flag replaced by 0, because the paragraph
+  // explaining why it is there still named it.
+  if (!/WinHttpOpenRequest\([\s\S]{0,300}?WINHTTP_FLAG_SECURE\)\)/.test(transport)) {
+    throw new Error(
+      "island_chatter_voice does not pass WINHTTP_FLAG_SECURE to WinHttpOpenRequest; " +
+      "the key would travel over plain HTTP");
+  }
+  /*
+   * The comparison itself, not just the constant's name.
+   *
+   * The first version of this only looked for `kMaxReplyBytes`, and the message
+   * inside the throw mentions it too — so turning the check into `if (false)`
+   * left the identifier in the file and the guard reported success. That is the
+   * same shape as the one-way translation check in invariant 8i: it was reading
+   * a consequence that survived the break.
+   */
+  if (!/response\.body\.size\(\) \+ available > cloud::kMaxReplyBytes/.test(transport)) {
+    throw new Error(
+      "the response read loop does not bound what it accumulates against kMaxReplyBytes; " +
+      "an endpoint that never stops sending would be read until memory runs out");
+  }
+}
+
+// The native side of the cloud voice has to be built and tested, and the socket
+// has to stay out of the library that links into the .aex.
+{
+  const nativeCMake = fs.readFileSync(path.join(root, "native", "CMakeLists.txt"), "utf8");
+  if (!/add_test\(NAME island_chatter_cloud_tests/.test(nativeCMake)) {
+    throw new Error("native/CMakeLists.txt does not register the cloud tests with ctest");
+  }
+  if (!/add_executable\(island_chatter_voice/.test(nativeCMake)) {
+    throw new Error("native/CMakeLists.txt does not build island_chatter_voice");
+  }
+  const dspLibrary = nativeCMake.slice(
+    nativeCMake.indexOf("add_library(island_chatter_dsp"),
+    nativeCMake.indexOf(")", nativeCMake.indexOf("add_library(island_chatter_dsp")));
+  if (/cloud\.cpp/.test(dspLibrary)) {
+    throw new Error(
+      "src/cloud.cpp is in island_chatter_dsp, which links into the .aex. Nothing that can " +
+      "open a socket belongs in the audio render path (invariant 8).");
   }
 }
 for (const smokeFragment of [

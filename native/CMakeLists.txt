@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(IslandChatterNative VERSION 2.1.0 LANGUAGES CXX)
+project(IslandChatterNative VERSION 2.4.0 LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
 
@@ -11,6 +11,7 @@ if(MSVC)
 endif()
 
 add_library(island_chatter_dsp STATIC
+    src/analysis.cpp
     src/dsp.cpp
     src/midi.cpp
     src/song.cpp
@@ -35,6 +36,29 @@ target_link_libraries(island_chatter_midi_tests PRIVATE island_chatter_dsp)
 add_executable(island_chatter_song_tests tests/song_tests.cpp)
 target_link_libraries(island_chatter_song_tests PRIVATE island_chatter_dsp)
 
+add_executable(island_chatter_analysis_tests tests/analysis_tests.cpp)
+target_link_libraries(island_chatter_analysis_tests PRIVATE island_chatter_dsp)
+
+# The cloud voice, kept out of island_chatter_dsp on purpose: that library is
+# what links into the .aex, and nothing that can open a socket belongs in the
+# audio render path. Only island_chatter_voice and its tests see this.
+add_library(island_chatter_cloud STATIC src/cloud.cpp)
+target_include_directories(island_chatter_cloud PUBLIC include)
+target_compile_features(island_chatter_cloud PUBLIC cxx_std_17)
+if(MSVC)
+    target_compile_options(island_chatter_cloud PRIVATE /W4 /permissive- /EHsc)
+else()
+    target_compile_options(island_chatter_cloud PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(island_chatter_cloud_tests tests/cloud_tests.cpp)
+target_link_libraries(island_chatter_cloud_tests PRIVATE island_chatter_cloud)
+# This suite is mostly about what gets refused, so it is the one test binary
+# that catches exceptions and needs unwind semantics turned on.
+if(MSVC)
+    target_compile_options(island_chatter_cloud_tests PRIVATE /EHsc)
+endif()
+
 add_executable(island_chatter_render tools/render_preview.cpp)
 target_link_libraries(island_chatter_render PRIVATE island_chatter_dsp)
 
@@ -43,10 +67,23 @@ target_link_libraries(island_chatter_render PRIVATE island_chatter_dsp)
 add_executable(island_chatter_bake tools/bake_cli.cpp)
 target_link_libraries(island_chatter_bake PRIVATE island_chatter_dsp)
 
+# Ships beside the .aex as well. Windows only, and not because of a porting
+# decision: the whole file is WinHTTP, which is the TLS stack ExtendScript does
+# not have and the reason this tool exists at all.
+if(WIN32)
+    add_executable(island_chatter_voice tools/voice_cli.cpp)
+    target_link_libraries(island_chatter_voice PRIVATE island_chatter_cloud winhttp)
+    if(MSVC)
+        target_compile_options(island_chatter_voice PRIVATE /W4 /permissive- /EHsc)
+    endif()
+endif()
+
 enable_testing()
 add_test(NAME island_chatter_native_tests COMMAND island_chatter_native_tests)
 add_test(NAME island_chatter_midi_tests COMMAND island_chatter_midi_tests)
 add_test(NAME island_chatter_song_tests COMMAND island_chatter_song_tests)
+add_test(NAME island_chatter_analysis_tests COMMAND island_chatter_analysis_tests)
+add_test(NAME island_chatter_cloud_tests COMMAND island_chatter_cloud_tests)
 
 if(ISLAND_CHATTER_BUILD_AE_PLUGIN)
     include(cmake/VerifyAfterEffectsSdk.cmake)
