@@ -55,31 +55,52 @@ private:
 };
 
 /*
- * lexicon.txt, kept for the English half.
+ * Which language the model in front of us speaks, which decides who reads the
+ * text.
  *
- * The Chinese half of this file is not consulted at run time: its keys are
+ * Not a panel setting and not a guess about the characters: it is a property of
+ * the model the user chose from the voice-source menu. Invariant 8i's rule that
+ * the interface language never reaches the engine still holds — this is not the
+ * interface language, it is which of two downloaded models is being driven.
+ */
+enum class Language { Mandarin, Japanese };
+
+/*
+ * lexicon.txt, and how much of it is kept depends on which model it belongs to.
+ *
+ * For the Chinese model, only the Latin entries: its 190,000 Chinese keys are
  * Simplified words, this product is Traditional-first, and the engine reads
- * both without needing it. It is 6.8 MB, so parsing it is not free — but the
- * English words are in the same file and there is nowhere else to get them.
+ * Chinese without needing them. Keeping them would cost about 40 MB of hash
+ * table to answer no questions.
+ *
+ * For the Japanese model, all of it, and that is the whole reading path. Its
+ * 13,700 keys are kana *and* common kanji — 今日, 日本, 私, 行く — which is
+ * something the engine cannot do at all: invariant 8h says unmarked kanji keeps
+ * its Mandarin reading, because a kanji's reading depends on the word and this
+ * product has no Japanese dictionary. The model brought one.
  */
 class Lexicon {
 public:
     struct Entry {
         std::vector<std::string> phones;
-        std::vector<int> tones;         // 7-11 for English; the model's own offset
+        std::vector<int> tones;         // 7-11 for English, 6 for Japanese
     };
 
-    static Lexicon parse(const std::string& text);
+    static Lexicon parse(const std::string& text, Language language = Language::Mandarin);
 
     const Entry* find(const std::string& word) const;
     std::size_t size() const { return words_.size(); }
     // In bytes, and ASCII-only by construction, because it bounds the greedy
     // match over Latin runs and those are compared byte for byte.
     std::size_t longest_latin() const { return longest_latin_; }
+    // In code points, because a Japanese key is Japanese text and the greedy
+    // match over it walks characters rather than bytes.
+    std::size_t longest_word() const { return longest_word_; }
 
 private:
     std::unordered_map<std::string, Entry> words_;
     std::size_t longest_latin_ = 1;
+    std::size_t longest_word_ = 1;
 };
 
 struct Plan {
@@ -104,7 +125,8 @@ struct Plan {
  * option that changes readings cannot be forgotten here.
  */
 Plan plan(const std::string& utf8_text, const Settings& settings,
-          const Lexicon& lexicon, const Tokens& tokens);
+          const Lexicon& lexicon, const Tokens& tokens,
+          Language language = Language::Mandarin);
 
 /*
  * Digits, spelled out in Chinese before anything else sees them.

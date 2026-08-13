@@ -8,8 +8,8 @@
     var TONE_MATCH_NAME = "ADBE Aud Tone";
     // 1 implicit input + 278 registered parameters. After Effects also reports a
     // trailing built-in group, so the scripted count matches by construction.
-    var EXPECTED_PARAMETERS = 279;
-    var EXPECTED_VERSION = "3.1.0";
+    var EXPECTED_PARAMETERS = 290;
+    var EXPECTED_VERSION = "3.2.0";
     var ownsProject = false;
 
     function writeReport(message) {

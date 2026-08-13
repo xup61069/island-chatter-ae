@@ -37,6 +37,12 @@ std::string settings_key(const Settings& settings) {
     // Timbre changes the rendered samples, so it belongs in the key. Volume is
     // still deliberately absent: it is applied as a gain when copying out.
     append_binary(key, settings.formant);
+    // A measured vowel space changes every sample of every syllable, so it is
+    // as much part of the key as the voice preset is. All ten numbers plus the
+    // flag: five vowels measured and one skipped is a different voice from six
+    // measured, and the flag alone cannot say which.
+    append_binary(key, settings.custom_timbre);
+    for (const double formant : settings.custom_vowels) { append_binary(key, formant); }
     append_binary(key, settings.source);
     append_binary(key, settings.vibrato_depth);
     append_binary(key, settings.vibrato_rate);

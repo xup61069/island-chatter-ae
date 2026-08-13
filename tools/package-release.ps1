@@ -1,8 +1,13 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Version = "3.1.0",
+    [string]$Version = "3.2.0",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
-    [string]$AexPath = ""
+    [string]$AexPath = "",
+    # Package the trial instead of the product. The payload is identical — the
+    # difference is inside the binaries, which sign the audio they render — so
+    # this switch does not choose what to copy. What it does is decide which
+    # token the staged binaries must carry, and refuse the other one.
+    [switch]$Trial
 )
 
 $ErrorActionPreference = "Stop"
@@ -102,7 +107,8 @@ Write-Host "Packaging voice tool: $resolvedVoice"
 Write-Host "Packaging offline voice: $resolvedLocal"
 
 $distRoot = Join-Path $repoRoot "dist"
-$stageRoot = Join-Path $distRoot "Island-Chatter-AE-$Version-Windows-x64"
+$flavour = if ($Trial) { "-Trial" } else { "" }
+$stageRoot = Join-Path $distRoot "Island-Chatter-AE-$Version$flavour-Windows-x64"
 $zipPath = "$stageRoot.zip"
 
 if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
@@ -148,6 +154,8 @@ Copy-Item -LiteralPath (Join-Path $repoRoot "THIRD_PARTY_NOTICES.md") `
 # a statically linked library that no header mentions. `strings` would do, but
 # it is not on every Windows machine and a guard that silently does not run is
 # the shape of failure this project keeps a section of CLAUDE.md about.
+$signed = 0
+$unsigned = 0
 foreach ($binary in (Get-ChildItem -LiteralPath $resources -File |
         Where-Object { $_.Extension -in ".exe", ".dll", ".aex" })) {
     $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($binary.FullName))
@@ -158,7 +166,48 @@ foreach ($binary in (Get-ChildItem -LiteralPath $resources -File |
                 "run. This is what held 3.0.0 back. See THIRD_PARTY_NOTICES.md.")
         }
     }
+    # Which build these binaries actually are, read out of the files rather
+    # than assumed from the switch. Shipping the trial as the product gives it
+    # away; shipping the product as the trial marks audio somebody paid for.
+    # Only the ones that link the engine carry a token at all.
+    if ($text.Contains("ISLAND-CHATTER-TRIAL")) { $signed += 1 }
+    elseif ($text.Contains("ISLAND-CHATTER-RELEASE")) { $unsigned += 1 }
 }
+if ($Trial) {
+    if ($signed -eq 0) {
+        throw ("None of the staged binaries carry the trial token. Configure a separate " +
+            "build directory with -DISLAND_CHATTER_TRIAL=ON and package from that.")
+    }
+    if ($unsigned -gt 0) {
+        throw ("$unsigned of the staged binaries are release builds and $signed are trial " +
+            "builds. A package with both signs its previews and not its exports; build " +
+            "them all in the one trial directory.")
+    }
+} else {
+    if ($signed -gt 0) {
+        throw ("$signed of the staged binaries carry the trial token, which would sign the " +
+            "audio of a product somebody paid for. Package the release from a build " +
+            "directory configured without -DISLAND_CHATTER_TRIAL.")
+    }
+    if ($unsigned -eq 0) {
+        throw ("No staged binary carries a build token at all. Something that does not link " +
+            "the engine is being packaged in place of something that does.")
+    }
+}
+# And the plug-in by name, because it is the file that renders the audio inside
+# After Effects. The counts above are satisfied by any one binary carrying the
+# right token, and the first run of this check found the .aex carrying *neither*
+# — nothing in it called build_kind(), so the linker had dropped the string and
+# a trial .aex could have shipped as the product unnoticed.
+$aexText = [Text.Encoding]::ASCII.GetString(
+    [IO.File]::ReadAllBytes((Join-Path $resources "IslandChatterNative.aex")))
+$wantedToken = if ($Trial) { "ISLAND-CHATTER-TRIAL" } else { "ISLAND-CHATTER-RELEASE" }
+if (-not $aexText.Contains($wantedToken)) {
+    throw ("IslandChatterNative.aex does not carry $wantedToken. It is the file that renders " +
+        "the audio; if it cannot say which build it is, nothing downstream can either.")
+}
+Write-Host ("Build token: {0} ({1} binaries)" -f
+    ($(if ($Trial) { "TRIAL" } else { "RELEASE" }), $(if ($Trial) { $signed } else { $unsigned })))
 
 Compress-Archive -LiteralPath $stageRoot -DestinationPath $zipPath -CompressionLevel Optimal
 $hash = Get-FileHash -LiteralPath $zipPath -Algorithm SHA256

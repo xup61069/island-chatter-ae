@@ -106,7 +106,7 @@
             check(tone.propertyIndex < chatter.propertyIndex, "Tone sits before the native effect");
             check(tone.propertyIndex === chatter.propertyIndex - 1, "Tone is immediately before it");
             check(tone.property(6).value === 0, "Tone level is zero");
-            check(chatter.numProperties === 279, "native effect exposes 279 parameters, got " + chatter.numProperties);
+            check(chatter.numProperties === 290, "native effect exposes 290 parameters, got " + chatter.numProperties);
             check(Math.round(chatter.property(6).value) === TEXT.length,
                 "text length parameter is " + TEXT.length + ", got " + Math.round(chatter.property(6).value));
             var textOk = true;
@@ -382,6 +382,51 @@
         });
         check(characterOfLayer(named) === "咪咪",
             "the character survives beside [Override], got \"" + characterOfLayer(named) + "\"");
+
+        /*
+         * A measured voice, through a real effect and back.
+         *
+         * The three states only exist once there is a layer to hold them, and
+         * the middle one — an empty array clearing what a full one wrote — is
+         * the one no portable test can see, because it is a property write
+         * followed by a property read.
+         */
+        var voiced = comp.layers.addText("自訂音色測試");
+        var voiceSettings = {};
+        for (var voiceKey in settings) {
+            if (settings.hasOwnProperty(voiceKey)) { voiceSettings[voiceKey] = settings[voiceKey]; }
+        }
+        voiceSettings.customVowels = [960, 1380, 550, 2090, 390, 2990, 450, 810, 368, 840];
+        attempt("apply a measured voice", function () {
+            applyToTextLayer(comp, voiced, "", voiceSettings, options);
+        });
+        var readBack = settingsFromEffect(findNativeEffect(voiced)).customVowels;
+        check(readBack.length === 10 && readBack[0] === 960 && readBack[9] === 840,
+            "the ten numbers survive the parameter round trip, got " + readBack.join(","));
+        check(Math.round(findNativeEffect(voiced).property(PARAM_CUSTOM_TIMBRE).value) === 1,
+            "and the flag came on by itself");
+
+        // Apply with no mention of the voice leaves it where it is: this is
+        // what stops Import and an ordinary Apply from wiping a recording.
+        var silentSettings = {};
+        for (var quietKey in settings) {
+            if (settings.hasOwnProperty(quietKey)) { silentSettings[quietKey] = settings[quietKey]; }
+        }
+        attempt("apply again without mentioning the voice", function () {
+            applyToTextLayer(comp, voiced, "", silentSettings, options);
+        });
+        check(settingsFromEffect(findNativeEffect(voiced)).customVowels.length === 10,
+            "the measured voice survived an Apply that said nothing about it");
+
+        // And an empty array is a different thing from an absent one.
+        voiceSettings.customVowels = [];
+        attempt("apply with the voice cleared", function () {
+            applyToTextLayer(comp, voiced, "", voiceSettings, options);
+        });
+        check(settingsFromEffect(findNativeEffect(voiced)).customVowels.length === 0,
+            "an empty measurement clears the layer rather than being ignored");
+        check(Math.round(findNativeEffect(voiced).property(PARAM_CUSTOM_TIMBRE).value) === 0,
+            "and the flag went off with it");
 
         /*
          * Preview, all the way through: it renders, it plays, and it leaves the
@@ -1106,8 +1151,8 @@
         var singEffect = findNativeEffect(singLayer);
         check(singEffect !== null, "the native effect is on the sung layer");
         if (singEffect) {
-            check(singEffect.numProperties === 279,
-                "the effect registers 279 parameters (got " + singEffect.numProperties + ")");
+            check(singEffect.numProperties === 290,
+                "the effect registers 290 parameters (got " + singEffect.numProperties + ")");
             var readMelody = melodyFromEffect(singEffect);
             var sameMelody = readMelody.length === singMelody.length;
             var m;

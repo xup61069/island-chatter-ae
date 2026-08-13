@@ -1017,9 +1017,80 @@ std::size_t harmonic_count(double frequency, double top_formant, double sample_r
     return static_cast<std::size_t>(clamp(count, 1.0, static_cast<double>(kMaxHarmonics)));
 }
 
+/*
+ * What a measured voice does to one vowel, as a multiplier per formant.
+ *
+ * The five measured vowels are the first five rows of kVowels — a e i o u, in
+ * that order — so a measurement lands on its own row without a lookup table
+ * that could get out of step.
+ *
+ * Three decisions live here, and each is a decision not to invent a number:
+ *
+ *   F3 follows F2. A third formant measured from a phone recording is mostly
+ *   noise, and F1/F2 are what decide which vowel a listener hears. Scaling F3
+ *   by F2's ratio keeps the tract coherent without claiming to have measured it.
+ *
+ *   Bandwidths follow their own formant. A longer tract has wider resonances;
+ *   scaling them together is what keeps a low voice from sounding like a filter
+ *   sweep rather than like a person.
+ *
+ *   The three Mandarin-only vowels — the apical one after zh/ch/sh, ü, and the
+ *   retroflex ending — are not among the five anybody records, so they move by
+ *   the average of whatever was measured. Leaving them at the table's values
+ *   would put two different speakers in one mouth.
+ *
+ * Ratios are clamped: a recording of a cough should make a strange voice, not
+ * an inaudible one.
+ */
+constexpr double kMinTractRatio = 0.5;
+constexpr double kMaxTractRatio = 2.0;
+
+std::array<double, 3> custom_vowel_scale(const Settings& settings, int vowel_index) {
+    std::array<double, 3> scale{1.0, 1.0, 1.0};
+    if (!settings.custom_timbre) { return scale; }
+
+    auto ratios_for = [&settings](std::size_t vowel) -> std::array<double, 2> {
+        const double first = settings.custom_vowels[vowel * 2];
+        const double second = settings.custom_vowels[vowel * 2 + 1];
+        if (first <= 0.0 || second <= 0.0) { return {0.0, 0.0}; }
+        const auto& defaults = kVowels[vowel].formants;
+        return {clamp(first / defaults[0], kMinTractRatio, kMaxTractRatio),
+                clamp(second / defaults[1], kMinTractRatio, kMaxTractRatio)};
+    };
+
+    const auto index = static_cast<std::size_t>(vowel_index);
+    if (index < Settings::kCustomVowels) {
+        const auto measured = ratios_for(index);
+        if (measured[0] > 0.0) {
+            scale[0] = measured[0];
+            scale[1] = measured[1];
+            scale[2] = measured[1];
+            return scale;
+        }
+    }
+    // Either a vowel nobody records, or one whose recording was skipped: the
+    // average of what was measured, and no change at all if nothing was.
+    double first_total = 0.0;
+    double second_total = 0.0;
+    std::size_t measured_count = 0;
+    for (std::size_t vowel = 0; vowel < Settings::kCustomVowels; ++vowel) {
+        const auto measured = ratios_for(vowel);
+        if (measured[0] <= 0.0) { continue; }
+        first_total += measured[0];
+        second_total += measured[1];
+        measured_count += 1;
+    }
+    if (measured_count == 0) { return scale; }
+    scale[0] = first_total / static_cast<double>(measured_count);
+    scale[1] = second_total / static_cast<double>(measured_count);
+    scale[2] = scale[1];
+    return scale;
+}
+
 void build_vowel_profile(
     int vowel_index,
     const Voice& voice,
+    const Settings& custom,
     SourceType source,
     double frequency,
     double sample_rate,
@@ -1028,9 +1099,13 @@ void build_vowel_profile(
     std::size_t& count) {
     const auto& vowel = kVowels[static_cast<std::size_t>(vowel_index)];
     std::array<double, 3> bandwidths{};
+    // What a measured voice does to this vowel, or 1.0 for every formant when
+    // there is nothing measured. One place, so every path that shapes a vowel
+    // — spoken, sung, held — gets the custom tract or none of them do.
+    const auto scale = custom_vowel_scale(custom, vowel_index);
     for (std::size_t index = 0; index < 3; ++index) {
-        formants[index] = vowel.formants[index] * voice.tract;
-        bandwidths[index] = vowel.bandwidths[index] * voice.tract;
+        formants[index] = vowel.formants[index] * voice.tract * scale[index];
+        bandwidths[index] = vowel.bandwidths[index] * voice.tract * scale[index];
     }
     harmonics.fill(0.0);
     count = harmonic_count(frequency, formants[2], sample_rate);
@@ -1062,14 +1137,14 @@ void build_vowel_profile(
 }
 
 void build_vowel(
-    Event& event, int first_vowel, int end_vowel, const Voice& voice, SourceType source,
-    double sample_rate) {
+    Event& event, int first_vowel, int end_vowel, const Voice& voice,
+    const Settings& settings, SourceType source, double sample_rate) {
     event.vowel_name = kVowels[static_cast<std::size_t>(first_vowel)].name;
     std::size_t first_count = 1;
     std::size_t end_count = 1;
-    build_vowel_profile(first_vowel, voice, source, event.frequency, sample_rate,
+    build_vowel_profile(first_vowel, voice, settings, source, event.frequency, sample_rate,
         event.formants, event.harmonics, first_count);
-    build_vowel_profile(end_vowel, voice, source, event.frequency, sample_rate,
+    build_vowel_profile(end_vowel, voice, settings, source, event.frequency, sample_rate,
         event.end_formants, event.end_harmonics, end_count);
     // The two vowels can want different counts when their third formants differ;
     // the morph in render_vowel() reads both, so take the wider.
@@ -1788,7 +1863,8 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             // The vowel the syllable ended on is the one that carries on, which
             // is what "holding a note" means: 好 sung over three notes is one
             // ao, not three hao.
-            build_vowel(event, held.vowel, held.vowel, voice, settings.source, sample_rate);
+            build_vowel(event, held.vowel, held.vowel, voice, settings, settings.source,
+                        sample_rate);
             previous_frequency = event.frequency;
             cursor = event.start + event.length;
             push_segmented(events, event, sample_rate);
@@ -1945,7 +2021,8 @@ std::pair<std::vector<Event>, std::size_t> build_events(const Settings& settings
             static_cast<std::size_t>(std::llround(onset_seconds * sample_rate)));
         event.phase = random.next() * kTwoPi;
         event.seed = static_cast<std::uint32_t>(random.next() * 2147483000.0) + 1U;
-        build_vowel(event, vowel_index, end_vowel_index, voice, settings.source, sample_rate);
+        build_vowel(event, vowel_index, end_vowel_index, voice, settings, settings.source,
+                    sample_rate);
         if (singing) {
             held.valid = true;
             held.vowel = end_vowel_index;
@@ -2391,6 +2468,81 @@ std::size_t syllable_count(const std::string& text, bool melody_mode) {
     return syllables;
 }
 
+namespace {
+
+/*
+ * The trial's mark on the audio, and why it is a chirp rather than a limit.
+ *
+ * A trial has to let somebody judge the product — every voice, the rig, the
+ * lip-sync, a whole scene — and still not be a free substitute for it. A layer
+ * limit fails the first half: you cannot tell whether twenty lines of dialogue
+ * hold together from three of them. A time limit fails the second, since a film
+ * is made of short lines. So the trial renders everything and signs it.
+ *
+ * A two-note chirp, quiet, every four seconds, which is unmistakably deliberate
+ * — nobody hears it and thinks the synthesizer is broken — and impossible to
+ * edit out of a mixed line without editing out the line.
+ *
+ * It is a pure function of the absolute sample index, which is what lets the
+ * lazy renderer and the eager one stay bit-identical (invariant 8d): the block
+ * a sample arrives in cannot change what is added to it. `dsp_tests.cpp`
+ * compares those two paths across awkward block sizes and would catch a mark
+ * that drifted with the block.
+ */
+constexpr double kTrialFirstMarkSeconds = 1.5;
+constexpr double kTrialMarkIntervalSeconds = 4.0;
+constexpr double kTrialMarkSeconds = 0.22;
+constexpr double kTrialMarkLevel = 0.10;
+constexpr double kTrialMarkHighHz = 1568.0;
+constexpr double kTrialMarkLowHz = 1046.0;
+
+float trial_mark(std::int64_t index, std::uint32_t sample_rate) {
+#ifdef ISLAND_CHATTER_TRIAL
+    if (index < 0 || sample_rate == 0U) { return 0.0F; }
+    const double rate = static_cast<double>(sample_rate);
+    const double seconds = static_cast<double>(index) / rate;
+    if (seconds < kTrialFirstMarkSeconds) { return 0.0F; }
+    const double into_cycle =
+        std::fmod(seconds - kTrialFirstMarkSeconds, kTrialMarkIntervalSeconds);
+    if (into_cycle >= kTrialMarkSeconds) { return 0.0F; }
+    // Two notes, and a raised-cosine envelope over the whole thing so neither
+    // edge clicks: a click is the one artefact that would read as a bug.
+    const double half = kTrialMarkSeconds * 0.5;
+    const double frequency = into_cycle < half ? kTrialMarkHighHz : kTrialMarkLowHz;
+    const double phase_start = into_cycle < half ? 0.0 : half;
+    const double envelope =
+        0.5 - 0.5 * std::cos(2.0 * M_PI * into_cycle / kTrialMarkSeconds);
+    const double angle = 2.0 * M_PI * frequency * (into_cycle - phase_start);
+    return static_cast<float>(std::sin(angle) * envelope * kTrialMarkLevel);
+#else
+    (void)index;
+    (void)sample_rate;
+    return 0.0F;
+#endif
+}
+
+}  // namespace
+
+float trial_signature(std::int64_t index, std::uint32_t sample_rate) {
+    return trial_mark(index, sample_rate);
+}
+
+const char* build_kind() {
+#ifdef ISLAND_CHATTER_TRIAL
+    return "ISLAND-CHATTER-TRIAL";
+#else
+    return "ISLAND-CHATTER-RELEASE";
+#endif
+}
+
+bool is_trial() {
+#ifdef ISLAND_CHATTER_TRIAL
+    return true;
+#else
+    return false;
+#endif
+}
+
 Result synthesize(const Settings& requested) {
     Settings settings = requested;
     if (settings.sample_rate < 8000U || settings.sample_rate > 192000U) {
@@ -2412,6 +2564,16 @@ Result synthesize(const Settings& requested) {
 
     for (auto& event : events) {
         render_event(event, settings, voice, result.samples.data() + event.start);
+    }
+    // The trial's signature, added *before* the gain and the limiter — added
+    // after them it pushes an already-loud line over 1.0, which the suite
+    // caught as "an extreme Volume clipped". A watermark that clips is a
+    // watermark that damages the thing it is watermarking. Silent in a release
+    // build, and the call is unconditional so the two output paths cannot
+    // drift apart: this one and copy_region() below are both of them.
+    for (std::size_t index = 0; index < result.samples.size(); ++index) {
+        result.samples[index] += trial_mark(static_cast<std::int64_t>(index),
+                                            settings.sample_rate);
     }
     apply_output_gain(result.samples.data(), result.samples.size(), output_gain(settings));
     for (const float sample : result.samples) {
@@ -2527,10 +2689,13 @@ void Utterance::copy_region(
     const double gain = output_gain(scaled);
     for (std::size_t frame = 0; frame < frame_count; ++frame) {
         const std::int64_t source_index = start_sample + static_cast<std::int64_t>(frame);
-        const float value =
+        const float raw =
             source_index >= 0 && static_cast<std::size_t>(source_index) < state.samples.size()
-                ? limited(state.samples[static_cast<std::size_t>(source_index)], gain)
+                ? state.samples[static_cast<std::size_t>(source_index)]
                 : 0.0F;
+        // Before the limiter, exactly as synthesize() does it above.
+        const float value =
+            limited(raw + trial_mark(source_index, state.settings.sample_rate), gain);
         for (std::size_t channel = 0; channel < channels; ++channel) {
             destination[frame * channels + channel] = value;
         }

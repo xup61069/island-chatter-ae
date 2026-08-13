@@ -22,6 +22,10 @@
   **要先知道：那是中國口音的普通話女聲。** 可商用授權的中文模型只有這一個，台灣國語的離線模型
   不存在。要台灣國語請用內建的聲音，或雲端 Azure 的 zh-TW 音色。
 - **試聽不用先套到圖層上。** 調完音色按一下就聽得到，專案不會多出任何東西。
+- **日文也可以離線。** 另外一個模型，假名和常用漢字都唸得出來——今日、日本、私。
+- **可以用你自己的聲音當音色。** 錄五個拉長的母音，引擎就用你嘴巴的形狀講話；
+  聲調、長短、嘴型還是引擎算的，所以中文的四聲不會被拉平。
+- **有試用版**：功能一樣，算出來的聲音每隔幾秒會有一小段標記聲。
 - **音檔可以直接轉成口型。** 真人配音、自己錄的、雲端回來的都一樣：引擎讀出裡面的音節，
   寫出跟講話的句子一模一樣的控制器，嘴型切換、逐字標記、頭部晃動全部照舊。
 - **匯入 MIDI，角色就會唱歌。** 貼歌詞、選一軌，一個字一個音，落在 MIDI 自己的時間上。
@@ -70,6 +74,13 @@ you hear. Built for Chinese first; it speaks Japanese and English too.
   model exists. For Taiwan Mandarin, use the built-in voice or Azure's zh-TW voice.
 - **Hear a voice before you apply it.** Preview plays the line straight from the panel and
   leaves nothing behind in the project.
+- **Japanese runs offline too**, as a second model, and it reads common kanji as well as
+  kana — 今日, 日本, 私.
+- **Or speak in the shape of your own voice.** Record five held vowels and the engine takes
+  your vocal tract; the tones, the timing and the mouth shapes are still the engine's, so a
+  Mandarin fourth tone still falls.
+- **There is a trial**: everything works, and the audio it renders carries a short mark
+  every few seconds.
 - **Any recording can drive the mouth.** A real voice actor, something you recorded yourself,
   or the file a cloud model just sent back — the engine finds the syllables in it and writes
   exactly the controls a spoken line writes, so mouth shapes, per-syllable markers and the head
@@ -129,6 +140,10 @@ After Effects のテキストレイヤーにそのままの声を持たせます
   **取得前にご確認を：声は中国の標準中国語（普通話）を話す女性です。** 商用利用できるライセンスの
   中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。
 - **適用する前に試聴できます。** パネルからそのまま再生され、プロジェクトには何も残りません。
+- **日本語もオフラインで**。もう一つのモデルで、仮名だけでなく常用漢字も読めます。
+- **自分の声の形で話させることもできます。** 母音を 5 つ録音すると、エンジンがその声道を使います。
+  声調も長さも口の形もエンジンのままなので、中国語の声調は平らになりません。
+- **体験版があります**：機能は同じで、生成された音声に数秒ごとに短い印が入ります。
 - **台本をまるごと貼れば 1 行が 1 レイヤー**になり、声が乗って順番に並びます。
   「ミミ：おはよう」と書けば名前は読まれず、その行がそのキャラに割り当てられます。
 - **間隔は音符の長さで指定。** 1 が 4 分音符、0.5 が 8 分音符。どの行も拍に乗ります。
@@ -154,4 +169,4 @@ build is not permitted. An original procedural synthesizer containing no audio a
 Nintendo or *Animal Crossing* audio; not affiliated with Adobe, Nintendo, OpenAI, ElevenLabs
 or Microsoft.
 
-Version 3.1.0
+Version 3.2.0

@@ -86,45 +86,68 @@ struct ModelFile {
     std::uint64_t bytes;
 };
 
-const ModelFile kModelFiles[] = {
-    {"model.onnx", 170429550u},
-    {"lexicon.txt", 6837671u},
-    {"tokens.txt", 655u},
-};
-
 /*
- * Three files, where 3.0.0 fetched seven.
+ * Two models, three files each, where 3.0.0 fetched one model in seven files.
  *
- * The four that are gone are OpenFST rule files — number, date, phone and
- * heteronym normalisation — and they are gone because reading them needs
+ * The four files that are gone were OpenFST rule files — number, date, phone
+ * and heteronym normalisation — and they went because reading them needs
  * OpenFST, which came in through sherpa-onnx. What they did has not been
  * dropped with them: digits are spelled out by `melo::normalise_numbers`, and
  * heteronyms were always the engine's job here, since it reads the text.
  *
- * The dict/ folder in the published package is not fetched either. It is 11 MB
- * of jieba dictionary for a segmenter this does not use: the engine decides
- * where the words are.
+ * The dict/ folder in the published Chinese package is not fetched either. It
+ * is 11 MB of jieba dictionary for a segmenter this does not use.
+ *
+ * Sizes are checked in because "downloaded" has to be a question with an
+ * answer: a truncated model.onnx loads and then fails somewhere far away from
+ * the cause. They are per model, so a half-downloaded Japanese model cannot
+ * make the Chinese one look broken.
  */
+struct LocalModel {
+    const char* id;                 // what a project stores
+    const char* label;              // what a person reads
+    const char* folder;             // under %LOCALAPPDATA%\Island Chatter\models
+    const wchar_t* path_prefix;     // on huggingface.co
+    melo::Language language;
+    ModelFile files[3];
+};
+
+const LocalModel kLocalModels[] = {
+    {"local-melo", "Local model (zh-CN + en)", "vits-melo-tts-zh_en",
+     L"/csukuangfj/vits-melo-tts-zh_en/resolve/main/", melo::Language::Mandarin,
+     {{"model.onnx", 170429550u}, {"lexicon.txt", 6837671u}, {"tokens.txt", 655u}}},
+    /*
+     * The Japanese model is a different upstream and the licence was checked
+     * the way 3.0.0 taught: inside the file. Its ONNX metadata carries
+     * `license: MIT license`, `url: https://github.com/myshell-ai/MeloTTS`,
+     * `model_type: melo-vits` and `language: Japanese` — the same evidence the
+     * Chinese package gives, from the same exporter, rather than a claim on a
+     * web page. It takes the same inputs, so nothing in the transport changes.
+     */
+    {"local-melo-ja", "Local model (ja)", "vits-melo-tts-ja",
+     L"/qqder/vits-melo-tts-ja/resolve/main/", melo::Language::Japanese,
+     {{"model.onnx", 170609323u}, {"lexicon.txt", 459895u}, {"tokens.txt", 1440u}}},
+};
+
 const wchar_t* kModelHost = L"huggingface.co";
-const wchar_t* kModelPathPrefix = L"/csukuangfj/vits-melo-tts-zh_en/resolve/main/";
 
 /*
- * The one local source, described the same way a cloud one is.
+ * A local source, described the same way a cloud one is.
  *
  * It borrows cloud::Provider rather than inventing a parallel type, so
  * cache_file_name() — and therefore the rule that an unchanged line is never
  * rendered twice — is literally the same code. `on_this_machine` is what the
  * panel reads to stop asking for an API key and to stop warning that the text
- * is leaving the computer, which for this row would be false.
+ * is leaving the computer, which for these rows would be false.
  *
- * The rate here is what the model is documented to produce. Nothing trusts it:
- * the WAV is written with the rate the model states at runtime, and this value
- * only ever reaches the cache key.
+ * The rate here is what the models are documented to produce, and both state
+ * 44100. Nothing trusts it: the WAV is written with the rate the model states
+ * at runtime, and this value only ever reaches the cache key.
  */
-const cloud::Provider& local_provider() {
-    static const cloud::Provider row{
-        "local-melo",
-        "Local model (zh-CN + en)",
+cloud::Provider provider_for(const LocalModel& model) {
+    return cloud::Provider{
+        model.id,
+        model.label,
         "-",                       // no host; it never leaves this machine
         "-",
         "",
@@ -132,15 +155,23 @@ const cloud::Provider& local_provider() {
         cloud::Escape::Json,
         cloud::Reply::RawPcm16,
         44100,
-        "vits-melo-tts-zh_en",
+        model.folder,
         "default",
         false,                     // no region
         true                       // on this machine
     };
-    return row;
 }
 
-std::filesystem::path model_root(const std::string& override_dir) {
+// Null for an id this tool does not serve, so the caller can say which one was
+// asked for instead of failing generically.
+const LocalModel* find_model(const std::string& id) {
+    for (const auto& model : kLocalModels) {
+        if (id == model.id) { return &model; }
+    }
+    return nullptr;
+}
+
+std::filesystem::path model_root(const LocalModel& model, const std::string& override_dir) {
     if (!override_dir.empty()) { return std::filesystem::u8path(override_dir); }
     /*
      * Under LOCALAPPDATA, not beside the .aex.
@@ -162,8 +193,10 @@ std::filesystem::path model_root(const std::string& override_dir) {
     if (base.empty()) {
         throw std::runtime_error("LOCALAPPDATA is not set, so the model folder cannot be found");
     }
-    return std::filesystem::u8path(base) / "Island Chatter" / "models" /
-           local_provider().default_model;
+    // One folder per model, named after the model, so the two never overwrite
+    // each other's files and a half-fetched one cannot make the other look
+    // broken.
+    return std::filesystem::u8path(base) / "Island Chatter" / "models" / model.folder;
 }
 
 /*
@@ -174,8 +207,8 @@ std::filesystem::path model_root(const std::string& override_dir) {
  * somewhere with no connection to the cause. Checking the size costs a stat per
  * file and turns that into "the model is incomplete, install it again".
  */
-bool model_is_installed(const std::filesystem::path& root) {
-    for (const auto& file : kModelFiles) {
+bool model_is_installed(const LocalModel& model, const std::filesystem::path& root) {
+    for (const auto& file : model.files) {
         std::error_code failed;
         const auto path = root / file.name;
         if (!std::filesystem::is_regular_file(path, failed)) { return false; }
@@ -232,10 +265,12 @@ bool usable_wav(const std::vector<unsigned char>& bytes) {
 void print_providers(const std::string& override_dir) {
     std::cout << "VOICE 1\n";
     std::size_t listed = 0;
-    std::filesystem::path root;
-    try { root = model_root(override_dir); } catch (const std::exception&) { root.clear(); }
-    if (!root.empty() && model_is_installed(root)) {
-        const auto& row = local_provider();
+    for (const auto& model : kLocalModels) {
+        std::filesystem::path root;
+        try { root = model_root(model, override_dir); }
+        catch (const std::exception&) { continue; }
+        if (root.empty() || !model_is_installed(model, root)) { continue; }
+        const auto row = provider_for(model);
         std::cout << "P " << row.id
                   << " " << cloud::as_hex(row.label)
                   << " " << row.host
@@ -244,9 +279,29 @@ void print_providers(const std::string& override_dir) {
                   << " " << (row.needs_region ? 1 : 0)
                   << " " << (row.on_this_machine ? 1 : 0)
                   << "\n";
-        listed = 1;
+        listed += 1;
+        // --model-dir names one folder, so it can only be the one model. Two
+        // rows out of one override would both point at the same files.
+        if (!override_dir.empty()) { break; }
     }
     std::cout << "END " << listed << "\n";
+}
+
+/*
+ * Which model a request is about.
+ *
+ * `--provider` is the id the panel stores in the project, so it is the thing to
+ * dispatch on. Nothing defaults silently to the Chinese model: a request naming
+ * a model this tool does not serve is refused by name, for the reason
+ * `parse_arguments()` refuses `--key` rather than ignoring it.
+ */
+const LocalModel& model_for(const std::string& provider) {
+    if (provider.empty()) { return kLocalModels[0]; }
+    const LocalModel* found = find_model(provider);
+    if (!found) {
+        throw std::runtime_error("there is no local model called '" + provider + "'");
+    }
+    return *found;
 }
 
 // --- fetching the model ------------------------------------------------------
@@ -274,7 +329,8 @@ std::string describe_net_error(DWORD code) {
  * Written to a .part and renamed, so an interrupted download cannot leave a
  * file that model_is_installed() would accept.
  */
-void fetch_one(HINTERNET session, const ModelFile& file, const std::filesystem::path& root) {
+void fetch_one(HINTERNET session, const LocalModel& model, const ModelFile& file,
+               const std::filesystem::path& root) {
     const auto destination = root / file.name;
     std::error_code failed;
     if (std::filesystem::is_regular_file(destination, failed) &&
@@ -285,7 +341,7 @@ void fetch_one(HINTERNET session, const ModelFile& file, const std::filesystem::
     Net connection(WinHttpConnect(session, kModelHost, INTERNET_DEFAULT_HTTPS_PORT, 0));
     if (!connection.value) { throw std::runtime_error(describe_net_error(GetLastError())); }
 
-    std::wstring path = kModelPathPrefix;
+    std::wstring path = model.path_prefix;
     for (const char* letter = file.name; *letter; ++letter) {
         path.push_back(static_cast<wchar_t>(*letter));
     }
@@ -362,7 +418,7 @@ void fetch_one(HINTERNET session, const ModelFile& file, const std::filesystem::
     }
 }
 
-void install_model(const std::filesystem::path& root) {
+void install_model(const LocalModel& model, const std::filesystem::path& root) {
     std::error_code failed;
     std::filesystem::create_directories(root, failed);
     Net session(WinHttpOpen(L"IslandChatter", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
@@ -371,11 +427,11 @@ void install_model(const std::filesystem::path& root) {
     // Generous: this is a 170 MB file, not a sentence.
     WinHttpSetTimeouts(session.value, 15000, 15000, 30000, 600000);
     std::uint64_t total = 0;
-    for (const auto& file : kModelFiles) {
-        fetch_one(session.value, file, root);
+    for (const auto& file : model.files) {
+        fetch_one(session.value, model, file, root);
         total += file.bytes;
     }
-    if (!model_is_installed(root)) {
+    if (!model_is_installed(model, root)) {
         throw std::runtime_error("the model is still incomplete after downloading");
     }
     std::cout << "VOICE 1\nOK " << cloud::as_hex(root.u8string()) << " " << total << " 0\n";
@@ -417,10 +473,12 @@ std::string metadata_value(const Ort::ModelMetadata& metadata, const char* key,
     return value ? std::string(value.get()) : std::string();
 }
 
-std::vector<unsigned char> speak(const std::filesystem::path& root, const std::string& text,
+std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem::path& root,
+                                 const std::string& text,
                                  std::uint32_t* rate_out, std::string* unspoken_out) {
     const auto tokens = melo::Tokens::parse(read_text_file(root / "tokens.txt"));
-    const auto lexicon = melo::Lexicon::parse(read_text_file(root / "lexicon.txt"));
+    const auto lexicon = melo::Lexicon::parse(read_text_file(root / "lexicon.txt"),
+                                              model.language);
     if (tokens.size() == 0) {
         throw std::runtime_error("the model's tokens.txt has no phones in it");
     }
@@ -430,7 +488,7 @@ std::vector<unsigned char> speak(const std::filesystem::path& root, const std::s
     // going through that synthesizer — but the reading is the engine's, and
     // that is what these settings decide.
     const Settings settings;
-    const auto plan = melo::plan(text, settings, lexicon, tokens);
+    const auto plan = melo::plan(text, settings, lexicon, tokens, model.language);
     if (unspoken_out) { *unspoken_out = plan.unspoken; }
     if (plan.syllables == 0) {
         std::string message = "there is nothing in that line this model can say";
@@ -564,7 +622,16 @@ int main(int argc, char** argv) {
             rest.push_back(args[index]);
         }
         if (installing) {
-            install_model(model_root(override_dir));
+            // --install carries --provider too, so pressing Get model on the
+            // Japanese row fetches the Japanese model. Without an id it is the
+            // first row, which is what a caller written before there were two
+            // of them meant.
+            std::string wanted;
+            for (std::size_t index = 0; index + 1 < rest.size(); ++index) {
+                if (rest[index] == "--provider") { wanted = rest[index + 1]; }
+            }
+            const LocalModel& model = model_for(wanted);
+            install_model(model, model_root(model, override_dir));
             return 0;
         }
         const auto command = cloud::parse_arguments(rest);
@@ -574,10 +641,12 @@ int main(int argc, char** argv) {
             return 0;
         }
 
-        const auto root = model_root(override_dir);
-        if (!model_is_installed(root)) {
+        const LocalModel& model = model_for(command.params.provider);
+        const auto root = model_root(model, override_dir);
+        if (!model_is_installed(model, root)) {
             throw std::runtime_error(
-                "the local model is not installed in " + root.u8string());
+                std::string("the local model ") + model.id + " is not installed in " +
+                root.u8string());
         }
         if (command.cache_dir.empty()) {
             throw std::runtime_error("--cache-dir is required");
@@ -588,8 +657,12 @@ int main(int argc, char** argv) {
 
         const auto folder = std::filesystem::u8path(command.cache_dir);
         auto params = command.params;
-        params.provider = local_provider().id;
-        const auto destination = folder / cloud::cache_file_name(local_provider(), params);
+        const auto row = provider_for(model);
+        params.provider = row.id;
+        // The cache key carries the provider id, so the same sentence rendered
+        // by the Chinese model and by the Japanese one cannot collide — which
+        // it otherwise would, being the same text at the same rate.
+        const auto destination = folder / cloud::cache_file_name(row, params);
         const auto printable = cloud::as_hex(destination.u8string());
 
         if (command.mode == cloud::Mode::CachePath) {
@@ -608,7 +681,7 @@ int main(int argc, char** argv) {
 
         std::uint32_t rate = 0;
         std::string unspoken;
-        const auto wav = speak(root, params.text, &rate, &unspoken);
+        const auto wav = speak(model, root, params.text, &rate, &unspoken);
         std::error_code ignored;
         std::filesystem::create_directories(folder, ignored);
         write_atomically(destination, wav);

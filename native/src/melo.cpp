@@ -267,8 +267,9 @@ int Tokens::id(std::string_view phone) const {
     return found == ids_.end() ? -1 : found->second;
 }
 
-Lexicon Lexicon::parse(const std::string& text) {
+Lexicon Lexicon::parse(const std::string& text, Language language) {
     Lexicon out;
+    const bool keep_everything = language == Language::Japanese;
     /*
      * Scanned as views rather than read line by line into strings.
      *
@@ -286,7 +287,8 @@ Lexicon Lexicon::parse(const std::string& text) {
         remaining = break_at == std::string_view::npos ? std::string_view()
                                                        : remaining.substr(break_at + 1);
         if (!line.empty() && line.back() == '\r') { line.remove_suffix(1); }
-        if (line.empty() || static_cast<unsigned char>(line[0]) > 0x7FU) { continue; }
+        if (line.empty()) { continue; }
+        if (!keep_everything && static_cast<unsigned char>(line[0]) > 0x7FU) { continue; }
         std::istringstream fields{std::string(line)};
         std::string word;
         if (!(fields >> word)) { continue; }
@@ -297,15 +299,17 @@ Lexicon Lexicon::parse(const std::string& text) {
         // the halves cannot be what this claims, so the line is skipped rather
         // than split somewhere arbitrary.
         if (rest.size() < 2 || rest.size() % 2 != 0) { continue; }
-        // Only the Latin half is kept. The Chinese half is 190,000 Simplified
-        // words this never asks about — the engine reads Chinese — and holding
-        // it costs about 40 MB of hash table for nothing.
+        // From the Chinese model, only the Latin half is kept: the other
+        // 190,000 keys are Simplified words this never asks about — the engine
+        // reads Chinese — and holding them costs about 40 MB of hash table for
+        // nothing. From the Japanese model everything is kept, because there
+        // the lexicon *is* the reader.
         bool latin = !word.empty();
         for (const char letter : word) {
             const auto code = static_cast<unsigned char>(letter);
             if (code > 0x7FU) { latin = false; break; }
         }
-        if (!latin) { continue; }
+        if (!latin && !keep_everything) { continue; }
         const std::size_t half = rest.size() / 2;
         Entry entry;
         entry.phones.assign(rest.begin(), rest.begin() + static_cast<std::ptrdiff_t>(half));
@@ -315,10 +319,17 @@ Lexicon Lexicon::parse(const std::string& text) {
         }
         if (entry.tones.size() != entry.phones.size()) { continue; }
         std::string key = word;
-        for (char& letter : key) {
-            letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+        if (latin) {
+            for (char& letter : key) {
+                letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+            }
+            out.longest_latin_ = std::max(out.longest_latin_, key.size());
         }
-        out.longest_latin_ = std::max(out.longest_latin_, key.size());
+        // Code points, not bytes: the greedy match over Japanese walks
+        // characters, and 日本 is two characters and six bytes. A bound in the
+        // wrong unit is a bound that either does too much work or misses the
+        // longest word in the file.
+        out.longest_word_ = std::max(out.longest_word_, decode(key).size());
         out.words_.emplace(std::move(key), std::move(entry));
     }
     return out;
@@ -375,6 +386,58 @@ void append_chinese(const std::string& run, const Settings& base, const Tokens& 
     }
 }
 
+/*
+ * Japanese, read by the model's own lexicon rather than by the engine.
+ *
+ * This is the one place invariant 8ac's rule is deliberately the other way
+ * round, and the reasons are specific to Japanese rather than a change of mind.
+ * The engine reads kana and refuses kanji — 8h: a kanji's reading depends on
+ * the word, and this product has no Japanese dictionary. The model brought one,
+ * keyed by surface form: 今日 is `ky o`, 日本 is `n i q p o N`, 行く is `i k u`.
+ * So here the lexicon can say something the engine cannot, and the argument for
+ * the two voices agreeing does not apply — the built-in voice cannot say the
+ * line at all.
+ *
+ * Greedy longest match over code points, longest key first, so 日本 is one word
+ * before 日 is. A character with no entry is reported rather than guessed: a
+ * wrong reading is worse than a named gap, which is the same choice 8h made.
+ */
+void append_japanese(const std::vector<Character>& characters, std::size_t begin,
+                     std::size_t end, const std::string& source,
+                     const Lexicon& lexicon, const Tokens& tokens,
+                     std::vector<std::int64_t>& out_tokens,
+                     std::vector<std::int64_t>& out_tones,
+                     std::string& unspoken, std::size_t& syllables) {
+    std::size_t index = begin;
+    while (index < end) {
+        const std::size_t remaining = end - index;
+        std::size_t span = std::min(lexicon.longest_word(), remaining);
+        const Lexicon::Entry* entry = nullptr;
+        std::size_t matched = 0;
+        for (; span > 0; --span) {
+            const std::size_t from = characters[index].begin;
+            const auto& last = characters[index + span - 1];
+            entry = lexicon.find(source.substr(from, last.begin + last.length - from));
+            if (entry) { matched = span; break; }
+        }
+        if (!entry) {
+            unspoken += source.substr(characters[index].begin, characters[index].length);
+            index += 1;
+            continue;
+        }
+        for (std::size_t step = 0; step < entry->phones.size(); ++step) {
+            const int id = tokens.id(entry->phones[step]);
+            if (id < 0) { continue; }
+            out_tokens.push_back(id);
+            out_tones.push_back(entry->tones[step]);
+        }
+        // One word is one syllable for counting purposes, the same way an
+        // English word is: the count exists to say whether anything was said.
+        syllables += 1;
+        index += matched;
+    }
+}
+
 // One run of Latin, read by the model's own lexicon. Greedy longest match, so
 // "island" is a word before "is" is.
 void append_latin(const std::string& run, const Lexicon& lexicon, const Tokens& tokens,
@@ -413,8 +476,43 @@ void append_latin(const std::string& run, const Lexicon& lexicon, const Tokens& 
 }  // namespace
 
 Plan plan(const std::string& utf8_text, const Settings& settings,
-          const Lexicon& lexicon, const Tokens& tokens) {
+          const Lexicon& lexicon, const Tokens& tokens, Language language) {
     Plan out;
+    /*
+     * The Japanese model reads everything it is given, in one pass.
+     *
+     * No number spelling: its lexicon has 1, 10, 100 and the rest as keys of
+     * their own, so the greedy match reads them itself and 二零二六 — which is
+     * what normalise_numbers() would produce — is not Japanese. No engine, no
+     * Latin split, no `[...]` overrides: an override carries pinyin, which is
+     * not a reading of anything here.
+     */
+    if (language == Language::Japanese) {
+        const auto characters = decode(utf8_text);
+        std::size_t run = 0;
+        for (std::size_t index = 0; index <= characters.size(); ++index) {
+            const bool at_end = index == characters.size();
+            const std::uint32_t code = at_end ? 0 : characters[index].code;
+            const char* mark = at_end ? nullptr : punctuation_token(code);
+            const bool space = !at_end && (code == ' ' || code == '\t' || code == '\n' ||
+                                           code == '\r' || code == 0x3000U);
+            if (!at_end && !mark && !space) { continue; }
+            append_japanese(characters, run, index, utf8_text, lexicon, tokens,
+                            out.tokens, out.tones, out.unspoken, out.syllables);
+            run = index + 1;
+            if (mark) {
+                const int id = tokens.id(mark);
+                if (id >= 0) {
+                    out.tokens.push_back(id);
+                    out.tones.push_back(0);
+                }
+            }
+        }
+        out.tokens = intersperse(out.tokens);
+        out.tones = intersperse(out.tones);
+        return out;
+    }
+
     const std::string normalised = normalise_numbers(utf8_text);
     const auto characters = decode(normalised);
 
@@ -471,9 +569,9 @@ Plan plan(const std::string& utf8_text, const Settings& settings,
             continue;
         }
         // Whitespace separates words and says nothing. Anything else — kana,
-        // an emoji, a symbol — is reported rather than dropped: the Japanese
-        // offline model is a separate 160 MB and is not installed, so kana
-        // arriving here is a line this voice genuinely cannot say.
+        // an emoji, a symbol — is reported rather than dropped. Kana reaching
+        // here means the Chinese model was asked to say it; the Japanese model
+        // is a separate download and a separate row in the menu.
         flush();
         if (here.code != ' ' && here.code != '\t' && here.code != '\n' &&
             here.code != '\r' && here.code != 0x3000U) {

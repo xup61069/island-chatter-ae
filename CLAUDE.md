@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.1.0` (Windows x64).
+- Current public release: `v3.2.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -57,7 +57,7 @@ effect.
 | `native/tools/bake_cli.cpp` | `island_chatter_bake`: renders a WAV, and reports the timing plan with `--plan` |
 | `native/tools/voice_cli.cpp` | `island_chatter_voice`: the WinHTTP transport and nothing else. Windows-only by necessity rather than by choice — this is the TLS stack ExtendScript does not have |
 | `native/tools/local_cli.cpp` | `island_chatter_local`: speaks a line with a neural model on this machine, opening no socket, and prints the protocol the panel already parses. Links ONNX Runtime (MIT) and nothing else; built when `ISLAND_CHATTER_ONNXRUNTIME_ROOT` points at an unpacked `onnxruntime-win-x64` release — referenced by path, never vendored, exactly as the AE SDK is. **The licence chain is the reason this file is not Piper and no longer sherpa-onnx:** Piper went GPL-3.0 in October 2025 and its MIT-era releases still linked espeak-ng (GPL v3+); sherpa-onnx is Apache-2.0 but the `sherpa-onnx-c-api.dll` it publishes *statically links espeak-ng anyway* — `if(SHERPA_ONNX_ENABLE_TTS)` pulls it in unconditionally, with no option to exclude — and the GPL attaches to the file that is distributed, not to the code paths that run. That is what stopped 3.0.0 shipping. The check that missed it asked whether the *Chinese pipeline uses* espeak-ng (a consequence) instead of whether the *shipped binary contains* it (the mechanism), which is one `strings` away |
-| `native/src/melo.cpp` | The offline voice's front end: text to the two integer sequences the model wants. Chinese is read by the *engine* (invariant 8ac), the model's lexicon supplies English, digits are spelled out here because dropping sherpa-onnx dropped its OpenFST normalisers. Pure, so `melo_tests.cpp` covers all of it without the 177 MB model |
+| `native/src/melo.cpp` | The offline voice's front end: text to the two integer sequences the model wants. Chinese is read by the *engine* (invariant 8ac), Japanese by the model's own lexicon (8ag), the lexicon also supplies English, and digits are spelled out here because dropping sherpa-onnx dropped its OpenFST normalisers. Pure, so `melo_tests.cpp` covers all of it without a 170 MB model |
 | `native/generated/melo_phonemes.hpp` | Generated pinyin-to-phone table; do not hand-edit. `native/tools/generate-melo-phonemes.js` derives it by joining the model's own single-character lexicon entries against Unihan readings and letting 20,888 characters vote |
 | `native/tests/melo_tests.cpp` | The generated table against the model's real token list, the number spelling, the bracket rule, punctuation folding, and that 銀行 still comes out `hang2` — which only the engine knows |
 | `native/tests/ae-language-verify.jsx` | Host suite for the interface language: builds the panel and switches it through all three |
@@ -80,11 +80,12 @@ effect.
 ## Compatibility invariants
 
 1. **Parameter order is a saved-project ABI.** `params.hpp`, the native plug-in, the panel constants,
-   PiPL version, and tests must remain synchronized. There are 279 slots including input: input
+   PiPL version, and tests must remain synchronized. There are 290 slots including input: input
    `0`, visible voice controls `1-5`, text length `6`, text units 0-63 at `7-70`, creative
    controls `71-75`, tempo lock `76`, timbre `77-80`, text units 64-127 at `81-144`, melody
    length `145`, melody tempo/transpose/tone-blend/portamento/vibrato-delay `146-150`,
-   melody slots 0-63 at `151-214`, and melody detail slots 0-63 at `215-278`.
+   melody slots 0-63 at `151-214`, melody detail slots 0-63 at `215-278`, the custom-timbre
+   flag `279` and ten measured vowel formants at `280-289`.
    Append new parameters; never reorder or reuse a
    published index. Every appended parameter needs a default that reproduces the previous
    behaviour, or older projects change how they sound when they are opened.
@@ -260,6 +261,77 @@ effect.
    **What cannot be said is said out loud.** Kana, an emoji, a syllable with no phones: the tool
    prints `WARN` after its `OK` and the panel reports it once. The analyser reads the file, not
    the script, so this is the only place the difference can surface.
+
+8ag. **Japanese is the one place the model's lexicon reads the text, and the reason is
+   specific.**
+   Invariant 8ac says the engine reads the Chinese. For Japanese it is the other way round,
+   because the engine reads kana and *refuses kanji* — 8h: a kanji's reading depends on the
+   word, and this product has no Japanese dictionary. The model brought one, keyed by surface
+   form: 今日 is `ky o`, 日本 is `n i q p o N`, 私 is `w a t a sh i`. So here the lexicon can
+   say something the engine cannot, and 8ac's argument that both voices should read a line the
+   same way does not apply: the built-in voice cannot say the line at all.
+
+   The Japanese path therefore does **no** number spelling — the lexicon has 1, 10, 100 as keys
+   of its own, and 二零二六 is not Japanese — and no `[...]` overrides, which carry pinyin. It
+   is a greedy longest match over code points, longest key first, and a character with no entry
+   is reported rather than guessed.
+
+   **Which language a line is depends on the model the user chose, not on the characters.** Two
+   rows in the voice menu, two folders under `%LOCALAPPDATA%`, two entries in the tool's table.
+   Nothing guesses, and `--provider` is refused rather than defaulted when it names a model the
+   tool does not serve — a Japanese line rendered by the Chinese model reads as the model being
+   bad rather than as the wrong model.
+
+8ah. **Custom timbre is a vocal tract, not a recording, and what is not measured is derived.**
+   Five vowels, F1 and F2 each, measured from recordings the user makes. They replace the
+   engine's table for a, e, i, o, u; everything else about the voice is still the engine, which
+   is why this is not sample playback — samples cannot bend to a Mandarin tone contour, and
+   that was the reason sampled voices were rejected in the first place.
+
+   F3 follows F2's ratio and the bandwidths follow their own formant, because a third formant
+   measured from a phone recording is mostly noise and an unreliable number is worse than an
+   honestly derived one. The three Mandarin-only vowels follow the average of what was
+   measured, or two speakers end up in one mouth. Ratios are clamped: a recording of a cough
+   should make a strange voice, not an inaudible one.
+
+   Zero means "not measured" and the engine's own value stands, which is what makes a
+   half-finished session harmless and what makes a project saved before 3.2.0 sound exactly as
+   it did. **Three states, and the middle one is the one that gets lost:** settings carrying no
+   `customVowels` leave the layer alone, an *empty* array clears it, and values write it. The
+   melody made the same distinction in 1.7.0 (8t); collapse the two and either Clear does
+   nothing or Import wipes a voice somebody recorded.
+
+8ai. **The trial signs its audio, and the limit lives in the engine.**
+   Everything works in a trial build; the engine adds a quiet two-note chirp every four
+   seconds. A layer limit would stop anybody judging whether twenty lines hold together, and a
+   time limit means nothing to a product whose unit is a two-second line — so the trial renders
+   everything and signs the result.
+
+   It goes in **before the limiter**, which the DSP suite established by failing ("an extreme
+   Volume clipped") when it went after: a watermark that clips damages the thing it is
+   watermarking. It is a pure function of the absolute sample index, so the lazy renderer and
+   the eager one stay bit-identical (8d), and **both** output paths add it — one of them alone
+   is a build that signs its previews and not its exports.
+
+   The panel cannot enforce any of this: it is plain text, and a limit written in ExtendScript
+   is a limit anybody deletes with Notepad. What the panel does is *say* so, because somebody
+   who does not know about the mark is somebody deciding the synthesizer is broken; it asks
+   `island_chatter_bake --build`, which knows because the answer is compiled into it.
+
+   `tools/package-release.ps1` reads the token out of every staged binary and refuses **both**
+   directions: a release carrying the trial token would sign audio somebody paid for, and a
+   trial package that is not actually a trial build gives the product away. A check in one
+   direction only is how the other one ships.
+
+   **The .aex has to carry the token itself, and only does because the About box says it.**
+   Nothing else in the plug-in called `build_kind()`, so the linker dropped the string and the
+   first run of the packaging check found the one file that renders audio in After Effects
+   carrying neither token. The packager now names it specifically rather than trusting a count.
+
+   **One measured consequence, in the trial only:** the analyser scores vowel colours against
+   audio the engine rendered, and a tone burst inside a vowel changes the spectrum it is
+   identified from. `analysis_tests.cpp` therefore skips that one score in a trial build and
+   says why. Syllable *timing* is unaffected, which is what the mouth is driven by.
 
 8b. **The panel asks the engine for the plan; it must never compute one.** Markers, the
    rig, Type-On and Fit Duration all need to know where each syllable falls.

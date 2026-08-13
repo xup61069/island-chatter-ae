@@ -332,7 +332,7 @@ for (const filePath of extendScriptFiles) {
 // The parameter ABI is split across three files. Keep them in lockstep.
 const paramsHeader = fs.readFileSync(
   path.join(root, "native", "plugin", "params.hpp"), "utf8");
-if (!/static_assert\(kParamCount == 279/.test(paramsHeader)) {
+if (!/static_assert\(kParamCount == 290/.test(paramsHeader)) {
   throw new Error("params.hpp no longer asserts the published parameter count");
 }
 for (const pinned of [
@@ -342,6 +342,8 @@ for (const pinned of [
   /static_assert\(kParamMelodyLength == 145/,
   /static_assert\(kParamMelodyFirst == 151/,
   /static_assert\(kParamMelodyDetailFirst == 215/,
+  /static_assert\(kParamCustomTimbre == 279/,
+  /static_assert\(kParamCustomVowelFirst == 280/,
 ]) {
   if (!pinned.test(paramsHeader)) {
     throw new Error("params.hpp must pin the published indices so appends cannot shift them");
@@ -359,6 +361,8 @@ for (const [constant, index] of [
   ["PARAM_MELODY_TRANSPOSE", 147], ["PARAM_TONE_BLEND", 148],
   ["PARAM_PORTAMENTO", 149], ["PARAM_VIBRATO_DELAY", 150],
   ["PARAM_MELODY_FIRST", 151], ["PARAM_MELODY_DETAIL_FIRST", 215],
+  // A measured vowel space, appended in 3.2.0.
+  ["PARAM_CUSTOM_TIMBRE", 279], ["PARAM_CUSTOM_VOWEL_FIRST", 280],
 ]) {
   if (!new RegExp(`var ${constant} = ${index};`).test(nativePanelSource)) {
     throw new Error(`Panel ${constant} must stay at published index ${index}`);
@@ -377,6 +381,8 @@ for (const [constant, index] of [
     150: /PF_ADD_FLOAT_SLIDERX\("Vibrato Delay[^;]*?ae::kParamVibratoDelay\);/s,
     151: /PF_ADD_SLIDER\("Melody note"[^;]*?ae::kParamMelodyFirst \+ index\)\);/s,
     215: /PF_ADD_SLIDER\("Melody detail"[^;]*?ae::kParamMelodyDetailFirst \+ index\)\);/s,
+    279: /PF_ADD_SLIDER\("Custom timbre"[^;]*?ae::kParamCustomTimbre\)\);/s,
+    280: /PF_ADD_SLIDER\("Vowel formant"[^;]*?ae::kParamCustomVowelFirst \+ index\)\);/s,
   }[index];
   const registered = named || new RegExp(`PF_ADD_[A-Z_]+\\([^;]*?[ ,]${index}\\);`, "s");
   if (!registered.test(nativePluginSource)) {
@@ -899,7 +905,7 @@ for (const bpm of [60, 90, 120, 174]) {
    */
   const identicalInBothScripts = new Set(Array.from(
     "一三上下不中之也了二五些亮人什介仍代以件任份伴但位低何作你例依保修候倦值停" +
-    "普女授播特" +
+    "普女授播特足我振他" +
     "像元先免入全八六共其再冒出分切列判到制前剛加勾十升半危即厚原去取受口句只叫" +
     "可台右吃合同名向否含吼和咪咬哪唱四回因固在地型填增多大太失奏套奶好始子字存" +
     "它安完定害容射小少尚就尾左巨差己已巴常幕平年序度延建式弦形影往很律得心怕性" +
@@ -2001,6 +2007,48 @@ const stepFor = (gapBeats, bpm) =>
     }
   }
   /*
+   * A measured voice is written when there is one to write, cleared when there
+   * is not, and left alone when nobody is talking about it.
+   *
+   * Three states, and the middle one is the one that gets lost: an *empty*
+   * array means "this line has no custom voice any more" and must clear the
+   * layer, while an absent field means "I am not talking about the voice" and
+   * must leave it. Collapse the two and either Clear does nothing, or Import —
+   * which carries no measurement — wipes a voice the user recorded.
+   *
+   * The melody made exactly this distinction in 1.7.0 (invariant 8t) and it is
+   * the same code shape, so it is checked the same way.
+   */
+  {
+    const writing = takeFunction("setEffectParameters");
+    if (!/if \(settings\.customVowels\) \{/.test(writing)) {
+      throw new Error(
+        "setEffectParameters() must leave a layer's measured voice alone when the settings " +
+        "carry none; Import and a plain Apply would otherwise wipe it");
+    }
+    if (!/setPropertyValue\(effect\.property\(PARAM_CUSTOM_TIMBRE\), anyMeasured \? 1 : 0, time\)/
+      .test(writing)) {
+      throw new Error(
+        "The custom-timbre flag must be derived from whether anything was actually measured, " +
+        "not set beside the numbers: a flag that says yes over ten zeros is a voice that " +
+        "cannot be heard and cannot be cleared");
+    }
+    const reading = takeFunction("customVowelsFromEffect");
+    if (!/if \(Math\.round\(effect\.property\(PARAM_CUSTOM_TIMBRE\)\.value\) === 0\) \{ return out; \}/
+      .test(reading)) {
+      throw new Error(
+        "customVowelsFromEffect() must return nothing when the flag is off. A project from " +
+        "before 3.2.0 has zeros in those slots because nothing was ever written, and a " +
+        "caller cannot tell that from a cleared measurement without this");
+    }
+    if (!/customVowels: customVowelsFromEffect\(effect\)/.test(takeFunction("settingsFromEffect"))) {
+      throw new Error(
+        "settingsFromEffect() must read the measured voice back, or Re-sync writes a layer " +
+        "back without the voice it had (invariant 8o)");
+    }
+  }
+
+  /*
    * A line records which character it was given, and the record outlives the rig.
    *
    * Three things can go wrong here and none of them is visible in a screenshot.
@@ -2583,6 +2631,73 @@ for (const releaseFile of [
     }
   }
   /*
+   * The trial, and the two ways of shipping the wrong one.
+   *
+   * A trial sold as the product gives the product away; the product handed out
+   * as the trial signs audio somebody paid for. Neither is visible from
+   * outside — same file names, same sizes — so the packager reads the token out
+   * of the staged binaries and refuses the wrong one in *both* directions. A
+   * check in one direction only is how you end up shipping the other.
+   *
+   * The limit is in the engine because the panel is plain text: a limit written
+   * in ExtendScript is a limit anybody can delete with Notepad.
+   */
+  {
+    if (!/ISLAND-CHATTER-TRIAL/.test(packager) || !/ISLAND-CHATTER-RELEASE/.test(packager)) {
+      throw new Error(
+        "tools/package-release.ps1 must read the build token out of the staged binaries");
+    }
+    if (!/if \(\$Trial\) \{[\s\S]{0,600}\$signed -eq 0[\s\S]{0,600}\$unsigned -gt 0/.test(packager)) {
+      throw new Error(
+        "The trial package must refuse binaries that are not trial builds, and must refuse a " +
+        "mixture: a package with both signs its previews and not its exports");
+    }
+    if (!/\} else \{[\s\S]{0,400}\$signed -gt 0/.test(packager)) {
+      throw new Error(
+        "The release package must refuse a binary carrying the trial token; that is the " +
+        "direction that marks audio somebody paid for");
+    }
+    const engine = fs.readFileSync(path.join(root, "native", "src", "dsp.cpp"), "utf8");
+    if (!/value =\s*\n?\s*limited\(raw \+ trial_mark\(source_index, state\.settings\.sample_rate\), gain\)/
+      .test(engine)) {
+      throw new Error(
+        "The trial mark must go through the limiter with the audio. Added after it, an " +
+        "already-loud line clips — which the DSP suite caught as an extreme Volume clipping");
+    }
+    /*
+     * Both output paths, each checked in its own body.
+     *
+     * Written as a count of `trial_mark(` in the file, this passed with the
+     * mark deleted from synthesize() — the definition and the test accessor
+     * make up the number on their own. Counting occurrences is the same
+     * mistake as searching for an identifier: it survives the break.
+     */
+    // Comments stripped first: dsp.cpp says "synthesize()" in a comment above
+    // the function, and the brace walk would start there and read the wrong
+    // body — which is how this check first failed against correct code.
+    const engineCode = engine.split(/\r?\n/).filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join("\n");
+    for (const path of ["synthesize", "Utterance::copy_region"]) {
+      if (!/trial_mark\(/.test(takeCppFunction(engineCode, path))) {
+        throw new Error(
+          `${path}() does not add the trial mark. Both of the engine's output paths must, ` +
+          "or the trial signs its previews and not its exports — or the other way round");
+      }
+    }
+    const panelTrial = takeFunction("buildIsTrial");
+    if (!/" --build"/.test(panelTrial) || !/ISLAND-CHATTER-TRIAL/.test(panelTrial)) {
+      throw new Error(
+        "The panel must ask the engine tool which build it is; it ships identically in both " +
+        "packages and cannot know by itself");
+    }
+    if (!/if \(buildIsTrial\(\)\) \{/.test(nativePanelSource)) {
+      throw new Error(
+        "A trial has to say it is a trial. Somebody who does not know about the mark is " +
+        "somebody deciding the synthesizer is broken");
+    }
+  }
+
+  /*
    * And the packager has to look inside the binaries, not at their names.
    *
    * 3.0.0 was built, packaged and installed before anybody read the DLL it
@@ -2597,6 +2712,56 @@ for (const releaseFile of [
     throw new Error(
       "tools/package-release.ps1 must search the staged binaries for espeak-ng before it " +
       "zips them. Reading about a dependency is what let 3.0.0 be built");
+  }
+  /*
+   * Two offline models, and neither may be fetched by accident.
+   *
+   * Get model downloads 170-odd MB, so it has to fetch the row the user is
+   * looking at: without `--provider` the tool takes its first model, which
+   * means pressing the button on the Japanese row spends twenty minutes on the
+   * Chinese one and then still cannot speak Japanese.
+   *
+   * And the caveat has to belong to the model rather than to the button. The
+   * accent warning is true of the Chinese model and false of the Japanese one,
+   * and a warning that is attached to the press rather than to the thing being
+   * pressed is how the wrong model gets the wrong sentence.
+   */
+  {
+    // A handler, not a named function, so it is read as the slice from its
+    // assignment to the end of the block it opens.
+    const handlerAt = nativePanelSource.indexOf("modelButton.onClick = function");
+    if (handlerAt < 0) throw new Error("Get model has no handler");
+    const downloading = nativePanelSource.slice(handlerAt,
+      nativePanelSource.indexOf("cloudButton.onClick", handlerAt));
+    if (!/" --install --provider " \+ wanted/.test(downloading)) {
+      throw new Error(
+        "Get model must name the model it is fetching. Without --provider the tool takes " +
+        "its first one, and the Japanese row would download the Chinese model");
+    }
+    if (!/IC_SOURCE_NOTES\[wanted\]/.test(downloading)) {
+      throw new Error("Get model must take the size and the caveat from the source's own note");
+    }
+    const notes = nativePanelSource.slice(nativePanelSource.indexOf("var IC_SOURCE_NOTES"));
+    if (!/"local-melo":\s*{[\s\S]{0,200}caveat:\s*"[^"]{40,}"/.test(notes)) {
+      throw new Error(
+        "The Chinese offline model must carry its accent caveat in IC_SOURCE_NOTES; it is " +
+        "the one thing somebody has to know before spending 177 MB rather than after");
+    }
+    if (!/"local-melo-ja":\s*{[\s\S]{0,80}caveat:\s*""/.test(notes)) {
+      throw new Error(
+        "The Japanese offline model must not inherit the Chinese model's accent caveat");
+    }
+    // And the tool refuses an id it does not serve rather than quietly serving
+    // the first model, for the reason parse_arguments() refuses --key.
+    const localTool = fs.readFileSync(
+      path.join(root, "native", "tools", "local_cli.cpp"), "utf8");
+    if (!/throw std::runtime_error\("there is no local model called '" \+ provider \+ "'"\)/
+      .test(localTool)) {
+      throw new Error(
+        "island_chatter_local must refuse an unknown model by name. Falling back to the " +
+        "first one renders Japanese text with the Chinese model, which reads as the model " +
+        "being bad rather than as the wrong model");
+    }
   }
   // And the offline tool has to be *in* the package, with the one DLL it needs
   // beside it. A plug-in whose local voice appears in the menu and then cannot
@@ -2970,7 +3135,7 @@ for (const smokeFragment of [
   'comp.layers.addText("你好，中文聲音測試！")',
   'effects.addProperty(TONE_MATCH_NAME)',
   'effects.addProperty(EFFECT_NAME)',
-  "EXPECTED_PARAMETERS = 279",
+  "EXPECTED_PARAMETERS = 290",
   '"External audio files: 0"',
 ]) {
   if (!aeSmokeSource.includes(smokeFragment)) {
@@ -2982,7 +3147,7 @@ for (const smokeFragment of [
 {
   const hostRegressionSource = fs.readFileSync(
     path.join(root, "native", "tests", "ae-host-regression.jsx"), "utf8");
-  if (!hostRegressionSource.includes("chatter.numProperties === 279")) {
+  if (!hostRegressionSource.includes("chatter.numProperties === 290")) {
     throw new Error("ae-host-regression.jsx no longer checks the published parameter count");
   }
 }
@@ -3113,7 +3278,7 @@ while (filesToVisit.length) {
   }
   for (const promise of [
     // Numbers a wrong answer would mislead someone about.
-    "128 UTF-16 units", "**64**", "**279**", "44,355",
+    "128 UTF-16 units", "**64**", "**290**", "44,355",
     // The distinction users get wrong most often.
     "Re-sync", "Island Chatter Audio Bootstrap",
   ]) {

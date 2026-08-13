@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 3.1.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.2.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -235,8 +235,8 @@ Grouped by what they are for. Exact strings in all four languages are in
 Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
-- Controls and menu entries with a label: **84**
-- Distinct messages the panel can print: **91**
+- Controls and menu entries with a label: **87**
+- Distinct messages the panel can print: **97**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -252,6 +252,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Angry | 生氣 | 生气 | おこり |
 | Apply to selected text layers | 套用到選取文字圖層 | 应用到选中文本图层 | 選択したテキストレイヤーに適用 |
 | Bake | 轉成音訊 | 转成音频 | 音声ファイルに書き出す |
+| Built-in | 內建 | 内建 | 内蔵 |
 | Buzzy | 電子 | 电子 | バジー |
 | Center | 維持置中 | 维持置中 | 中央ぞろえを保つ |
 | Chatter | 逐字開合 | 逐字开合 | 1 音ずつ開閉 |
@@ -259,6 +260,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Chirpy | 活潑 | 活泼 | チャーピー |
 | Choose MIDI | 選 MIDI | 选 MIDI | MIDI を選ぶ |
 | Clarity | 清晰度 | 清晰度 | はっきりさ |
+| Clear | 清除 | 清除 | 消去 |
 | Cloud voice | 雲端語音 | 云端语音 | クラウド音声 |
 | Consonant | 聲母 | 声母 | しいん |
 | Cozy | 溫厚 | 温厚 | コージー |
@@ -285,6 +287,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Metallic | 金屬 | 金属 | メタリック |
 | Model | 模型 | 模型 | モデル |
 | Mouth switch | 建立嘴型切換 | 创建口型切换 | 口パクをつなぐ |
+| My voice… | 我的聲音… | 我的声音… | 自分の声… |
 | Neutral | 中性 | 中性 | ふつう |
 | New | 新增角色 | 新增角色 | キャラを追加 |
 | Per layer | 每層 | 每层 | レイヤーごと |
@@ -603,7 +606,7 @@ pattern, because a beat grid and a stress pattern cannot both be satisfied.
 | --- | --- | --- |
 | Text per layer | **128 UTF-16 units** | A typed line is truncated **and reported**. An imported line is **split** at punctuation into more layers. A surrogate pair counts as 2 units and is never cut in half. |
 | Notes per layer | **64** | A longer melody is split, and the cut backs up to the last **bar line** so it reads as a line rather than a mistake. |
-| Effect parameters | **279** | A saved-project contract. Do not expect this to change. |
+| Effect parameters | **290** | A saved-project contract. Do not expect this to change. |
 | Melody timing resolution | **1/96 of a beat** | Supports 64th notes (6 ticks) and 32nd triplets (8). ~5.2 ms at 120 BPM. |
 | Mouth shapes | **6** | closed, a, i, u, e, o |
 | Sung mouth-close threshold | **2 frames** | Frames, not seconds, so it behaves the same at any frame rate |
@@ -645,16 +648,19 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Applied to {0} layer(s) | 已套用 {0} 個圖層 | 已应用 {0} 个图层 | {0} レイヤーに適用しました |
 | Apply Island Chatter first, then bake. | 請先按 Apply 再轉成音訊。 | 请先按 Apply 再转成音频。 | 先に適用してから書き出してください。 |
 | Apply Island Chatter to these layers first. | 這些圖層還沒套用過。 | 这些图层还没应用过。 | これらのレイヤーにはまだ適用されていません。 |
+| Back to the built-in voice | 已改回內建的聲音 | 已改回内建的声音 | 内蔵の声に戻しました |
 | Baked {0} layer(s) -> {1} | 已轉成音訊 {0} 層 -> {1} | 已转成音频 {0} 层 -> {1} | {0} レイヤーを書き出しました -> {1} |
 | Character {0} | 角色 {0} | 角色 {0} | キャラ {0} |
 | Choose a MIDI file | 選一個 MIDI 檔 | 选一个 MIDI 文件 | MIDI ファイルを選ぶ |
 | Choose a MIDI file first. | 請先按「選 MIDI」挑一個檔案。 | 请先按「选 MIDI」挑一个文件。 | 先に「MIDI を選ぶ」でファイルを選んでください。 |
 | Choose a provider first. | 請先選一家供應商。 | 请先选一家供应商。 | 先にサービスを選んでください。 |
+| Choose a recording of a held “{0}” | 請選一段拉長的「{0}」的錄音 | 请选一段拉长的「{0}」的录音 | 「{0}」を伸ばして録音したファイルを選んでください |
 | Choose a track first. | 請先選一個軌道。 | 请先选一个轨道。 | 先にトラックを選んでください。 |
 | Choose or create a character first. | 請先選擇或新增角色。 | 请先选择或新增角色。 | 先にキャラを選ぶか追加してください。 |
+| Choose which offline model to download in the source menu. | 請先在來源清單選一個要下載的離線模型。 | 请先在来源清单选一个要下载的离线模型。 | ダウンロードするオフラインモデルを、音声ソースの一覧から選んでください。 |
 | Cloud voice on {0} layer(s) via {1} | 已用 {1} 為 {0} 層配音 | 已用 {1} 为 {0} 层配音 | {1} で {0} レイヤーに声を当てました |
 | Download failed | 下載失敗 | 下载失败 | ダウンロードに失敗しました |
-| Download the offline voice model? ⏎  ⏎ About {0} MB, once. After that this voice needs no network and no account — it runs on this computer. ⏎  ⏎ It is Mandarin as it is spoken in China, by a woman. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure. ⏎  ⏎ After Effects will not respond while it downloads. | 要下載離線語音模型嗎？ ⏎  ⏎ 大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。 ⏎  ⏎ 這個聲音是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。 ⏎  ⏎ 下載時 After Effects 會沒有反應。 | 要下载离线语音模型吗？ ⏎  ⏎ 大约 {0} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。 ⏎  ⏎ 这个声音是中国口音的普通话女声。可商用授权的中文模型只有这一个，台湾国语的离线模型并不存在；要台湾国语请用内建的声音或 Azure。 ⏎  ⏎ 下载时 After Effects 会没有反应。 | オフライン音声モデルをダウンロードしますか？ ⏎  ⏎ 約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。 ⏎  ⏎ 声は中国の標準中国語（普通話）を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。 ⏎  ⏎ ダウンロード中は After Effects が応答しなくなります。 |
+| Download the offline voice model? ⏎  ⏎ About {0} MB, once. After that this voice needs no network and no account — it runs on this computer. ⏎  ⏎ After Effects will not respond while it downloads. | 要下載離線語音模型嗎？ ⏎  ⏎ 大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。 ⏎  ⏎ 下載時 After Effects 會沒有反應。 | 要下载离线语音模型吗？ ⏎  ⏎ 大约 {0} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。 ⏎  ⏎ 下载时 After Effects 会没有反应。 | オフライン音声モデルをダウンロードしますか？ ⏎  ⏎ 約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。 ⏎  ⏎ ダウンロード中は After Effects が応答しなくなります。 |
 | Downloading… | 下載中… | 下载中… | ダウンロード中… |
 | Error | 錯誤 | 错误 | エラー |
 | Imported {0} layer(s) | 已匯入 {0} 層 | 已导入 {0} 层 | {0} レイヤーを読み込みました |
@@ -664,6 +670,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Lip-synced {0} layer(s) onto {1} | 已對嘴 {0} 層到「{1}」 | 已对嘴 {0} 层到「{1}」 | {0} レイヤーを「{1}」に口パクさせました |
 | Lip-synced {0} layer(s); {1} overlap | 已對嘴 {0} 層；有 {1} 句重疊 | 已对嘴 {0} 层；有 {1} 句重叠 | {0} レイヤーを口パクさせました。{1} 件が重なっています |
 | MIDI loaded: {0} — pick a track, then Sing | 已讀取 {0} —— 選好軌道後按「唱出來」 | 已读取 {0} —— 选好轨道后按「唱出来」 | MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」 |
+| Measured {0} vowel(s); Apply writes them onto a layer | 已量到 {0} 個母音，按 Apply 才會寫到圖層上 | 已量到 {0} 个母音，按 Apply 才会写到图层上 | 母音を {0} つ測りました。レイヤーに書き込むには「適用」を押してください |
 | Model ready | 模型已就緒 | 模型已就绪 | モデルの準備ができました |
 | Mouth on Time Remap | 嘴型已接上時間重映射 | 口型已接上时间重映射 | 口パクをタイムリマップにつなぎました |
 | Mouth switch on {0} layer(s) -> {1} | 已接上嘴型 {0} 層 -> {1} | 已接上口型 {0} 层 -> {1} | 口パクを {0} レイヤーにつなぎました -> {1} |
@@ -703,6 +710,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | There are no Island Chatter lines here. | 這個合成裡沒有台詞圖層。 | 这个合成里没有台词图层。 | このコンポにセリフのレイヤーがありません。 |
 | There is no shared rig here. | 這個合成裡沒有共用控制器。 | 这个合成里没有共用控制器。 | このコンポには共有リグがありません。 |
 | This voice has no sound for these characters, so they were left out: {0} | 這個語音沒有這些字的發音，所以沒有唸出來：{0} | 这个语音没有这些字的发音，所以没有念出来：{0} | この音声には次の文字の読みがないため、読み上げられませんでした：{0} |
+| Trial: the voice carries a short mark every few seconds | 試用版：聲音每隔幾秒會有一小段標記聲 | 试用版：声音每隔几秒会有一小段标记声 | 体験版：数秒ごとに短い印の音が入ります |
 | Truncated: {0} | 已截斷：{0} | 已截断：{0} | 文字が切れました：{0} |
 | Type something first, or select a text layer to hear. | 請先打字，或選一個文字圖層來聽。 | 请先打字，或选一个文本图层来听。 | 先に文字を入力するか、聴きたいテキストレイヤーを選んでください。 |
 | truncated: {0} | 被截斷：{0} | 被截断：{0} | 切れました：{0} |
@@ -714,6 +722,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | {0} new, {1} reused | 新增 {0}、沿用 {1} | 新增 {0}、沿用 {1} | 新規 {0} 件・再利用 {1} 件 |
 | {0} note(s) dropped from chords | 和弦捨去 {0} 個音 | 和弦舍去 {0} 个音 | 和音から {0} 音を省きました |
 | {0} note(s) with no syllable | {0} 個音符沒有字 | {0} 个音符没有字 | {0} 音に歌詞がありません |
+| {0} of 5 vowels | 5 個母音中的 {0} 個 | 5 个母音中的 {0} 个 | 母音 5 つのうち {0} つ |
 | {0} s/syllable   Speed {1} | {0} 秒／字   Speed {1} | {0} 秒／字   Speed {1} | {0} 秒／音   Speed {1} |
 | {0} syllable(s) found | 找到 {0} 個音節 | 找到 {0} 个音节 | {0} 音節を検出しました |
 | {0} syllable(s) with no note | {0} 個字沒有音符（用最後一個音唱完） | {0} 个字没有音符（用最后一个音唱完） | {0} 文字に音符がありません（最後の音でのばします） |
@@ -859,7 +868,7 @@ Some guidance specific to this product:
 | `CLAUDE.md` | Maintainer guide and design invariants. Not a usage reference |
 | `native/panel/IslandChatterNativePanel.jsx` | The panel — every label and message |
 | `native/src/dsp.cpp` | The synthesis engine, Mandarin readings, kana, English syllables |
-| `native/plugin/params.hpp` | The 279-parameter layout |
+| `native/plugin/params.hpp` | The 290-parameter layout |
 | `docs/gumroad-listing.md` | Storefront copy |
 | `LICENSE` | Source-available terms |
 

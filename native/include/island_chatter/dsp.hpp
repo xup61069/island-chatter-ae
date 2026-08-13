@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -149,6 +150,30 @@ struct Settings {
     // Below 1 is a smaller head, above 1 a larger one. 1.0 leaves each voice
     // preset exactly as it was.
     double formant = 1.0;
+
+    /*
+     * A vowel space measured from somebody's own voice.
+     *
+     * Five vowels, F1 and F2 each, in Hz, in the order a e i o u — the two
+     * numbers that decide which vowel a listener hears. They replace the
+     * engine's table for those five when `custom_timbre` is on, and everything
+     * else about the voice is unchanged: this is a vocal tract, not a
+     * recording. Sampled playback was considered and rejected, because samples
+     * cannot carry the Mandarin tone contours the engine draws.
+     *
+     * What is *not* measured is derived rather than guessed at: F3 and the
+     * three bandwidths move by the same ratio the measured formants moved, and
+     * the three Mandarin-only vowels (the apical one, ü, and the retroflex
+     * ending) move by the average of those ratios. Measuring F3 from a phone
+     * recording is unreliable, and a number that is unreliable is worse than a
+     * number that is honestly derived.
+     *
+     * Zero for a vowel means "not measured", and the engine's own value stands.
+     * That is what makes a half-finished recording session harmless.
+     */
+    static constexpr std::size_t kCustomVowels = 5;
+    std::array<double, kCustomVowels * 2> custom_vowels{};
+    bool custom_timbre = false;
     SourceType source = SourceType::voice;
     // Multiplies the voice preset's own vibrato depth, so 1.0 changes nothing
     // and 0 removes the wobble entirely.
@@ -213,6 +238,34 @@ struct Result {
     std::vector<float> samples;
     Diagnostics diagnostics;
 };
+
+/*
+ * Which build this is, as a string that survives into the binary.
+ *
+ * A trial build marks the audio it renders, and the one thing that must never
+ * happen is shipping the wrong one — a trial sold as the product, or a full
+ * build handed out as the trial. Neither is visible from outside: the files
+ * have the same names and the same sizes to the eye.
+ *
+ * So the build says so *inside itself*, in a token distinctive enough to search
+ * for, and `tools/package-release.ps1` searches every staged binary before it
+ * zips them: the release package must not contain the trial token, and the
+ * trial package must. That is the same check the espeak-ng one is, and it is
+ * here for the same reason — reading the build script tells you what somebody
+ * intended, and reading the file tells you what they made.
+ */
+const char* build_kind();
+bool is_trial();
+
+/*
+ * The trial's mark on the audio at one sample, exposed so it can be tested
+ * rather than inferred from a rendered file.
+ *
+ * Zero everywhere in a release build, which is the assertion that matters most:
+ * a release that signs its audio is a product that damages what people paid
+ * for, and comparing two renders cannot tell that from an ordinary difference.
+ */
+float trial_signature(std::int64_t index, std::uint32_t sample_rate);
 
 const std::vector<Voice>& voices();
 

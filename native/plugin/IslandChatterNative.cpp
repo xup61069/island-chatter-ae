@@ -138,6 +138,21 @@ island_chatter::Settings settings_from_params(PF_ParamDef* params[], std::uint32
         quantize(params[island_chatter::ae::kParamVibratoDepth]->u.fs_d.value, 0.1) / 100.0;
     settings.vibrato_rate =
         quantize(params[island_chatter::ae::kParamVibratoRate]->u.fs_d.value, 0.01);
+    /*
+     * A measured vowel space, if there is one.
+     *
+     * Not quantized, unlike the sliders above: these are not keyframable in any
+     * useful sense — a formant that moves between blocks is a different voice
+     * every block, and the panel writes them once from a recording. Reading
+     * them straight also keeps the value that goes into the cache key exactly
+     * the value the panel wrote.
+     */
+    settings.custom_timbre =
+        params[island_chatter::ae::kParamCustomTimbre]->u.sd.value != 0;
+    for (std::size_t index = 0; index < island_chatter::ae::kCustomVowelValues; ++index) {
+        settings.custom_vowels[index] = static_cast<double>(
+            params[island_chatter::ae::kParamCustomVowelFirst + index]->u.sd.value);
+    }
     settings.melody = melody_from_params(params);
     settings.melody_mode = !settings.melody.empty();
     settings.melody_bpm = quantize(params[island_chatter::ae::kParamMelodyBpm]->u.fs_d.value, 0.01);
@@ -294,6 +309,25 @@ PF_Err params_setup(PF_InData* in_data, PF_OutData* out_data) {
         PF_ADD_SLIDER("Melody detail", 0, 65535, 0, 65535, 0,
             static_cast<A_long>(island_chatter::ae::kParamMelodyDetailFirst + index));
     }
+    /*
+     * Custom timbre, appended in 3.2.0: a flag and ten formant values in Hz.
+     *
+     * Hidden, like the text and melody transports, because nobody sets a
+     * formant by dragging a slider — they are written by the panel from a
+     * recording the user made. The ranges are wide enough for any human tract
+     * (a child's F2 reaches 3500 Hz) and the defaults are zero, which is what
+     * makes a project saved before this existed sound exactly as it did.
+     */
+    AEFX_CLR_STRUCT(def);
+    def.ui_flags = PF_PUI_INVISIBLE;
+    PF_ADD_SLIDER("Custom timbre", 0, 1, 0, 1, 0,
+        static_cast<A_long>(island_chatter::ae::kParamCustomTimbre));
+    for (std::size_t index = 0; index < island_chatter::ae::kCustomVowelValues; ++index) {
+        AEFX_CLR_STRUCT(def);
+        def.ui_flags = PF_PUI_INVISIBLE;
+        PF_ADD_SLIDER("Vowel formant", 0, 5000, 0, 5000, 0,
+            static_cast<A_long>(island_chatter::ae::kParamCustomVowelFirst + index));
+    }
     out_data->num_params = island_chatter::ae::kParamCount;
     return PF_Err_NONE;
 }
@@ -357,9 +391,20 @@ extern "C" DllExport PF_Err EffectMain(
     try {
         switch (cmd) {
             case PF_Cmd_ABOUT:
+                /*
+                 * The build token goes in the About box, and that is not
+                 * decoration: it is what puts the string into the .aex at all.
+                 * Nothing else in the plug-in called build_kind(), so the
+                 * linker dropped it — and the packaging check that reads the
+                 * token out of every shipped binary found the .aex carrying
+                 * neither, which means a trial .aex could have shipped as the
+                 * product with nothing noticing. The file that renders the
+                 * audio is the file that has to say which build it is.
+                 */
                 PF_SPRINTF(out_data->return_msg,
                     "Island Chatter Native v" ISLAND_CHATTER_VERSION_TEXT
-                    "\rMandarin character voices, timing, and animation controls.");
+                    "\rMandarin character voices, timing, and animation controls."
+                    "\r%s", island_chatter::build_kind());
                 return PF_Err_NONE;
             case PF_Cmd_GLOBAL_SETUP: return global_setup(out_data);
             case PF_Cmd_PARAMS_SETUP: return params_setup(in_data, out_data);

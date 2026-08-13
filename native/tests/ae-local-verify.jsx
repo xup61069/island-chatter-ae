@@ -91,8 +91,14 @@
         for (index = 0; index < sources.length; index += 1) {
             check(sources[index].tool !== undefined && sources[index].tool !== null,
                 sources[index].id + " remembers which tool serves it");
-            if (sources[index].onThisMachine) { localRows += 1; picked = sources[index]; }
-            else { cloudRows += 1; }
+            if (sources[index].onThisMachine) {
+                localRows += 1;
+                // The Chinese model, deliberately, because the line below is
+                // Chinese. Taking whichever row happened to be last is how this
+                // suite ended up rendering 你好，歡迎來到小島！ with the
+                // Japanese model and calling three syllables a pass.
+                if (sources[index].id === "local-melo" || !picked) { picked = sources[index]; }
+            } else { cloudRows += 1; }
         }
         check(cloudRows >= 3, "the cloud tool still contributes its " + cloudRows + " sources");
         if (!picked) {
@@ -101,7 +107,11 @@
             skipped = true;
             return;   // the finally reports, and will not call this a pass
         }
-        check(localRows === 1, "and the local tool contributes exactly one");
+        // One row per model the user has actually downloaded, so this is a
+        // count of installed models rather than a constant.
+        check(localRows >= 1, "the local tool contributes " + localRows + " installed model(s)");
+        check(picked.id === "local-melo",
+            "the Chinese model is the one this suite drives, got " + picked.id);
         check(picked.tool.fsName === local.fsName,
             "the local row is served by the local tool, not the cloud one");
         check(picked.label.length > 0, "it has a name a person can read: " + picked.label);

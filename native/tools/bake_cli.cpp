@@ -289,6 +289,15 @@ std::string play_file(const std::string& path) {
         "island_chatter_bake --analyse-hex <hex-utf8-path> [--rate N]\n"
         "                    [--sensitivity 0..1] [--vowels 0|1]\n"
         "\n"
+        "island_chatter_bake --measure-vowel <hex-utf8-path>\n"
+        "  One sustained vowel, for custom timbre. Prints\n"
+        "  VOWEL <f1> <f2> <frames> <seconds>.\n"
+        "\n"
+        "island_chatter_bake --build\n"
+        "  Prints which build this is. The two tokens are deliberately not\n"
+        "  spelled out here: the packager searches the shipped binaries for\n"
+        "  them, and a help string naming both would match either way.\n"
+        "\n"
         "island_chatter_bake --midi-hex <hex-utf8-path> --list-tracks\n"
         "island_chatter_bake --midi-hex <hex-utf8-path> --track N\n"
         "                    --lyrics <hex-utf8> --dump-song\n"
@@ -316,7 +325,9 @@ int main(int argc, char** argv) {
         bool list_tracks = false;
         bool dump_song = false;
         bool play = false;
+        bool want_build_kind = false;
         std::string analyse_path;
+        std::string vowel_path;
         double sensitivity = 0.5;
         bool identify_vowels = true;
 
@@ -325,6 +336,8 @@ int main(int argc, char** argv) {
             // The flags that take no value, handled before the loop reaches for
             // one.
             if (flag == "--plan") { plan_only = true; continue; }
+            // Which build this is, for a panel that ships in both packages.
+            if (flag == "--build") { want_build_kind = true; continue; }
             // Renders and then plays it, for the panel's Preview.
             if (flag == "--play") { play = true; continue; }
             if (flag == "--list-tracks") { list_tracks = true; continue; }
@@ -332,6 +345,7 @@ int main(int argc, char** argv) {
             if (index + 1 >= argc) usage();
             const std::string value = argv[++index];
             if (flag == "--analyse-hex") analyse_path = decode_hex(value);
+            else if (flag == "--measure-vowel") vowel_path = decode_hex(value);
             else if (flag == "--sensitivity") sensitivity = std::atof(value.c_str());
             else if (flag == "--vowels") identify_vowels = std::atoi(value.c_str()) != 0;
             else if (flag == "--midi-hex") midi_path = decode_hex(value);
@@ -391,6 +405,38 @@ int main(int argc, char** argv) {
             print_song(island_chatter::song::assign(file, track, lyrics, tonic));
             return 0;
         }
+        /*
+         * One sustained vowel, for custom timbre.
+         *
+         * Before the text check for the same reason the analysis is: there is
+         * no utterance here, there is a recording of somebody holding a vowel.
+         * What comes back is the two numbers and the evidence for them — how
+         * many frames agreed and how long the recording was — so the panel can
+         * refuse a file that was mostly silence rather than building a voice
+         * out of a room.
+         */
+        /*
+         * Which build the panel is talking to.
+         *
+         * The panel is plain text and ships identically in both packages, so it
+         * cannot know by itself — and a trial that does not say it is a trial is
+         * a product that sounds broken. It asks the one thing that does know.
+         */
+        if (want_build_kind) {
+            std::cout << "BUILD " << island_chatter::build_kind() << "\n";
+            return 0;
+        }
+
+        if (!vowel_path.empty()) {
+            const auto audio = island_chatter::analysis::read_wav(read_all(vowel_path));
+            const auto measured = island_chatter::analysis::measure_vowel(audio);
+            std::cout << "VOWEL " << static_cast<int>(std::lround(measured.formants.first))
+                      << " " << static_cast<int>(std::lround(measured.formants.second))
+                      << " " << measured.frames
+                      << " " << measured.seconds << "\n";
+            return 0;
+        }
+
         // A recording is not an utterance, so this runs before text is asked
         // for, exactly as the MIDI modes do.
         if (!analyse_path.empty()) {

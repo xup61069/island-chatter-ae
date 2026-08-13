@@ -568,6 +568,111 @@ int main() {
             }
         }
 
+        {
+            /*
+             * Which build this is, and what that is allowed to do to the audio.
+             *
+             * Asserted per build rather than compared between two renders,
+             * because the assertion that matters is the negative one: a release
+             * build must add *nothing*, and "these two files differ" cannot
+             * tell a watermark from any other difference.
+             */
+            const std::string kind = island_chatter::build_kind();
+            require(kind == (island_chatter::is_trial() ? "ISLAND-CHATTER-TRIAL"
+                                                        : "ISLAND-CHATTER-RELEASE"),
+                    "the build says which build it is");
+
+            const std::uint32_t rate = 48000;
+            double loudest = 0.0;
+            for (std::int64_t index = 0; index < static_cast<std::int64_t>(rate) * 8; ++index) {
+                loudest = std::max(loudest,
+                    std::fabs(static_cast<double>(island_chatter::trial_signature(index, rate))));
+            }
+            if (island_chatter::is_trial()) {
+                require(loudest > 0.05, "a trial build signs its audio");
+                // Nothing before the first mark, so a one-second line is clean
+                // and the mark cannot be mistaken for a start-up click.
+                double early = 0.0;
+                for (std::int64_t index = 0; index < static_cast<std::int64_t>(rate); ++index) {
+                    early = std::max(early,
+                        std::fabs(static_cast<double>(
+                            island_chatter::trial_signature(index, rate))));
+                }
+                require(early == 0.0, "the mark waits until the line is under way");
+            } else {
+                require(loudest == 0.0,
+                        "a release build must add nothing at all to what it renders");
+            }
+        }
+
+        {
+            /*
+             * A measured vowel space, and the promise that it costs nothing
+             * until somebody measures one.
+             *
+             * The off case is bit-identical, which is the same promise
+             * `melody_mode` makes in invariant 8t and for the same reason: a
+             * project saved before this existed reads zeros out of the new
+             * parameters, and zeros have to mean "the voice you already had".
+             */
+            island_chatter::Settings base;
+            base.text = "你好，我是動態島的居民！";
+            base.sample_rate = 48000;
+            base.seed = 4242;
+            const auto untouched = island_chatter::synthesize(base).samples;
+
+            island_chatter::Settings idle = base;
+            idle.custom_timbre = true;      // on, but nothing measured
+            require(island_chatter::synthesize(idle).samples == untouched,
+                    "custom timbre with nothing measured must render bit-identically");
+
+            island_chatter::Settings measured = base;
+            measured.custom_timbre = true;
+            /*
+             * A shorter tract than the engine's table, and deliberately not a
+             * uniform one: 1.2, 1.1, 1.3, 0.9, 1.05 against the table's values.
+             * Written uniformly at first, every ratio the same, which made the
+             * half-measured case below identical to this one — the average of
+             * five equal numbers is that number, so the test could not tell
+             * the fallback from the measurement. Real vowels do not scale
+             * together either.
+             */
+            measured.custom_vowels = {960.0, 1380.0, 550.0, 2090.0, 390.0, 2990.0,
+                                      450.0, 810.0, 367.5, 840.0};
+            const auto shifted = island_chatter::synthesize(measured).samples;
+            require(shifted.size() == untouched.size(),
+                    "a measured vowel space must not change the timing");
+            require(shifted != untouched, "a measured vowel space must change the sound");
+
+            // And the flag is what decides: the same numbers with it off are
+            // the untouched voice again, so a stale measurement cannot leak.
+            island_chatter::Settings ignored = measured;
+            ignored.custom_timbre = false;
+            require(island_chatter::synthesize(ignored).samples == untouched,
+                    "the numbers do nothing while the flag is off");
+
+            // Half a session: three vowels measured, two not. The two that were
+            // skipped follow the average rather than staying in another
+            // speaker's mouth, so this is neither the untouched voice nor the
+            // fully measured one.
+            island_chatter::Settings partial = measured;
+            partial.custom_vowels[6] = 0.0;
+            partial.custom_vowels[7] = 0.0;
+            partial.custom_vowels[8] = 0.0;
+            partial.custom_vowels[9] = 0.0;
+            const auto half = island_chatter::synthesize(partial).samples;
+            require(half != untouched && half != shifted,
+                    "a half-measured voice is its own voice, not one of the two");
+
+            // The cache keys the numbers, or a second line with a different
+            // voice would be served the first one's audio.
+            island_chatter::SynthesisCache cache(4);
+            const auto first = cache.get(measured);
+            const auto second = cache.get(partial);
+            require(first.get() != second.get(),
+                    "two measured voices must not share one cache entry");
+        }
+
         island_chatter::Settings timbre;
         timbre.text = "你好，我是動態島的居民！";
         timbre.sample_rate = 48000;

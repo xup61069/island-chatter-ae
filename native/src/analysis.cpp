@@ -780,6 +780,59 @@ Formants formants_at(const std::vector<float>& samples, std::size_t centre,
     return formants;
 }
 
+SustainedVowel measure_vowel(const Audio& audio) {
+    SustainedVowel out;
+    if (audio.sample_rate == 0 || audio.samples.empty()) { return out; }
+    out.seconds = static_cast<double>(audio.samples.size()) / audio.sample_rate;
+
+    const auto mono = resample(audio.samples, audio.sample_rate, kAnalysisRate);
+    if (mono.size() < kAnalysisRate / 20) { return out; }   // under 50 ms is not a vowel
+
+    /*
+     * The loudest half of the recording, measured in frames.
+     *
+     * A person recording a vowel gives you a breath, the vowel, and a fade —
+     * and the fade is where the formants wander. Taking frames above half the
+     * peak energy keeps the held part without needing anybody to trim the file,
+     * which is the difference between a feature people use and one they give up
+     * on.
+     */
+    const auto db = energy_db(mono, kAnalysisRate);
+    if (db.empty()) { return out; }
+    double loudest = db[0];
+    for (const double value : db) { loudest = std::max(loudest, value); }
+    const double floor_db = loudest - 12.0;
+
+    std::vector<double> firsts;
+    std::vector<double> seconds;
+    for (std::size_t frame = 0; frame < db.size(); ++frame) {
+        if (db[frame] < floor_db) { continue; }
+        const auto centre = static_cast<std::size_t>(
+            static_cast<double>(frame) * kHopSeconds * kAnalysisRate);
+        if (centre >= mono.size()) { break; }
+        const auto measured = formants_at(mono, centre, kAnalysisRate);
+        // Zero means the LPC envelope had no peak in that range — breath, a
+        // click, the room. Counting it as zero would drag the median towards a
+        // vowel nobody said.
+        if (measured.first <= 0.0 || measured.second <= 0.0) { continue; }
+        firsts.push_back(measured.first);
+        seconds.push_back(measured.second);
+    }
+    if (firsts.empty()) { return out; }
+
+    auto median = [](std::vector<double>& values) {
+        std::sort(values.begin(), values.end());
+        const std::size_t middle = values.size() / 2;
+        return values.size() % 2 == 1
+            ? values[middle]
+            : 0.5 * (values[middle - 1] + values[middle]);
+    };
+    out.formants.first = median(firsts);
+    out.formants.second = median(seconds);
+    out.frames = firsts.size();
+    return out;
+}
+
 Result analyse(const Audio& audio, const Settings& settings) {
     Result result;
     if (audio.sample_rate == 0 || audio.samples.empty()) { return result; }

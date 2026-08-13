@@ -392,6 +392,61 @@ void testFormants() {
     require(nothing.first == 0.0 && nothing.second == 0.0, "silence reports no formants");
 }
 
+/*
+ * A whole recording of one vowel, which is what custom timbre is measured from.
+ *
+ * The recording is built the way a person's is: silence, the vowel, silence.
+ * A measurement that reads the file end to end is dragged towards nothing by
+ * both ends, so this is the case that says whether the loud-frames rule and the
+ * median are doing their job.
+ */
+void testASustainedVowelIsMeasured() {
+    std::cout << "sustained vowels\n";
+    const std::uint32_t rate = 44100;
+    const struct { const char* name; double first; double second; } cases[] = {
+        {"a", 800.0, 1150.0},
+        {"i", 300.0, 2300.0},
+        {"u", 350.0, 800.0},
+    };
+    for (const auto& one : cases) {
+        island_chatter::analysis::Audio audio;
+        audio.sample_rate = rate;
+        // Half a second of room, a second of vowel, half a second of room.
+        audio.samples.assign(static_cast<std::size_t>(rate * 0.5), 0.0F);
+        const auto held = synth_vowel(one.first, one.second, 1.0, rate);
+        audio.samples.insert(audio.samples.end(), held.begin(), held.end());
+        audio.samples.resize(audio.samples.size() + static_cast<std::size_t>(rate * 0.5), 0.0F);
+
+        const auto measured = island_chatter::analysis::measure_vowel(audio);
+        note(std::string(one.name) + ": wanted " + std::to_string(static_cast<int>(one.first)) +
+             "/" + std::to_string(static_cast<int>(one.second)) + ", found " +
+             std::to_string(static_cast<int>(measured.formants.first)) + "/" +
+             std::to_string(static_cast<int>(measured.formants.second)) +
+             " over " + std::to_string(measured.frames) + " frames");
+        require(measured.frames > 10,
+                std::string("enough frames were held for ") + one.name);
+        require(std::fabs(measured.formants.first - one.first) < 120.0,
+                std::string("F1 for a sustained ") + one.name + " is within 120 Hz");
+        require(std::fabs(measured.formants.second - one.second) < 250.0,
+                std::string("F2 for a sustained ") + one.name + " is within 250 Hz");
+        require(measured.seconds > 1.9 && measured.seconds < 2.1,
+                "the length of the recording is reported");
+    }
+
+    // A recording with nothing in it says so, rather than reporting the
+    // formants of a room. The panel refuses it on this.
+    island_chatter::analysis::Audio empty;
+    empty.sample_rate = rate;
+    empty.samples.assign(rate, 0.0F);
+    const auto nothing = island_chatter::analysis::measure_vowel(empty);
+    require(nothing.frames == 0 && nothing.formants.first == 0.0,
+            "a silent recording measures nothing rather than something");
+
+    // And so does a file that is not there at all.
+    const auto absent = island_chatter::analysis::measure_vowel({});
+    require(absent.frames == 0, "an empty audio buffer measures nothing");
+}
+
 void testVowelsAreTold() {
     const std::uint32_t rate = 48000;
     struct Case { char vowel; double first; double second; };
@@ -545,8 +600,22 @@ void testAgainstTheEngine() {
          * This is a guess made from a spectrum and it is allowed to be wrong.
          * What it is not allowed to do is get quietly worse, and the number
          * printed above is the one to argue with.
+         *
+         * **Except in a trial build**, where the engine mixes a tone burst into
+         * what it renders every four seconds (invariant 8ai) and this test
+         * scores the analyser against audio the engine made. A tone inside a
+         * vowel changes the spectrum the vowel is identified from, so the score
+         * drops — that is the watermark working, not the analyser regressing.
+         * The timing checks above still hold, which is what the mouth is driven
+         * by; only the colour of each vowel is affected. Nothing is asserted
+         * here rather than asserting a second, invented threshold.
          */
-        require(share >= 0.55, "at least 55% of vowels agree with the engine");
+        if (island_chatter::is_trial()) {
+            note("trial build: the engine signs what it renders, so the vowel colours it is "
+                 "scored against are not the engine's alone");
+        } else {
+            require(share >= 0.55, "at least 55% of vowels agree with the engine");
+        }
     }
 }
 
@@ -561,6 +630,7 @@ int main() {
     testNucleiTiming();
     std::cout << "formants\n";
     testFormants();
+    testASustainedVowelIsMeasured();
     std::cout << "vowels\n";
     testVowelsAreTold();
     std::cout << "against the engine\n";

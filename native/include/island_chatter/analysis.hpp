@@ -121,6 +121,33 @@ struct Formants {
 Formants formants_at(const std::vector<float>& samples, std::size_t centre,
                      std::uint32_t sample_rate);
 
+/*
+ * One sustained vowel, measured from somebody's own recording.
+ *
+ * This is what custom timbre is built on: the user says "aaah" into a phone,
+ * and the two numbers that come back are what the engine's vowel table is
+ * replaced with. It is deliberately not `analyse()` — there are no syllables to
+ * find here, there is one long sound, and the question is what shape the mouth
+ * was in while it lasted.
+ *
+ * The **median** of the frames, not the mean and not one frame in the middle.
+ * A recording made by a person in a room starts with a breath, ends with the
+ * hand moving to the button, and may have a click in it; a mean carries all
+ * three into the answer and a single frame is a coin toss. The median of thirty
+ * frames is the value that was actually held.
+ *
+ * Frames whose formants come back as zero — silence, breath — are dropped
+ * before the median rather than counted as zero, which would drag it down
+ * towards a vowel nobody said. `frames` reports how many survived, so a caller
+ * can refuse a recording that was mostly silence rather than quietly using it.
+ */
+struct SustainedVowel {
+    Formants formants;
+    std::size_t frames = 0;         // how many frames agreed enough to be used
+    double seconds = 0.0;           // how much sound there was to work with
+};
+SustainedVowel measure_vowel(const Audio& audio);
+
 // The analysis rate. Formants worth having all sit below 5 kHz, and the LPC
 // order needed scales with the rate, so everything is done here rather than at
 // whatever the file happened to be.

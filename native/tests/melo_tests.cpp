@@ -316,6 +316,89 @@ void test_a_plan_is_always_well_formed() {
     }
 }
 
+// --- Japanese ------------------------------------------------------------------
+
+/*
+ * The Japanese model's lexicon, in its own format: kana, kanji words, and a
+ * digit, all keyed by the surface form, with the model's Japanese tone 6.
+ * These are real lines from it.
+ */
+melo::Lexicon japanese_lexicon() {
+    return melo::Lexicon::parse(
+        "こ k o 6 6\n"
+        "ん N 6\n"
+        "に n i 6 6\n"
+        "ち ch i 6 6\n"
+        "は h a 6 6\n"
+        "こんにちは k o N n i ch i w a 6 6 6 6 6 6 6 6 6\n"
+        "今日 ky o 6 6\n"
+        "日本 n i q p o N 6 6 6 6 6 6\n"
+        "日 n i ch i 6 6 6 6\n"
+        "1 i ch i 6 6 6\n",
+        melo::Language::Japanese);
+}
+
+melo::Plan japanese_plan(const std::string& text) {
+    island_chatter::Settings settings;
+    return melo::plan(text, settings, japanese_lexicon(), sample_tokens(),
+                      melo::Language::Japanese);
+}
+
+void test_japanese_is_read_by_the_models_lexicon() {
+    /*
+     * The mirror of test_chinese_is_read_by_the_engine(), and deliberately the
+     * other way round. The engine cannot read kanji at all — invariant 8h:
+     * a kanji's reading depends on the word and this product has no Japanese
+     * dictionary — so for Japanese the lexicon is the only reader that can say
+     * anything, and 今日 is `ky o` rather than two Mandarin syllables.
+     */
+    const auto tokens = sample_tokens();
+    const auto today = japanese_plan("今日");
+    const auto phones = spoken(today.tokens);
+    require(phones.size() == 2, "今日 is two phones, got " + std::to_string(phones.size()));
+    require(phones.size() == 2 && phones[0] == tokens.id("ky") && phones[1] == tokens.id("o"),
+            "今日 is read ky o, which only the model's lexicon knows");
+    require(spoken(today.tones)[0] == 6, "and carries the model's Japanese tone");
+
+    // Longest match: こんにちは is one word before こ is.
+    const auto greeting = japanese_plan("こんにちは");
+    require(greeting.syllables == 1, "こんにちは matched as one word");
+    require(spoken(greeting.tokens).size() == 9, "and produced its nine phones");
+
+    // 日本 wins over 日, which is the whole point of longest-first.
+    const auto japan = japanese_plan("日本");
+    require(spoken(japan.tokens).size() == 6, "日本 is the six-phone word, not 日 + 本");
+
+    const auto unknown = japanese_plan("齷");
+    require(unknown.unspoken == "齷", "a character with no entry is reported, got " +
+            unknown.unspoken);
+    require(unknown.syllables == 0, "and nothing was counted as spoken");
+}
+
+void test_japanese_leaves_digits_and_brackets_alone() {
+    // The Japanese lexicon has its own digit entries, so spelling numbers out
+    // in Chinese would replace a reading it has with characters it does not.
+    const auto one = japanese_plan("1");
+    require(spoken(one.tokens).size() == 3, "1 is read by the lexicon as i ch i");
+    require(one.unspoken.empty(), "and nothing was reported unspoken");
+
+    // A pronunciation override carries pinyin, which is not a reading here, so
+    // the brackets are ordinary characters and are reported rather than obeyed.
+    const auto override_text = japanese_plan("[今日|xyz]");
+    require(!override_text.unspoken.empty(),
+            "an override is not a Japanese reading and says so");
+}
+
+void test_japanese_punctuation_still_pauses() {
+    const auto tokens = sample_tokens();
+    const auto plan = japanese_plan("は、は");
+    const auto phones = spoken(plan.tokens);
+    require(phones.size() == 5, "two words and one comma, got " +
+            std::to_string(phones.size()));
+    require(phones.size() == 5 && phones[2] == tokens.id(","),
+            "the comma is between them, which is what closes the mouth");
+}
+
 void test_the_lexicon_keeps_only_what_it_is_for() {
     // The Chinese half of lexicon.txt is 190,000 Simplified words this never
     // asks about. Keeping it costs about 40 MB of hash table to answer no
@@ -326,6 +409,21 @@ void test_the_lexicon_keeps_only_what_it_is_for() {
     require(lexicon.size() == 1, "only the Latin entry was kept");
     require(lexicon.find("hello") != nullptr, "and it is the one that was asked for");
     require(lexicon.find("你好") == nullptr, "the Chinese entry is not there to be found");
+
+    // The Japanese model is the opposite: there the lexicon is the reader, so
+    // dropping its non-Latin keys would drop the whole language.
+    const auto japanese = melo::Lexicon::parse(
+        "hello hh ah l ow 7 8 7 9\n"
+        "今日 ky o 6 6\n", melo::Language::Japanese);
+    require(japanese.size() == 2, "the Japanese lexicon keeps its Japanese keys");
+    require(japanese.find("今日") != nullptr, "and 今日 can be found in it");
+    // Five, not six: "hello" is five code points and 今日 is two, while in
+    // bytes 今日 is six and would win. The bound is what the greedy match
+    // starts its span at, and a span counted in the wrong unit walks off the
+    // end of the characters it is indexing.
+    require(japanese.longest_word() == 5,
+            "the longest key is measured in code points, not bytes; got " +
+            std::to_string(japanese.longest_word()));
 }
 
 }  // namespace
@@ -343,6 +441,9 @@ int main() {
     test_mixed_text_keeps_both_readers();
     test_what_cannot_be_said_is_reported();
     test_a_plan_is_always_well_formed();
+    test_japanese_is_read_by_the_models_lexicon();
+    test_japanese_leaves_digits_and_brackets_alone();
+    test_japanese_punctuation_still_pauses();
     test_the_lexicon_keeps_only_what_it_is_for();
 
     if (failures) {

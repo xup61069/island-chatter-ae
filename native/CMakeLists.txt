@@ -1,10 +1,17 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(IslandChatterNative VERSION 3.1.0 LANGUAGES CXX)
+project(IslandChatterNative VERSION 3.2.0 LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
 
 option(ISLAND_CHATTER_BUILD_AE_PLUGIN "Build the After Effects .aex target" OFF)
+
+# The trial. Everything works and the engine signs what it renders with a quiet
+# chirp every few seconds; see trial_mark() in src/dsp.cpp for why it is a mark
+# rather than a limit. Configure a *separate* build directory with this on —
+# tools/package-release.ps1 -Trial packages from it, and refuses if the binaries
+# it is handed do not actually carry the trial token.
+option(ISLAND_CHATTER_TRIAL "Build the trial: the engine signs its audio" OFF)
 
 if(MSVC)
     add_compile_options(/utf-8)
@@ -19,6 +26,12 @@ add_library(island_chatter_dsp STATIC
 )
 target_include_directories(island_chatter_dsp PUBLIC include)
 target_include_directories(island_chatter_dsp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# PUBLIC: everything that links the engine is part of the same build, and a
+# half-trial package — a marked .aex beside an unmarked bake tool — would be a
+# product that signs its previews and not its exports.
+if(ISLAND_CHATTER_TRIAL)
+    target_compile_definitions(island_chatter_dsp PUBLIC ISLAND_CHATTER_TRIAL)
+endif()
 target_compile_features(island_chatter_dsp PUBLIC cxx_std_17)
 target_compile_definitions(island_chatter_dsp PRIVATE _USE_MATH_DEFINES)
 if(MSVC)

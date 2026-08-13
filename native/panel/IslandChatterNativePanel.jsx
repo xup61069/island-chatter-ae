@@ -59,6 +59,21 @@
     // 1.7.0 project reads these as zero, which is no dynamics and no extra
     // length, and the coarse field alone still means the same durations.
     var PARAM_MELODY_DETAIL_FIRST = 215;
+    /*
+     * Appended in 3.2.0: a vowel space measured from somebody's own voice.
+     *
+     * The flag, then ten numbers — F1 and F2 for a, e, i, o, u, in Hz. A
+     * project saved before 3.2.0 reads all eleven as zero, which is exactly
+     * "nothing measured": the engine's own vowel table stands and the line
+     * sounds the way it always did. Mirrors kParamCustomTimbre and
+     * kParamCustomVowelFirst in native/plugin/params.hpp.
+     */
+    var PARAM_CUSTOM_TIMBRE = 279;
+    var PARAM_CUSTOM_VOWEL_FIRST = 280;
+    // a e i o u, two numbers each, in that order — the order the engine's own
+    // vowel table starts with, so a measurement lands on its own row.
+    var CUSTOM_VOWEL_NAMES = ["a", "e", "i", "o", "u"];
+    var CUSTOM_VOWEL_VALUES = 10;
     // One slot per note, holding pitch * 512 + ticks in the same 0-65535 range
     // a text unit uses. Mirrors kMelodySlots and kMelodySlotStride in
     // native/include/island_chatter/dsp.hpp.
@@ -235,6 +250,27 @@
         setPropertyValue(effect.property(PARAM_SOURCE), settings.source + 1, time);
         setPropertyValue(effect.property(PARAM_VIBRATO), settings.vibrato * 100, time);
         setPropertyValue(effect.property(PARAM_VIBRATO_RATE), settings.vibratoRate, time);
+        /*
+         * The measured vowel space, when the settings carry one.
+         *
+         * `customVowels` absent means the caller is not talking about it, and
+         * the layer keeps whatever it has — the same rule the melody follows
+         * (invariant 8t), and for the same reason: Apply must not wipe a
+         * measurement that Import or a saved character put there. An empty
+         * array *is* talking about it, and clears it.
+         */
+        if (settings.customVowels) {
+            var measured = settings.customVowels;
+            var anyMeasured = false;
+            var vowel;
+            for (vowel = 0; vowel < CUSTOM_VOWEL_VALUES; vowel += 1) {
+                var hertz = measured.length > vowel ? Math.round(measured[vowel]) : 0;
+                if (hertz > 0) { anyMeasured = true; }
+                setPropertyValue(effect.property(PARAM_CUSTOM_VOWEL_FIRST + vowel),
+                    clamp(hertz, 0, 5000), time);
+            }
+            setPropertyValue(effect.property(PARAM_CUSTOM_TIMBRE), anyMeasured ? 1 : 0, time);
+        }
         setPropertyValue(effect.property(PARAM_TEXT_LENGTH), units, time);
         var index;
         for (index = 0; index < MAX_TEXT_UNITS; index += 1) {
@@ -338,8 +374,30 @@
             formant: effect.property(PARAM_FORMANT).value / 100,
             source: Math.round(effect.property(PARAM_SOURCE).value) - 1,
             vibrato: effect.property(PARAM_VIBRATO).value / 100,
-            vibratoRate: effect.property(PARAM_VIBRATO_RATE).value
+            vibratoRate: effect.property(PARAM_VIBRATO_RATE).value,
+            // Always read, so Re-sync writes back exactly what it found and a
+            // measured voice survives an edit to the text (invariant 8o).
+            customVowels: customVowelsFromEffect(effect)
         };
+    }
+
+    /*
+     * The ten numbers a layer is carrying, or an empty array.
+     *
+     * Empty when the flag is off, rather than the ten numbers that happen to be
+     * sitting there: a layer whose custom timbre was cleared has zeros written
+     * over it, but a project from before 3.2.0 has zeros because nothing was
+     * ever written, and both must read as "no measurement" without the caller
+     * having to know which.
+     */
+    function customVowelsFromEffect(effect) {
+        var out = [];
+        if (Math.round(effect.property(PARAM_CUSTOM_TIMBRE).value) === 0) { return out; }
+        var index;
+        for (index = 0; index < CUSTOM_VOWEL_VALUES; index += 1) {
+            out.push(Math.round(effect.property(PARAM_CUSTOM_VOWEL_FIRST + index).value));
+        }
+        return out;
     }
 
     function textFromEffect(effect) {
@@ -2113,6 +2171,61 @@
     }
 
     /*
+     * Custom timbre: five recordings in, ten numbers out.
+     *
+     * The user holds each vowel for a second or two and saves five files; the
+     * engine tool measures F1 and F2 from each, and those replace the engine's
+     * vowel table. What comes back is a *vocal tract*, not a recording — the
+     * synthesizer still draws every tone contour, every syllable length and
+     * every mouth shape, which is why this is not sample playback. Samples
+     * cannot bend to a Mandarin fourth tone, and a product whose whole point is
+     * Chinese cannot ship a voice that flattens them.
+     *
+     * A file that turns out to be mostly silence is refused by name rather than
+     * averaged into the voice: `frames` is how many frames of the recording
+     * actually held a vowel, and a handful of them is a cough or a room.
+     */
+    /*
+     * Which build the panel is talking to.
+     *
+     * The panel ships identically in both packages — it is plain text, and a
+     * limit written here would be a limit anybody could delete — so it cannot
+     * know by itself. It asks the engine tool, which does know because the
+     * answer is compiled into it.
+     *
+     * The point of asking at all is that a trial has to *say* it is a trial.
+     * The audio carries a chirp every few seconds, and somebody who does not
+     * know that is somebody deciding the synthesizer is broken.
+     */
+    function buildIsTrial() {
+        var tool = bakeToolFile();
+        if (!tool) { return false; }
+        return String(system.callSystem(quoted(tool.fsName) + " --build"))
+            .indexOf("ISLAND-CHATTER-TRIAL") >= 0;
+    }
+
+    var MIN_VOWEL_FRAMES = 8;
+
+    function measureVowelFile(file) {
+        var tool = requireEngineTool();
+        var reply = String(system.callSystem(quoted(tool.fsName) +
+            " --measure-vowel " + hexUtf8(file.fsName)));
+        var fields = trim(reply).split(/\s+/);
+        if (fields.length < 4 || fields[0] !== "VOWEL") {
+            throw new Error(M("Could not read {0}. / 無法讀取 {0}。", file.name) + "\n\n" + reply);
+        }
+        var first = parseInt(fields[1], 10);
+        var second = parseInt(fields[2], 10);
+        var frames = parseInt(fields[3], 10);
+        if (!first || !second || frames < MIN_VOWEL_FRAMES) {
+            throw new Error(M(
+                "There is not enough steady sound in {0} to measure a vowel. Record a second or two of one held vowel. / {0} 裡面沒有足夠穩定的聲音可以量。請錄一兩秒、一個拉長的母音。",
+                file.name));
+        }
+        return [first, second];
+    }
+
+    /*
      * Renders with the panel's own settings, not a layer's — the whole point is
      * to hear a voice before anything is committed to one — and the engine tool
      * plays it too.
@@ -2419,6 +2532,38 @@
     // What the offline model costs to fetch. Stated to the user before the
     // download starts; the tool has the authoritative per-file sizes.
     var LOCAL_MODEL_MEGABYTES = 177;
+
+    /*
+     * What each offline model costs to fetch, and what it has to say for itself.
+     *
+     * Keyed by the id the tool reports, so a row this table does not know about
+     * still downloads — it just does so without a caveat and with the default
+     * size. That is the right way round: a new model must not inherit another
+     * model's warning, and an unknown row must not be unusable because this
+     * table was not updated.
+     *
+     * The caveat is a message key rather than a sentence, because everything
+     * the panel says goes through `M()` in three languages (invariant 8i) and a
+     * string the tool sent could not be translated. It is the accent, which is
+     * the one thing about the Chinese model somebody has to know *before*
+     * spending 177 MB rather than after.
+     */
+    var IC_SOURCE_NOTES = {
+        "local-melo": {
+            megabytes: 177,
+            caveat: "This model is Mandarin as it is spoken in China, by a woman. It is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure. / 這個模型是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。"
+        },
+        "local-melo-ja": { megabytes: 171, caveat: "" }
+    };
+
+    // The first offline row in a source list, or "" when none is installed.
+    function offlineSourceId(rows) {
+        var index;
+        for (index = 0; index < rows.length; index += 1) {
+            if (rows[index].onThisMachine) { return rows[index].id; }
+        }
+        return "";
+    }
     /*
      * Which source a panel with no remembered choice starts on.
      *
@@ -3617,6 +3762,20 @@
         "Lip-synced {0} layer(s); {1} overlap / 已對嘴 {0} 層；有 {1} 句重疊":
             "{0} レイヤーを口パクさせました。{1} 件が重なっています",
         "Preview / 試聽": "試聴",
+        "My voice… / 我的聲音…": "自分の声…",
+        "Clear / 清除": "消去",
+        "Trial: the voice carries a short mark every few seconds / 試用版：聲音每隔幾秒會有一小段標記聲":
+            "体験版：数秒ごとに短い印の音が入ります",
+        "Built-in / 內建": "内蔵",
+        "{0} of 5 vowels / 5 個母音中的 {0} 個": "母音 5 つのうち {0} つ",
+        "Choose a recording of a held “{0}” / 請選一段拉長的「{0}」的錄音":
+            "「{0}」を伸ばして録音したファイルを選んでください",
+        "Measured {0} vowel(s); Apply writes them onto a layer / 已量到 {0} 個母音，按 Apply 才會寫到圖層上":
+            "母音を {0} つ測りました。レイヤーに書き込むには「適用」を押してください",
+        "Back to the built-in voice / 已改回內建的聲音": "内蔵の声に戻しました",
+        "Could not read {0}. / 無法讀取 {0}。": "{0} を読み取れませんでした。",
+        "There is not enough steady sound in {0} to measure a vowel. Record a second or two of one held vowel. / {0} 裡面沒有足夠穩定的聲音可以量。請錄一兩秒、一個拉長的母音。":
+            "{0} には母音を測れるだけの安定した音がありません。母音を 1〜2 秒伸ばして録音してください。",
         "Playing… / 播放中…": "再生中…",
         "Previewed / 已試聽": "試聴しました",
         "Type something first, or select a text layer to hear. / 請先打字，或選一個文字圖層來聽。":
@@ -3628,8 +3787,12 @@
         "Cloud voice / 雲端語音": "クラウド音声",
         "API key / 金鑰": "APIキー",
         "Get model / 下載模型": "モデルを入手",
-        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is Mandarin as it is spoken in China, by a woman. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。":
-            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。\n\n声は中国の標準中国語（普通話）を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。\n\nダウンロード中は After Effects が応答しなくなります。",
+        "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n下載時 After Effects 會沒有反應。":
+            "オフライン音声モデルをダウンロードしますか？\n\n約 {0} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。\n\nダウンロード中は After Effects が応答しなくなります。",
+        "This model is Mandarin as it is spoken in China, by a woman. It is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure. / 這個模型是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。":
+            "このモデルの声は中国の標準中国語（普通話）を話す女性です。商用利用できるライセンスの中国語モデルはこれだけで、台湾なまりのオフラインモデルは存在しません。台湾の中国語には内蔵の音声か Azure をお使いください。",
+        "Choose which offline model to download in the source menu. / 請先在來源清單選一個要下載的離線模型。":
+            "ダウンロードするオフラインモデルを、音声ソースの一覧から選んでください。",
         "This voice has no sound for these characters, so they were left out: {0} / 這個語音沒有這些字的發音，所以沒有唸出來：{0}":
             "この音声には次の文字の読みがないため、読み上げられませんでした：{0}",
         "Downloading… / 下載中…": "ダウンロード中…",
@@ -3952,7 +4115,7 @@
      */
     var IC_SIMPLIFIED_CHARS = {
         "並": "并", "併": "并", "佇": "伫", "來": "来", "個": "个", "們": "们",
-        "陸": "陆", "灣": "湾", "國": "国", "貨": "货", "試": "试", "帶": "带", "復": "复", "鐘": "钟",
+        "陸": "陆", "灣": "湾", "國": "国", "貨": "货", "試": "试", "帶": "带", "復": "复", "鐘": "钟", "穩": "稳", "順": "顺", "彎": "弯", "複": "复", "製": "制",
         "償": "偿", "儲": "储", "內": "内", "兩": "两", "刪": "删", "別": "别",
         "剛": "刚", "劃": "划", "劇": "剧", "動": "动", "匯": "汇", "問": "问",
         "啟": "启", "嗎": "吗", "唸": "念", "圍": "围", "圖": "图", "夠": "够",
@@ -4272,6 +4435,41 @@
         "\n\nプロジェクトには何も書き込みません。レイヤーもエフェクトも取り消し履歴も増えず、" +
         "\n.aep の隣にファイルもできません。音声は一時ファイルに書かれ、次の試聴で上書きされます。" +
         "\n\n再生中は After Effects が応答しなくなります。音が終わるまで待つためで、一文なら数秒です。");
+
+    help("customTimbre",
+        "Make the engine speak with the shape of your own voice." +
+        "\n\nRecord yourself holding five vowels — ah, eh, ee, oh, oo — for a" +
+        " second or two each, save them as five files, and pick them here in" +
+        " that order. Any recorder will do; a phone is fine." +
+        "\n\nWhat is measured is the two resonances that decide which vowel a" +
+        " listener hears, and they replace the engine's own. Everything else" +
+        " about the voice is still the engine: the tones, the timing, the" +
+        " mouth shapes. That is why this is not sample playback — samples" +
+        " cannot bend to a Mandarin tone, and this can." +
+        "\n\nSo it is a resemblance, not a copy. It carries the size and shape" +
+        " of your mouth, not your accent and not your delivery." +
+        "\n\nSkip a vowel and the ones you did record decide how it sounds." +
+        " Nothing reaches a layer until you press Apply, and Clear puts the" +
+        " built-in voice back.",
+        "讓引擎用你自己的嘴巴形狀講話。" +
+        "\n\n錄五個拉長的母音——ㄚ、ㄝ、一、ㄛ、ㄨ——每個一兩秒，存成五個檔案，" +
+        "\n然後照這個順序選進來。用什麼錄都可以，手機就行。" +
+        "\n\n量的是決定「聽起來是哪個母音」的那兩個共振峰，拿它們換掉引擎自己的。" +
+        "\n聲音的其他部分還是引擎：聲調、長短、嘴型，全都照舊。" +
+        "\n這就是它不是取樣播放的原因——取樣沒辦法照著中文聲調彎，這個可以。" +
+        "\n\n所以它是「像」，不是「複製」。它帶的是你嘴巴的大小和形狀，不是你的口音，也不是你的語氣。" +
+        "\n\n少錄一個母音，那個母音就跟著你錄到的那幾個走。按 Apply 之前不會寫到任何圖層上，" +
+        "\n按「清除」就換回內建的聲音。",
+        "エンジンに、あなた自身の口の形で話させます。" +
+        "\n\n母音を 5 つ——ア、エ、イ、オ、ウ——それぞれ 1〜2 秒伸ばして録音し、" +
+        "\n5 つのファイルとして保存して、この順番で選んでください。録音機材は何でも構いません。" +
+        "\n\n測るのは「どの母音に聞こえるか」を決める 2 つの共鳴で、それがエンジン内蔵の値と" +
+        "\n置き換わります。声調も長さも口の形もエンジンのままです。サンプル再生ではないのは" +
+        "\nそのためで、サンプルは中国語の声調に合わせて曲げられませんが、これはできます。" +
+        "\n\nつまり「似せる」であって「複製」ではありません。運ばれるのは口の大きさと形で、" +
+        "\nなまりや話し方ではありません。" +
+        "\n\n録らなかった母音は、録った母音に合わせて決まります。「適用」を押すまでレイヤーには" +
+        "\n何も書き込まれず、「消去」で内蔵の声に戻ります。");
 
     help("getModel",
         "Download the offline voice model, once, so a voice source can run on" +
@@ -5128,6 +5326,83 @@
         tip(previewButton, "preview");
 
         /*
+         * Custom timbre, on the page about what a character sounds like.
+         *
+         * Two buttons and a readout, on the row Preview already opened, because
+         * the panel is 796 px of the 800 it may have (invariant 8z) and this
+         * page is the one with room. The readout says how many vowels are
+         * measured rather than the numbers themselves: ten formants in Hz mean
+         * nothing to the person who recorded them, and "5 vowels" is the whole
+         * of what they need to know.
+         */
+        var vowelButton = previewRow.add("button", undefined, "My voice… / 我的聲音…");
+        tip(vowelButton, "customTimbre");
+        var vowelClear = previewRow.add("button", undefined, "Clear / 清除");
+        var vowelReadout = previewRow.add("statictext", undefined, "Built-in / 內建", { truncate: "end" });
+        // Measured before the panel is asked how wide it is: an empty
+        // statictext measures as nothing (invariant 8z), so it is filled with
+        // its own longest text rather than left blank.
+        vowelReadout.preferredSize.width = 120;
+        var measuredVowels = [];
+
+        function showVowels() {
+            var measured = 0;
+            var index;
+            for (index = 0; index < CUSTOM_VOWEL_NAMES.length; index += 1) {
+                if (measuredVowels[index * 2] > 0) { measured += 1; }
+            }
+            vowelReadout.text = measured
+                ? M("{0} of 5 vowels / 5 個母音中的 {0} 個", measured)
+                : M("Built-in / 內建");
+            return measured;
+        }
+
+        /*
+         * One dialog per vowel, in the order the engine's table starts with.
+         *
+         * Five separate presses rather than one folder, because the panel has
+         * to know *which* vowel each file is and a folder cannot say. Cancel on
+         * any of them keeps what was measured so far, so a session can be done
+         * in two sittings — the engine treats an unmeasured vowel as "follow
+         * the others" rather than as an error.
+         */
+        vowelButton.onClick = function () {
+            var gathered = measuredVowels.slice(0);
+            while (gathered.length < CUSTOM_VOWEL_VALUES) { gathered.push(0); }
+            var index;
+            var measured = 0;
+            for (index = 0; index < CUSTOM_VOWEL_NAMES.length; index += 1) {
+                var file = File.openDialog(M(
+                    "Choose a recording of a held “{0}” / 請選一段拉長的「{0}」的錄音",
+                    CUSTOM_VOWEL_NAMES[index]));
+                if (!file) { break; }
+                try {
+                    var pair = measureVowelFile(file);
+                    gathered[index * 2] = pair[0];
+                    gathered[index * 2 + 1] = pair[1];
+                    measured += 1;
+                } catch (error) {
+                    alert(String(error.message || error));
+                    break;
+                }
+            }
+            if (!measured) { return; }
+            measuredVowels = gathered;
+            var total = showVowels();
+            status.text = M("Measured {0} vowel(s); Apply writes them onto a layer / 已量到 {0} 個母音，按 Apply 才會寫到圖層上",
+                total);
+        };
+
+        vowelClear.onClick = function () {
+            // An empty array is not the same as nothing: it clears the layer's
+            // measurement on the next Apply, where dropping the field entirely
+            // would leave the old one in place. Same rule as the melody's.
+            measuredVowels = [];
+            showVowels();
+            status.text = M("Back to the built-in voice / 已改回內建的聲音");
+        };
+
+        /*
          * What gets spoken, and why the selected layer wins.
          *
          * Adjusting a timbre with a line selected means you want to hear that
@@ -5717,6 +5992,10 @@
                 // the dropdown; applyToTextLayer() prefers the rig's name when
                 // there is one.
                 character: currentCharacterName(),
+                // The measured vowel space, always present so Apply either
+                // writes one or clears one. A line cannot keep a voice the
+                // panel is no longer holding.
+                customVowels: measuredVowels.slice(0),
                 // How a melody is sung, which the panel does own. The melody
                 // itself is not here on purpose: it belongs to the line, and
                 // only Import puts one in.
@@ -6657,15 +6936,35 @@
                     LOCAL_TOOL_NAME));
                 return;
             }
-            if (!confirm(M(
-                    "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nIt is Mandarin as it is spoken in China, by a woman. That is the only Chinese model whose licence allows it to ship here, and no Taiwanese-accented offline model exists; for Taiwan Mandarin use the built-in voice or Azure.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n這個聲音是中國口音的普通話女聲。可商用授權的中文模型只有這一個，台灣國語的離線模型並不存在；要台灣國語請用內建的聲音或 Azure。\n\n下載時 After Effects 會沒有反應。",
-                    Math.round(LOCAL_MODEL_MEGABYTES)))) {
-                return;
+            /*
+             * Which model, and what it has to say for itself.
+             *
+             * The menu holds every source the two tools reported, so the one
+             * to fetch is whichever offline row is selected — and when a cloud
+             * row is selected there is nothing to fetch, which is worth saying
+             * rather than silently installing Chinese.
+             */
+            var picked = cloudTable[providerList.selection ? providerList.selection.index : 0];
+            var wanted = picked && picked.onThisMachine ? picked.id : "";
+            if (!wanted) {
+                wanted = offlineSourceId(cloudTable);
+                if (!wanted) {
+                    alert(M("Choose which offline model to download in the source menu. / 請先在來源清單選一個要下載的離線模型。"));
+                    return;
+                }
             }
+            var note = IC_SOURCE_NOTES[wanted] || { megabytes: LOCAL_MODEL_MEGABYTES, caveat: "" };
+            var question = M(
+                "Download the offline voice model?\n\nAbout {0} MB, once. After that this voice needs no network and no account — it runs on this computer.\n\nAfter Effects will not respond while it downloads. / 要下載離線語音模型嗎？\n\n大約 {0} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。\n\n下載時 After Effects 會沒有反應。",
+                Math.round(note.megabytes));
+            // The caveat belongs to the model, not to the button, so a model
+            // that has nothing to warn about does not borrow another's warning.
+            if (note.caveat) { question = M(note.caveat) + "\n\n" + question; }
+            if (!confirm(question)) { return; }
             cloudReadout.text = M("Downloading… / 下載中…");
             try {
                 var answer = parseVoiceReply(
-                    system.callSystem(quoted(local.fsName) + " --install"));
+                    system.callSystem(quoted(local.fsName) + " --install --provider " + wanted));
                 // The list is asked again rather than assumed: the tool decides
                 // whether the model counts as installed, and it checks sizes.
                 refreshProviders(rememberedProvider);
@@ -6889,6 +7188,17 @@
         // Last, so it overrides the defaults every control was built with
         // rather than being overwritten by them.
         restoreState();
+        /*
+         * A trial says so, once, where the panel says everything else.
+         *
+         * After restoreState() so nothing overwrites it, and in the status line
+         * rather than an alert: an alert on every Apply is a product people
+         * uninstall, and a line that never appears is a synthesizer people
+         * think is broken.
+         */
+        if (buildIsTrial()) {
+            status.text = M("Trial: the voice carries a short mark every few seconds / 試用版：聲音每隔幾秒會有一小段標記聲");
+        }
         languagePicker.onChange = function () {
             UI_LANGUAGE = languageCodes[languagePicker.selection ? languagePicker.selection.index : 0];
             app.settings.saveSetting(SCRIPT_NAME, UI_LANGUAGE_SETTING, UI_LANGUAGE);
