@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 3.5.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.6.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents

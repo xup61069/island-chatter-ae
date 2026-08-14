@@ -4187,13 +4187,15 @@
     var UI_LANGUAGE = "zh";
     var UI_LANGUAGE_SETTING = "uiLanguage";
     var IC_JAPANESE_UI = {
-        "Speak / 說話": "話す",
-        // Three tabs from 2.4.0. "Timbre / 音色" and "Animation / 動畫" were
-        // two short pages about the same thing — the character — and "Import /
-        // 匯入" lost the script importer to the Speak page, which left it
-        // holding only performances that arrive already made.
-        "Timbre & animation / 音色與動畫": "音色とアニメーション",
-        "Sing & dub / 唱歌與配音": "歌と吹き替え",
+        /*
+         * Two tabs from 3.6.0, split by whether a control exists anywhere else.
+         * Everything on the second page is an effect parameter and appears in
+         * Effect Controls once a line is applied; nothing on the first page
+         * does. It replaced "Speak / 說話", "Timbre & animation / 音色與動畫"
+         * and "Sing & dub / 唱歌與配音".
+         */
+        "Lines & animation / 句子與動畫": "セリフとアニメーション",
+        "Voice settings / 聲音參數": "声のパラメーター",
         "Lip-sync from audio / 音檔轉口型": "音声から口を動かす",
         "Sensitivity / 靈敏度": "感度",
         "Vowels / 判斷母音": "母音を判定",
@@ -4650,7 +4652,9 @@
         "報": "报", "壓": "压", "碼": "码", "務": "务", "暫": "暂", "給": "给",
         "係": "系", "價": "价", "欄": "栏", "費": "费",
         // Added with the offline model.
-        "載": "载", "統": "统", "員": "员", "權": "权"
+        "載": "载", "統": "统", "員": "员", "權": "权",
+        // Added with the two-page panel: 聲音參數.
+        "參": "参"
     };
 
     function simplify(text) {
@@ -5592,46 +5596,61 @@
             tab.spacing = 8;
             return tab;
         }
-        var speakTab = addTab("Speak / 說話");
-        var characterTab = addTab("Timbre & animation / 音色與動畫");
         /*
-         * Three pages, and every count this has been is a measured number
-         * rather than a preference.
+         * Two pages from 3.6.0, split by a question rather than by subject:
+         * **can you do this anywhere else?**
          *
-         * 2.2.0 made it four, from one column of forty rows that wanted
-         * 1354 px against the ~900 px a 1080p dock gives — a docked ScriptUI
-         * panel does not scroll, it clips, and what was clipped was every verb
-         * the product has. 2.3.0 tried a fifth for audio and could not have
-         * one: the strip of titles went to 507 px against the 460 a dock can
-         * give, about 97 px per tab and most of that the tab's own padding, so
-         * no amount of shortening a title would have reached it.
+         * Everything on the second page is an effect parameter. Once a line has
+         * been applied, all thirteen of those rows exist again in After
+         * Effects' own Effect Controls, where they can be keyframed and where
+         * anybody working on that layer will already be looking. The panel's
+         * copies matter only until the first Apply.
          *
-         * 2.4.0 goes the other way, to three. Timbre and Animation were 208
-         * and 260 px, two short pages that were both about the character
-         * rather than about the line, so they are one page. Fewer tabs also
-         * buys width back, which matters because the strip had become the
-         * widest thing in the panel.
+         * Everything on the first page has no other home. A script, a MIDI
+         * file, a recording, an offline model, the rig, the mouth switch,
+         * Type-On, the markers, reading a layer back — none of it is a
+         * parameter and none of it can be reached from the effect. That is what
+         * somebody opened this panel for, so it is what the panel opens on.
          *
-         * What is on the last page is the answer to "where did this
-         * performance come from" when the answer is not "somebody typed it":
-         * a MIDI file, a recording, a cloud model.
+         * The count has always been a measured number and this time it is a
+         * measured *cost*. 2.2.0 went to four pages because one column of forty
+         * rows wanted 1354 px against the ~900 px a 1080p dock gives — a docked
+         * ScriptUI panel does not scroll, it clips, and what was clipped was
+         * every verb the product has. 2.4.0 went to three. Two does **not**
+         * fit that budget: the panel-only rows are 27 of the 40 and want 932 px
+         * on their own, against the 570 a page had.
+         *
+         * **So the limits were raised rather than the content hidden, and that
+         * is a decision with a price.** `TALLEST_PAGE` and `TALLEST_PANEL` in
+         * ae-language-verify.jsx are now 980 and 1210. On a dock shorter than
+         * that the first page clips, and what clips is the bottom of it — the
+         * voice-source rows. The verbs are safe: Apply, Re-sync, Re-flow and
+         * the status line live outside the tabbed panel and always have. The
+         * alternative was hiding a row per mode until its mode was on, which
+         * buys exactly 224 px and leaves nothing for the next row anybody adds.
          */
-        var performTab = addTab("Sing & dub / 唱歌與配音");
-        tabs.selection = speakTab;
+        var mainTab = addTab("Lines & animation / 句子與動畫");
+        var voiceTab = addTab("Voice settings / 聲音參數");
+        tabs.selection = mainTab;
 
         /*
          * Aliases, not a rename.
          *
          * The rows below are written where they read naturally — timbre with
          * timbre, animation with animation — and ScriptUI adds children in
-         * source order, so pointing two names at one page merges them without
-         * moving a single row. Doing it the other way round, by cutting and
-         * pasting sixty lines into a different block, is how a control gets
-         * lost or reordered in a diff nobody can review.
+         * source order, so pointing several names at one page merges them
+         * without moving a single row. Doing it the other way round, by cutting
+         * and pasting sixty lines into a different block, is how a control gets
+         * lost or reordered in a diff nobody can review. The seven rows that
+         * had to change page are re-pointed one line at a time below, and each
+         * says which parameter it is.
          */
-        var timbreTab = characterTab;
-        var animationTab = characterTab;
-        var scriptTab = performTab;
+        var speakTab = mainTab;
+        var characterTab = mainTab;
+        var animationTab = mainTab;
+        var performTab = mainTab;
+        var scriptTab = mainTab;
+        var timbreTab = voiceTab;
 
         speakTab.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
         var textInput = speakTab.add("edittext", undefined, "你好，歡迎來到小島！", { multiline: true, scrolling: true });
@@ -5683,7 +5702,13 @@
          * ae-language-verify.jsx is for — the answer if it ever stops fitting is
          * to split it back, not to shorten a translation.
          */
-        var characterRowTop = speakTab.add("group");
+        /*
+         * Effect parameters from here to the end of the sliders, so the second
+         * page: voice `1`, emotion `71`, character size `72`, then pitch `2`,
+         * speed `3`, volume `4`, consonant `5`, clarity `73`, cuteness `74`.
+         * Every one of them is in Effect Controls once a line is applied.
+         */
+        var characterRowTop = voiceTab.add("group");
         characterRowTop.orientation = "row";
         var voice = characterRowTop.add("dropdownlist", undefined, [
             "Sunny / 明亮", "Tiny / 迷你", "Cozy / 溫厚", "Buzzy / 電子",
@@ -5699,12 +5724,12 @@
             ["Tiny / 迷你", "Young / 少年", "Adult / 成熟", "Giant / 巨大"]);
         characterSize.selection = 2;
         // Ranges match the effect parameters in plugin/IslandChatterNative.cpp.
-        var pitch = addSlider(speakTab, "Pitch / 音高", 0.10, 4.00, 1.00);
-        var speed = addSlider(speakTab, "Speed / 速度", 0.10, 10.00, 1.00);
-        var volume = addSlider(speakTab, "Volume / 音量", 0.00, 2.00, 0.78);
-        var consonant = addSlider(speakTab, "Consonant / 聲母", 0.00, 6.00, 1.25);
-        var clarity = addSlider(speakTab, "Clarity / 清晰度", 0.00, 1.00, 0.78);
-        var cuteness = addSlider(speakTab, "Cuteness / 可愛度", 0.00, 1.00, 0.55);
+        var pitch = addSlider(voiceTab, "Pitch / 音高", 0.10, 4.00, 1.00);
+        var speed = addSlider(voiceTab, "Speed / 速度", 0.10, 10.00, 1.00);
+        var volume = addSlider(voiceTab, "Volume / 音量", 0.00, 2.00, 0.78);
+        var consonant = addSlider(voiceTab, "Consonant / 聲母", 0.00, 6.00, 1.25);
+        var clarity = addSlider(voiceTab, "Clarity / 清晰度", 0.00, 1.00, 0.78);
+        var cuteness = addSlider(voiceTab, "Cuteness / 可愛度", 0.00, 1.00, 0.55);
         // Timbre, on its own page: these are set once for a character, not once
         // per line, and Speak is the page that decides how tall the panel is.
         // Every default reproduces 1.0.x, so nothing here changes an existing
@@ -5826,7 +5851,9 @@
          * 8z), so a row that could be measured wrong is not worth the 30 px
          * this one costs on a page that has 80 to spare.
          */
-        var previewRow = timbreTab.add("group");
+        // Panel-only, so the first page: nothing in Effect Controls renders a
+        // WAV and asks Windows to play it.
+        var previewRow = mainTab.add("group");
         var previewButton = previewRow.add("button", undefined, "Preview / 試聽");
         tip(previewButton, "preview");
 
@@ -5953,7 +5980,14 @@
         };
 
         // Saved characters sit with the timbre they mostly carry.
-        var characterRow = timbreTab.add("group");
+        /*
+         * Panel-only, and this is the row that makes the second page optional.
+         *
+         * A saved character *is* the thirteen parameters, under a name. Picking
+         * one here sets all of them without anybody opening the second page,
+         * which is why the sliders being one tab away costs so little.
+         */
+        var characterRow = mainTab.add("group");
         var preset = characterRow.add("dropdownlist", undefined, BUILT_IN_CHARACTERS.slice(0));
         preset.selection = 0;
         var randomButton = characterRow.add("button", undefined, "Random / 隨機");

@@ -284,15 +284,37 @@
          * bottom third was not there — and the bottom third was Apply, Re-sync,
          * Re-flow, Bake, Remove and the status line.
          *
-         * Both limits come from what a dock can give. A 1080p screen leaves
-         * After Effects roughly 900 px of column, so the panel stays under 800;
-         * a page is that less the strip of tab titles and the fixed row of verbs
-         * underneath, which is 570. A page that will not fit is split into
-         * another page — the same answer a row that will not fit gets, and for
-         * the same reason: shortening the words never reaches the number.
+         * Both limits used to come from what a dock can give. A 1080p screen
+         * leaves After Effects roughly 900 px of column, so the panel stayed
+         * under 800; a page was that less the strip of tab titles and the fixed
+         * row of verbs underneath, which was 570. A page that would not fit was
+         * split into another page — the same answer a row that will not fit
+         * gets, and for the same reason: shortening the words never reaches the
+         * number.
+         *
+         * **3.6.0 raised them, deliberately, and this is the record of what it
+         * costs.** The panel was reorganised around one question — can you do
+         * this anywhere else? — which puts every effect parameter on a second
+         * page and everything else on the first. That is the right split and it
+         * does not fit: the panel-only rows are 27 of the 40 and want 932 px on
+         * their own. Splitting them again would put the answer back to three
+         * pages, which is the arrangement being replaced.
+         *
+         * So the numbers below are now what the *panel needs* rather than what
+         * a 1080p dock gives, and on a dock shorter than that the first page
+         * clips. **What clips is the bottom of the first page**, currently the
+         * voice-source rows; the verbs that 2.2.0 lost are outside the tabbed
+         * panel and cannot be reached by this. That was the trade the limits
+         * were raised for, and anyone lowering them again is choosing three
+         * pages, not choosing tidiness.
+         *
+         * They are still limits and they are still measured. 3.6.0 wants
+         * **968 px** for the first page, 396 for the second and 1196 for the
+         * panel; these are those numbers plus ~40 px, which is one more row.
+         * A second row is meant to fail here.
          */
-        var TALLEST_PANEL = 800;
-        var TALLEST_PAGE = 570;
+        var TALLEST_PANEL = 1240;
+        var TALLEST_PAGE = 1010;
         var tooWide = [];
         var tooTall = [];
         var widestSeen = 0;

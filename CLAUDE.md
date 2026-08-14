@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.5.0` (Windows x64).
+- Current public release: `v3.6.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -647,15 +647,38 @@ effect.
    the only way to overflow a row is still to put too many controls in it, exactly as the
    eleven-control sing row did.
 
-   **Three pages from 2.4.0, and the count has only ever been a measured number.** Timbre and
-   Animation were 208 and 260 px — two short pages about the character rather than about the
-   line — so they are one page, which also buys width back from the strip. The script importer
-   moved to Speak, on the reasoning that importing a script is typing with more lines in it.
-   That move is the one to watch: it costs Speak 64 px, Speak is what decides the panel's
-   height, and the result measures **568 px against the 570 limit and 796 against the 800**.
-   It passes, and it has almost nothing left. Anyone adding a row to Speak will be told so by
-   `ae-language-verify.jsx` rather than by a user with a clipped panel; if that happens, moving
-   the importer back to the last page returns 64 px and is a two-line change.
+   **Two pages from 3.6.0, split by a question rather than by subject: can you do this
+   anywhere else?** Everything on the second page is an effect parameter — voice, emotion,
+   size, pitch, speed, volume, consonant, clarity, cuteness, formant, source, vibrato, rate,
+   seed — and every one of them exists again in After Effects' own Effect Controls once a line
+   is applied, where it can be keyframed and where anyone working on that layer is already
+   looking. The panel's copies matter only until the first Apply. Nothing on the first page has
+   another home: a script, a MIDI file, a recording, an offline model, the rig, the mouth
+   switch, Type-On, the markers, reading a layer back. **A saved character is what makes the
+   second page optional** — it is those thirteen parameters under a name, set from the first
+   page in one click.
+
+   Custom timbre stays on the first page even though it writes parameters `279-289`: the
+   parameters are visible in Effect Controls, but *measuring a vowel from a recording* is not
+   something Effect Controls can do. The test is what the control does, not what it writes.
+
+   **The limits were raised for this, and that is the cost of it.** The panel-only rows are 27
+   of the 40 and want **968 px** on their own; the old page limit was 570, and splitting them
+   again is three pages, which is the arrangement being replaced. So `TALLEST_PAGE` and
+   `TALLEST_PANEL` are **1010 and 1240**, and they now describe what the panel needs rather
+   than what a 1080p dock gives. On a shorter dock the first page clips from the bottom, which
+   today is the voice-source rows; the verbs 2.2.0 lost are outside the tabbed panel and cannot
+   be reached by this. Measured: 968 / 396 / 1196, ~40 px of headroom, which is one more row.
+   The guard was confirmed to still fail by setting the page limit to 900 and watching it
+   report `zh the 句子與動畫 page needs 968 px`.
+
+   **Anyone lowering those numbers again is choosing three pages, not choosing tidiness.**
+
+   One seam this split introduces and did not resolve: Tempo is panel-only so it is on the
+   first page, but everything it does is write the Speed slider, which is on the second. The
+   readout beside it prints the Speed it computed, which is why this is a seam rather than a
+   break — moving the tempo row to sit beside Speed is a one-line change if it ever reads
+   worse than it measures.
 
    `remeasure()` resets **both** axes on a `tab` and a `tabbedpanel` rather than carrying the
    height over. Apply's 34 px is a deliberate number and is kept; a page's height is whatever
