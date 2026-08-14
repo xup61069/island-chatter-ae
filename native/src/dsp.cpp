@@ -2425,10 +2425,29 @@ Diagnostics describe(
     return diagnostics;
 }
 
+/*
+ * No shortcut at unity gain, and taking it out was a bug fix rather than tidying.
+ *
+ * It used to return early when `gain == 1.0`, on the reasoning that multiplying
+ * by one changes nothing. Multiplying by one does change nothing — but this
+ * function does not only multiply, it *limits*, and returning early skipped the
+ * limiter as well. `copy_region()` has no such shortcut, so the eager path and
+ * the lazy path disagreed for every sample above the knee.
+ *
+ * That is invariant 8d violated in the default configuration: `output_gain()`
+ * is exactly 1.0 at the default Volume, so it was the *common* case, and it
+ * meant a baked WAV could differ from what After Effects played. It stayed
+ * hidden because the difference needs a sample over `kSoftKnee`, which quiet
+ * material never reaches.
+ *
+ * 3.9.0's louder trial mark reached it immediately and the suite said so — "a
+ * timbre renders differently block by block". The mark is not the bug; it is
+ * what finally made the bug loud enough to see.
+ *
+ * Below the knee `limited()` returns the sample unchanged, so this is
+ * bit-identical to the old behaviour for everything that was ever correct.
+ */
 void apply_output_gain(float* samples, std::size_t count, double gain) {
-    if (gain == 1.0) {
-        return;
-    }
     for (std::size_t index = 0; index < count; ++index) {
         samples[index] = limited(samples[index], gain);
     }
@@ -2471,28 +2490,34 @@ std::size_t syllable_count(const std::string& text, bool melody_mode) {
 namespace {
 
 /*
- * The trial's mark on the audio, and why it is a chirp rather than a limit.
+ * The trial's mark on the audio.
  *
- * A trial has to let somebody judge the product — every voice, the rig, the
- * lip-sync, a whole scene — and still not be a free substitute for it. A layer
- * limit fails the first half: you cannot tell whether twenty lines of dialogue
- * hold together from three of them. A time limit fails the second, since a film
- * is made of short lines. So the trial renders everything and signs it.
+ * A two-note chirp, unmistakably deliberate — nobody hears it and thinks the
+ * synthesizer is broken — and impossible to edit out of a mixed line without
+ * editing out the line.
  *
- * A two-note chirp, quiet, every four seconds, which is unmistakably deliberate
- * — nobody hears it and thinks the synthesizer is broken — and impossible to
- * edit out of a mixed line without editing out the line.
+ * **It is loud and it is often, and that is the 3.9.0 decision.** It was quiet
+ * and every four seconds, which is what you write when the fear is annoying a
+ * buyer. The fear that matters is the opposite one: a mark faint enough to mix
+ * under dialogue is a mark somebody ships. Three times the level and twice as
+ * often is still nothing anybody mistakes for a fault, and it is no longer
+ * something you can bury.
  *
  * It is a pure function of the absolute sample index, which is what lets the
  * lazy renderer and the eager one stay bit-identical (invariant 8d): the block
  * a sample arrives in cannot change what is added to it. `dsp_tests.cpp`
  * compares those two paths across awkward block sizes and would catch a mark
  * that drifted with the block.
+ *
+ * It goes in **before** the limiter. The DSP suite established that by failing
+ * ("an extreme Volume clipped") when it went after — a watermark that clips
+ * damages the thing it is watermarking, and that matters more now the level is
+ * higher, not less.
  */
-constexpr double kTrialFirstMarkSeconds = 1.5;
-constexpr double kTrialMarkIntervalSeconds = 4.0;
-constexpr double kTrialMarkSeconds = 0.22;
-constexpr double kTrialMarkLevel = 0.10;
+constexpr double kTrialFirstMarkSeconds = 0.8;
+constexpr double kTrialMarkIntervalSeconds = 2.0;
+constexpr double kTrialMarkSeconds = 0.26;
+constexpr double kTrialMarkLevel = 0.30;
 constexpr double kTrialMarkHighHz = 1568.0;
 constexpr double kTrialMarkLowHz = 1046.0;
 
@@ -2532,6 +2557,16 @@ const char* build_kind() {
     return "ISLAND-CHATTER-TRIAL";
 #else
     return "ISLAND-CHATTER-RELEASE";
+#endif
+}
+
+const char* version_text() {
+#ifdef ISLAND_CHATTER_VERSION_STRING
+    return ISLAND_CHATTER_VERSION_STRING;
+#else
+    // Only reachable in a build configured without the definition, which the
+    // CMakeLists always sets. Says so rather than inventing a number.
+    return "unknown";
 #endif
 }
 

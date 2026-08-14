@@ -1,14 +1,16 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(IslandChatterNative VERSION 3.8.0 LANGUAGES CXX)
+project(IslandChatterNative VERSION 3.9.0 LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
 
 option(ISLAND_CHATTER_BUILD_AE_PLUGIN "Build the After Effects .aex target" OFF)
 
-# The trial. Everything works and the engine signs what it renders with a quiet
-# chirp every few seconds; see trial_mark() in src/dsp.cpp for why it is a mark
-# rather than a limit. Configure a *separate* build directory with this on —
+# The trial. Everything still renders, and the engine signs what it renders with
+# a chirp every two seconds — see trial_mark() in src/dsp.cpp. From 3.9.0 the
+# panel also refuses more than ten layers in one press, which is a *soft* limit
+# and described as one: the panel is plain text and the mark is the part that is
+# compiled in. Configure a *separate* build directory with this on —
 # tools/package-release.ps1 -Trial packages from it, and refuses if the binaries
 # it is handed do not actually carry the trial token.
 option(ISLAND_CHATTER_TRIAL "Build the trial: the engine signs its audio" OFF)
@@ -32,6 +34,11 @@ target_include_directories(island_chatter_dsp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 if(ISLAND_CHATTER_TRIAL)
     target_compile_definitions(island_chatter_dsp PUBLIC ISLAND_CHATTER_TRIAL)
 endif()
+# The version, from the one place that already has it. `validate-script.js`
+# checks this against package.json, so the panel showing what the *tool*
+# reports cannot drift from the release it was built in.
+target_compile_definitions(island_chatter_dsp
+    PUBLIC ISLAND_CHATTER_VERSION_STRING="${PROJECT_VERSION}")
 target_compile_features(island_chatter_dsp PUBLIC cxx_std_17)
 target_compile_definitions(island_chatter_dsp PRIVATE _USE_MATH_DEFINES)
 if(MSVC)

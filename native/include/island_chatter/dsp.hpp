@@ -255,6 +255,18 @@ struct Result {
  * intended, and reading the file tells you what they made.
  */
 const char* build_kind();
+
+/*
+ * Which release this binary is, for a panel that cannot know.
+ *
+ * The panel ships as plain text and is installed beside whatever `.aex` and
+ * tools happen to be there — an older panel with a newer plug-in is a real
+ * arrangement, since a reinstall replaces both but a hand-copied panel does
+ * not. So a version written into the panel would be the version of the
+ * *panel*, which is not what anybody reading it wants to know. It asks the
+ * tool, and the tool was compiled with it.
+ */
+const char* version_text();
 bool is_trial();
 
 /*

@@ -441,7 +441,10 @@ int main(int argc, char** argv) {
          * a product that sounds broken. It asks the one thing that does know.
          */
         if (want_build_kind) {
-            std::cout << "BUILD " << island_chatter::build_kind() << "\n";
+            // The version rides along on the same reply the panel already
+            // asks for, so showing it costs no second call.
+            std::cout << "BUILD " << island_chatter::build_kind() << " "
+                      << island_chatter::version_text() << "\n";
             return 0;
         }
 

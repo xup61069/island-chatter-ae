@@ -589,16 +589,69 @@ int main() {
                     std::fabs(static_cast<double>(island_chatter::trial_signature(index, rate))));
             }
             if (island_chatter::is_trial()) {
-                require(loudest > 0.05, "a trial build signs its audio");
-                // Nothing before the first mark, so a one-second line is clean
-                // and the mark cannot be mistaken for a start-up click.
+                require(loudest > 0.2,
+                        "a trial build signs its audio, and loudly enough not to be mixed "
+                        "under a line");
+                /*
+                 * Not at the very start, or it reads as a start-up click rather
+                 * than as a deliberate mark.
+                 */
                 double early = 0.0;
-                for (std::int64_t index = 0; index < static_cast<std::int64_t>(rate); ++index) {
+                for (std::int64_t index = 0;
+                     index < static_cast<std::int64_t>(rate) / 4; ++index) {
                     early = std::max(early,
                         std::fabs(static_cast<double>(
                             island_chatter::trial_signature(index, rate))));
                 }
                 require(early == 0.0, "the mark waits until the line is under way");
+
+                /*
+                 * **A short line must carry one, and until 3.9.0 it did not.**
+                 *
+                 * The first mark was at 1.5 s and they repeated every 4. A line
+                 * of dialogue is a second or two, so most lines in a trial came
+                 * out entirely unmarked — the watermark only caught the long
+                 * ones. Counting the marks is the assertion; a level check
+                 * alone passes with them four seconds apart.
+                 */
+                /*
+                 * Counted over 10 ms windows, not sample by sample.
+                 *
+                 * A mark is a sine, so it passes through zero on every cycle —
+                 * counting "loud sample after a quiet one" counted the
+                 * zero-crossings and reported 569 marks in eight seconds. A
+                 * window either contains part of a mark or it does not.
+                 */
+                const auto marksWithin = [rate](double seconds) {
+                    const auto window = static_cast<std::int64_t>(rate) / 100;
+                    const auto last = static_cast<std::int64_t>(
+                        static_cast<double>(rate) * seconds);
+                    int marks = 0;
+                    bool inside = false;
+                    for (std::int64_t at = 0; at + window <= last; at += window) {
+                        bool loud = false;
+                        for (std::int64_t index = at; index < at + window; ++index) {
+                            if (std::fabs(static_cast<double>(
+                                    island_chatter::trial_signature(index, rate))) > 0.001) {
+                                loud = true;
+                                break;
+                            }
+                        }
+                        if (loud && !inside) { marks += 1; }
+                        inside = loud;
+                    }
+                    return marks;
+                };
+                require(marksWithin(1.5) >= 1,
+                        "a line and a half carries a mark, so an ordinary line of dialogue "
+                        "cannot slip out of a trial unsigned");
+                require(marksWithin(8.0) >= 4,
+                        "and they keep coming, rather than one at the top");
+                // Printed rather than asserted: the numbers are what somebody
+                // deciding whether the mark is loud enough wants to read.
+                std::cout << "  trial mark: peak " << loudest << ", "
+                          << marksWithin(8.0) << " in 8 s, "
+                          << marksWithin(1.5) << " in the first 1.5 s\n";
             } else {
                 require(loudest == 0.0,
                         "a release build must add nothing at all to what it renders");
@@ -1055,10 +1108,27 @@ int main() {
         {
             const auto start = plan.start_samples[4];
             const auto length = plan.length_samples[4];
+            /*
+             * Measured off the samples the *synthesizer* produced, which in a
+             * trial build is not all of them.
+             *
+             * The watermark rides on top of the note. While it was quiet and
+             * four seconds apart it did not move a peak enough to matter; at
+             * 3.9.0's level and spacing one lands inside the early window and
+             * not the late one, and the note then looks like it faded when
+             * nothing about the note changed. Skipping the marked samples is
+             * exact rather than approximate — the mark is a pure function of
+             * the absolute sample index, so "is this sample carrying one" has
+             * a yes-or-no answer, and in a release build it is always no.
+             */
             const auto peak_between = [&](double from, double to) {
                 float peak = 0.0F;
                 for (auto at = start + static_cast<std::size_t>(length * from);
                         at < start + static_cast<std::size_t>(length * to); ++at) {
+                    if (island_chatter::trial_signature(static_cast<std::int64_t>(at),
+                                                        sung.sample_rate) != 0.0F) {
+                        continue;
+                    }
                     peak = std::max(peak, std::abs(result.samples[at]));
                 }
                 return peak;
@@ -1110,6 +1180,26 @@ int main() {
         // any of which could put the note somewhere else.
         {
             const auto pitch_of = [&](std::size_t from, std::size_t count) {
+                /*
+                 * The watermark comes off before the pitch is measured.
+                 *
+                 * It is a 1568 Hz tone followed by a 1046 Hz one. Autocorrelate
+                 * a window with one sitting in it and the answer is partly the
+                 * mark's period rather than the note's — which is what a trial
+                 * build started reporting as "a sung note came out at the wrong
+                 * pitch" when 3.9.0 made the mark loud.
+                 *
+                 * Subtracting is exact, not approximate: the mark is a pure
+                 * function of the absolute sample index and is added before a
+                 * limiter that leaves anything below the knee alone, which a
+                 * sung note is. In a release build it subtracts zero.
+                 */
+                std::vector<double> heard(count, 0.0);
+                for (std::size_t at = 0; at < count; ++at) {
+                    heard[at] = static_cast<double>(result.samples[from + at]) -
+                        static_cast<double>(island_chatter::trial_signature(
+                            static_cast<std::int64_t>(from + at), sung.sample_rate));
+                }
                 const auto lowest = static_cast<std::size_t>(sung.sample_rate / 1000);
                 const auto highest = static_cast<std::size_t>(sung.sample_rate / 80);
                 std::vector<double> correlation(highest, 0.0);
@@ -1119,8 +1209,8 @@ int main() {
                     double here = 0.0;
                     double there = 0.0;
                     for (std::size_t at = 0; at + lag < count; ++at) {
-                        const double left = result.samples[from + at];
-                        const double right = result.samples[from + at + lag];
+                        const double left = heard[at];
+                        const double right = heard[at + lag];
                         product += left * right;
                         here += left * left;
                         there += right * right;

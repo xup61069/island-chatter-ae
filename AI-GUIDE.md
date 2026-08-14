@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 3.8.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.9.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -236,7 +236,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
 - Controls and menu entries with a label: **85**
-- Distinct messages the panel can print: **108**
+- Distinct messages the panel can print: **109**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -717,7 +717,8 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | There is no shared rig here. | 這個合成裡沒有共用控制器。 | 这个合成里没有共用控制器。 | このコンポには共有リグがありません。 |
 | This build knows about no offline models. | 這個版本沒有任何離線模型。 | 这个版本没有任何离线模型。 | このビルドにはオフラインモデルがありません。 |
 | This voice has no sound for these characters, so they were left out: {0} | 這個語音沒有這些字的發音，所以沒有唸出來：{0} | 这个语音没有这些字的发音，所以没有念出来：{0} | この音声には次の文字の読みがないため、読み上げられませんでした：{0} |
-| Trial: the voice carries a short mark every few seconds | 試用版：聲音每隔幾秒會有一小段標記聲 | 试用版：声音每隔几秒会有一小段标记声 | 体験版：数秒ごとに短い印の音が入ります |
+| Trial | 試用版 | 试用版 | 体験版 |
+| Trial: a mark every {0} seconds, {1} layers at a time | 試用版：每 {0} 秒一段標記聲，一次最多 {1} 層 | 试用版：每 {0} 秒一段标记声，一次最多 {1} 层 | 体験版：{0} 秒ごとに印の音、一度に {1} レイヤーまで |
 | Truncated: {0} | 已截斷：{0} | 已截断：{0} | 文字が切れました：{0} |
 | Tuning… | 調音… | 调音… | 声の調整… |
 | Type something first, or select a text layer to hear. | 請先打字，或選一個文字圖層來聽。 | 请先打字，或选一个文本图层来听。 | 先に文字を入力するか、聴きたいテキストレイヤーを選んでください。 |

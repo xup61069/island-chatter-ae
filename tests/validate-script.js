@@ -2966,11 +2966,53 @@ for (const releaseFile of [
           "or the trial signs its previews and not its exports — or the other way round");
       }
     }
-    const panelTrial = takeFunction("buildIsTrial");
+    const panelTrial = takeFunction("buildInfo");
     if (!/" --build"/.test(panelTrial) || !/ISLAND-CHATTER-TRIAL/.test(panelTrial)) {
       throw new Error(
         "The panel must ask the engine tool which build it is; it ships identically in both " +
         "packages and cannot know by itself");
+    }
+    /*
+     * And the version comes from the same reply, for the same reason.
+     *
+     * The panel is plain text installed beside whatever tools happen to be
+     * there, so a version written into it would be the *panel's* version, not
+     * the product's — and would go stale the first time somebody hand-copied
+     * one file. It is read out of `BUILD <kind> <version>`.
+     */
+    if (!/buildAnswer\.version = fields\[2\]/.test(panelTrial)) {
+      throw new Error("buildInfo() does not read the version out of the tool's reply");
+    }
+    const versionish = nativePanelSource.match(/"\d+\.\d+\.\d+"/g);
+    if (versionish) {
+      throw new Error(
+        `The panel hardcodes what looks like a version (${versionish[0]}). It has to come ` +
+        "from the tool, which was compiled with it — see buildInfo().");
+    }
+    /*
+     * What the trial *says* has to be what the trial *does*.
+     *
+     * The status line states the interval and the layer cap. A trial that
+     * promises a mark every four seconds and delivers one every two reads as a
+     * fault rather than as a watermark, and the two numbers live in different
+     * languages — one in dsp.cpp, one in the panel — so nothing but this
+     * compares them.
+     */
+    const spacing = engine.match(/kTrialMarkIntervalSeconds = ([\d.]+);/);
+    const said = nativePanelSource.match(/var TRIAL_MARK_SECONDS = ([\d.]+);/);
+    if (!spacing || !said) {
+      throw new Error("The trial mark interval is missing from dsp.cpp or from the panel");
+    }
+    if (Number(spacing[1]) !== Number(said[1])) {
+      throw new Error(
+        `The panel tells people the trial marks every ${said[1]} s and dsp.cpp marks every ` +
+        `${spacing[1]} s`);
+    }
+    if (!/var TRIAL_MAX_LAYERS = \d+;/.test(nativePanelSource) ||
+      !/refuseBeyondTrialLimit\(/.test(takeFunction("buildUI"))) {
+      throw new Error(
+        "The trial's layer limit is not enforced where layers are applied. It is a soft limit " +
+        "either way — the panel is plain text — but it has to exist where it is claimed.");
     }
     if (!/if \(buildIsTrial\(\)\) \{/.test(nativePanelSource)) {
       throw new Error(
@@ -3548,6 +3590,58 @@ for (const releaseFile of [
     throw new Error(
       `docs/gumroad-listing.md does not end with "Version ${version}"; the page on Gumroad ` +
       "is what buyers read before they buy");
+  }
+
+  /*
+   * The trial's page, and the two numbers it promises.
+   *
+   * A trial listing exists to state the limits before somebody spends an
+   * evening finding them, so the limits it states have to be the ones the
+   * build enforces. Both numbers live somewhere else — the layer cap in the
+   * panel, the mark interval in dsp.cpp — and nothing but this compares them
+   * to the sentence a reader is given.
+   */
+  const trialListing = fs.readFileSync(path.join(root, "docs", "trial-listing.md"), "utf8");
+  if (!new RegExp(`^Version ${version.replace(/\./g, "\\.")}\\s*$`, "m").test(trialListing)) {
+    throw new Error(`docs/trial-listing.md does not end with "Version ${version}"`);
+  }
+  /*
+   * The sentence, not the digit.
+   *
+   * Counting occurrences of the number was the first version of this and it is
+   * hollow: "10" also appears in "Windows 10/11", so changing the page to
+   * promise twenty layers left the count untouched and the guard passed. It was
+   * caught by making exactly that change and watching nothing happen. Each
+   * phrase below is the claim itself, in the language it is made in.
+   */
+  const cap = nativePanelSource.match(/var TRIAL_MAX_LAYERS = (\d+);/)[1];
+  const every = nativePanelSource.match(/var TRIAL_MARK_SECONDS = ([\d.]+);/)[1];
+  for (const [what, phrase] of [
+    ["the layer cap, in Traditional Chinese", `一次最多套用 ${cap} 個圖層`],
+    ["the layer cap, in English", `${cap} layers per press`],
+    ["the layer cap, in Japanese", `一度に ${cap} レイヤーまで`],
+    ["the mark interval, in Traditional Chinese", `每 ${every} 秒`],
+    ["the mark interval, in English", `every ${every} seconds`],
+    ["the mark interval, in Japanese", `${every} 秒ごとに`],
+  ]) {
+    if (!trialListing.includes(phrase)) {
+      throw new Error(
+        `docs/trial-listing.md does not state ${what} as the build enforces it — expected ` +
+        `"${phrase}". A trial page exists to state its limits before somebody spends an ` +
+        "evening finding them, and a reader of one of the three languages still has to be told.");
+    }
+  }
+  for (const [language, promise] of [
+    ["Traditional Chinese", "離線 AI 語音算出來的聲音沒有標記聲"],
+    ["English", "An offline AI voice carries no mark"],
+    ["Japanese", "オフライン AI 音声には印が入りません"],
+  ]) {
+    if (!trialListing.includes(promise)) {
+      throw new Error(
+        `docs/trial-listing.md does not tell ${language} readers that an offline AI voice is ` +
+        "unmarked. It is the one way to hear a finished line in the trial, and a page that " +
+        "omits it undersells the trial and oversells the limit.");
+    }
   }
 }
 

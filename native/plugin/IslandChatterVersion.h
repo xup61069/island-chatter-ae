@@ -1,15 +1,15 @@
 #pragma once
 
 #define ISLAND_CHATTER_VERSION_MAJOR 3
-#define ISLAND_CHATTER_VERSION_MINOR 8
+#define ISLAND_CHATTER_VERSION_MINOR 9
 #define ISLAND_CHATTER_VERSION_BUG 0
 // PF_Stage_RELEASE. A published build must not ship as PF_Stage_DEVELOP;
 // After Effects compares the encoded stage when it resolves plug-in versions.
 #define ISLAND_CHATTER_VERSION_STAGE 3
 #define ISLAND_CHATTER_VERSION_BUILD 1
 
-// PF_VERSION(3, 8, 0, PF_Stage_RELEASE, 1)
-#define ISLAND_CHATTER_AE_VERSION 1836545
+// PF_VERSION(3, 9, 0, PF_Stage_RELEASE, 1)
+#define ISLAND_CHATTER_AE_VERSION 1869313
 
 #define ISLAND_CHATTER_STRINGIFY_IMPL(value) #value
 #define ISLAND_CHATTER_STRINGIFY(value) ISLAND_CHATTER_STRINGIFY_IMPL(value)

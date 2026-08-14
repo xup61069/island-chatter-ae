@@ -383,20 +383,58 @@ source, and `Island Chatter Native` then replaces its output samples. This exist
 host crash path in After Effects 26 around third-party audio synthesis on text layers; no
 carrier layer and no external WAV is created.
 
-## Cloud voice (bring your own API key)
+## AI voice (offline or cloud)
 
-Select the lines, press **Cloud voice** on the Import tab, and OpenAI, ElevenLabs or Azure
-speaks them. The returned audio lands beside the project, is imported onto the timeline, and
-the mouth is read out of it by the same analyser that reads any other recording — so you get
+Pick a voice source on the **Voice** tab and press the button: an AI model speaks the selected
+lines. The returned audio lands beside the project, is imported onto the timeline, and the
+mouth is read out of it by the same analyser that reads any other recording — so you get
 **a real voice with a mouth that matches it**.
 
-**This feature uses the network and sends those lines' text off the machine.** Before anything
-is sent, a dialog states how many lines, how many characters and which provider; cancel and
-nothing goes anywhere. The key is yours, the bill is yours, and no credit of any kind is
-included. **The built-in voice never uses a network** and works with the machine offline.
+There are two kinds of source and the button relabels itself between them, because only one
+difference about them matters: **whether the text leaves your computer.**
 
-- **It is one press, one file, not a live effect.** An audio callback cannot wait on a network
-  without hanging After Effects, so this takes the same road Bake already takes.
+### Offline AI voice (runs on your own machine)
+
+Press **Offline models…** for a window listing every model this build knows about, its size and
+whether it is installed. Fetch one once and after that there is no network, no account and no
+key, and **nothing you type leaves the machine**.
+
+- **The Chinese model is about 177 MB and the Japanese one about 171 MB**, kept in your own user
+  folder (`%LOCALAPPDATA%\Island Chatter\models`), so removing Island Chatter leaves them alone.
+  The same window removes them again.
+- **The Chinese one is Mandarin as it is spoken in China, by a woman.** It is the only Chinese
+  model whose licence allows this, and no Taiwanese-accented offline model exists. For Taiwan
+  Mandarin use the built-in voice or Azure's `zh-TW` voice. That sentence sits beside the
+  download button — before you spend 177 MB, not after.
+- **The Chinese is read by the built-in engine**, not by the model's own lexicon, so phrases,
+  tone sandhi, Zhuyin and inline `[重|chong2]` overrides all count and a line comes out the same
+  way whichever voice speaks it. Japanese is the other way round: the model's dictionary reads
+  it, because the built-in engine does not guess kanji readings.
+- **It can be tuned.** With an offline source selected, press **Tuning…** for five presets
+  (MeloTTS default, steady, lively, narration, hurried) and three sliders — variation, rhythm
+  and speed. **The dialog plays the line**, so you can hear a setting before applying it.
+- Each model was trained with **one voice**, so there is no speaker to choose. That was checked
+  against upstream's own config and the model files themselves rather than assumed.
+
+### Cloud AI voice (bring your own API key)
+
+OpenAI, ElevenLabs or Azure speaks the line. **This uses the network and sends those lines' text
+off the machine.** Before anything is sent, a dialog states how many lines, how many characters
+and which provider; cancel and nothing goes anywhere. The key is yours, the bill is yours, and
+no credit of any kind is included.
+
+The voice id, model and region live in the same dialog as the key, since they only mean anything
+to a cloud account. **The built-in voice never uses a network** and works with the machine
+offline.
+
+### Both kinds
+
+- **It is one press, one file, not a live effect.** An audio callback cannot wait on a network —
+  or on a model that takes seconds — without hanging After Effects, so this takes the same road
+  Bake already takes.
+- **An offline render has its leading and trailing silence trimmed.** The model pads by a
+  different amount every line (100–210 ms measured), and left in, Fit Duration and Re-flow
+  inherit it: a scene laid out on the beat would not be on the beat.
 - **Editing the line does not re-fetch it.** The recording is muted, the built-in voice comes
   back, and the layer is marked `(stale)` until you press the button again — a keystroke should
   not spend money. The mouth returns to the engine's timing at the same instant, so what you
@@ -409,6 +447,20 @@ included. **The built-in voice never uses a network** and works with the machine
 - **Errors are the provider's own words**: a refused key, a rate limit, an exhausted quota and
   an unreachable host are four different problems.
 - 2000 characters a line.
+
+## The trial
+
+There is a trial and it is the **same product**: no time limit, nothing switched off. The
+offline models, cloud voices, singing, lip-sync and custom timbre all work. Two differences:
+
+- **Audio the engine renders carries a short two-note mark every 2 seconds.** It is added
+  before the limiter, so it cannot clip what you made, and both Preview and Bake carry it —
+  there is no build that signs its previews and not its exports. **An offline AI voice carries
+  no mark**, because a model rendered it rather than the engine.
+- **Ten layers per press.** The full version has no limit.
+
+The panel shows its version in the top-left, with the word Trial after it, so you always know
+which one you are running.
 
 ## Japanese
 

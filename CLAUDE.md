@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.8.0` (Windows x64).
+- Current public release: `v3.9.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -416,17 +416,46 @@ effect.
    melody made the same distinction in 1.7.0 (8t); collapse the two and either Clear does
    nothing or Import wipes a voice somebody recorded.
 
-8ai. **The trial signs its audio, and the limit lives in the engine.**
-   Everything works in a trial build; the engine adds a quiet two-note chirp every four
-   seconds. A layer limit would stop anybody judging whether twenty lines hold together, and a
-   time limit means nothing to a product whose unit is a two-second line — so the trial renders
-   everything and signs the result.
+8ai. **The trial signs its audio, and the signature is the part that holds.**
+   The engine adds a two-note chirp every two seconds at 0.30. Everything still renders: a
+   time limit means nothing to a product whose unit is a two-second line.
+
+   **3.9.0 made the mark louder and more frequent, and added the layer limit this invariant
+   used to argue against.** It said a layer limit stops anybody judging whether twenty lines
+   hold together, which is true and is the cost that was accepted. The mark was quiet and four
+   seconds apart, which is what gets written when the fear is annoying a buyer; the fear that
+   matters is the opposite one, because a mark faint enough to mix under dialogue is a mark
+   somebody ships. **The old spacing also meant most lines carried no mark at all** — the first
+   was at 1.5 s and a line of dialogue is a second or two, so the watermark caught only the long
+   ones. `dsp_tests.cpp` counts the marks in the first 1.5 s now, which is the assertion a level
+   check alone cannot make.
+
+   The layer limit is the panel's and is **soft**, and has to be described that way: the panel
+   is plain text and anybody who can open it in Notepad can raise the number. It is a speed
+   bump. The mark is the enforcement.
 
    It goes in **before the limiter**, which the DSP suite established by failing ("an extreme
    Volume clipped") when it went after: a watermark that clips damages the thing it is
-   watermarking. It is a pure function of the absolute sample index, so the lazy renderer and
-   the eager one stay bit-identical (8d), and **both** output paths add it — one of them alone
-   is a build that signs its previews and not its exports.
+   watermarking, and that matters more at 0.30 than it did at 0.10. It is a pure function of
+   the absolute sample index, so the lazy renderer and the eager one stay bit-identical (8d),
+   and **both** output paths add it — one of them alone is a build that signs its previews and
+   not its exports.
+
+   **A louder mark found a real bug in the engine, and this is the part to remember.**
+   `apply_output_gain()` returned early when the gain was exactly 1.0, on the reasoning that
+   multiplying by one changes nothing. Multiplying by one does — but the function also
+   *limits*, and the early return skipped the limiter, while `copy_region()` had no such
+   shortcut. So the two output paths disagreed for every sample above the knee, **in the
+   default configuration**, since `output_gain()` is exactly 1.0 at the default Volume: a baked
+   WAV could differ from what After Effects played. It needed a sample over `kSoftKnee` to show,
+   which quiet material never reaches. The 0.30 mark reached it immediately and the suite said
+   "a timbre renders differently block by block". The mark was not the bug; it was what made the
+   bug loud enough to see.
+
+   Two tests measured the synthesizer *through* the watermark and had to stop: a held note's
+   sustain and a sung note's pitch. Both now subtract or skip the mark, which is exact rather
+   than approximate because it is a pure function of the sample index — and zero in a release
+   build. The same accommodation 8ai already recorded for the vowel-colour score.
 
    The panel cannot enforce any of this: it is plain text, and a limit written in ExtendScript
    is a limit anybody deletes with Notepad. What the panel does is *say* so, because somebody

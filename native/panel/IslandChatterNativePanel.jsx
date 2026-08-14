@@ -2197,11 +2197,58 @@
      * The audio carries a chirp every few seconds, and somebody who does not
      * know that is somebody deciding the synthesizer is broken.
      */
-    function buildIsTrial() {
+    /*
+     * Asked once and kept, because the answer cannot change while the panel is
+     * open and `callSystem()` costs ~85 ms.
+     *
+     * The reply is `BUILD <kind> <version>`. The version comes from the same
+     * place for the same reason as the kind: the panel is plain text installed
+     * beside whatever tools happen to be there, so a version written *here*
+     * would be the panel's rather than the product's.
+     */
+    var buildAnswer = null;
+    function buildInfo() {
+        if (buildAnswer) { return buildAnswer; }
+        buildAnswer = { trial: false, version: "" };
         var tool = bakeToolFile();
-        if (!tool) { return false; }
-        return String(system.callSystem(quoted(tool.fsName) + " --build"))
-            .indexOf("ISLAND-CHATTER-TRIAL") >= 0;
+        if (!tool) { return buildAnswer; }
+        var reply = String(system.callSystem(quoted(tool.fsName) + " --build"));
+        buildAnswer.trial = reply.indexOf("ISLAND-CHATTER-TRIAL") >= 0;
+        var fields = trim(reply).split(/\s+/);
+        // BUILD <kind> <version>. An older tool prints only two, and an absent
+        // version shows as nothing rather than as the word "undefined".
+        if (fields.length >= 3 && fields[0] === "BUILD") { buildAnswer.version = fields[2]; }
+        return buildAnswer;
+    }
+
+    function buildIsTrial() { return buildInfo().trial; }
+
+    /*
+     * What a trial will apply to in one press.
+     *
+     * **This reverses a decision invariant 8ai argued for, and the argument was
+     * not wrong — it was outvoted.** 8ai says a layer limit stops anybody
+     * judging whether twenty lines of dialogue hold together, which is true and
+     * is the cost being accepted here.
+     *
+     * It is also a *soft* limit and has to be described as one. The panel is
+     * plain text; anybody who can open it in Notepad can raise this number.
+     * The mark in the audio is the part that is compiled in and the part that
+     * actually holds, which is why making it louder and more frequent mattered
+     * more than this does.
+     */
+    var TRIAL_MAX_LAYERS = 10;
+    // What the status line tells people to expect. Kept next to the layer
+    // limit and checked against dsp.cpp by `tests/validate-script.js`, because
+    // a trial that says "every four seconds" and marks every two reads as a
+    // fault rather than as a watermark.
+    var TRIAL_MARK_SECONDS = 2;
+
+    function refuseBeyondTrialLimit(count) {
+        if (!buildIsTrial() || count <= TRIAL_MAX_LAYERS) { return; }
+        throw new Error(M(
+            "The trial applies to {0} layers at a time and {1} are selected.\n\nThe full version has no limit. / 試用版一次最多套用 {0} 層，你選了 {1} 層。\n\n正式版沒有這個限制。",
+            TRIAL_MAX_LAYERS, count));
     }
 
     var MIN_VOWEL_FRAMES = 8;
@@ -4313,8 +4360,13 @@
         "Preview / 試聽": "試聴",
         "My voice… / 我的聲音…": "自分の声…",
         "Clear / 清除": "消去",
-        "Trial: the voice carries a short mark every few seconds / 試用版：聲音每隔幾秒會有一小段標記聲":
-            "体験版：数秒ごとに短い印の音が入ります",
+        // 3.9.0 states both numbers. A trial that says "every few seconds" and
+        // marks every two reads as a fault rather than as a watermark.
+        "Trial: a mark every {0} seconds, {1} layers at a time / 試用版：每 {0} 秒一段標記聲，一次最多 {1} 層":
+            "体験版：{0} 秒ごとに印の音、一度に {1} レイヤーまで",
+        "Trial / 試用版": "体験版",
+        "The trial applies to {0} layers at a time and {1} are selected.\n\nThe full version has no limit. / 試用版一次最多套用 {0} 層，你選了 {1} 層。\n\n正式版沒有這個限制。":
+            "体験版は一度に {0} レイヤーまでです。{1} レイヤーが選択されています。\n\n製品版に制限はありません。",
         "Built-in / 內建": "内蔵",
         "{0} of 5 vowels / 5 個母音中的 {0} 個": "母音 5 つのうち {0} つ",
         "Choose a recording of a held “{0}” / 請選一段拉長的「{0}」的錄音":
@@ -5834,6 +5886,14 @@
         var languagePicker = languageRow.add("dropdownlist", undefined,
             ["繁體中文", "English", "日本語"]);
         tip(languagePicker, "language");
+        /*
+         * The version sits on the row that already exists, so it costs no
+         * height. Filled in at the end of buildUI() from what the tool reports;
+         * empty here rather than a placeholder, because a number that is wrong
+         * for the first half-second is worse than one that arrives.
+         */
+        var versionLabel = languageRow.add("statictext", undefined, "");
+        versionLabel.preferredSize.width = 120;
 
         /*
          * Four pages of settings, and the verbs underneath them.
@@ -7631,6 +7691,17 @@
                 alert(M("Select a text layer or enter text first. / 請選取文字圖層或先輸入文字。"));
                 return;
             }
+            /*
+             * Before the undo group, so a refusal leaves no empty step behind.
+             * A release build never gets here — the check asks the tool which
+             * build this is, and the tool knows because it is compiled in.
+             */
+            try {
+                refuseBeyondTrialLimit(hasSelection ? selectedTextLayers(comp).length : 1);
+            } catch (limited) {
+                alert(String(limited.message || limited));
+                return;
+            }
             app.beginUndoGroup(SCRIPT_NAME + " - Apply");
             try {
                 var applied = createOrUpdate(
@@ -8335,7 +8406,22 @@
          * think is broken.
          */
         if (buildIsTrial()) {
-            status.text = M("Trial: the voice carries a short mark every few seconds / 試用版：聲音每隔幾秒會有一小段標記聲");
+            status.text = M("Trial: a mark every {0} seconds, {1} layers at a time / 試用版：每 {0} 秒一段標記聲，一次最多 {1} 層",
+                TRIAL_MARK_SECONDS, TRIAL_MAX_LAYERS);
+        }
+        /*
+         * The version, beside the language picker.
+         *
+         * Read from the tool rather than written here — see buildInfo(). It is
+         * set after the language pass on purpose: this is a number and a build
+         * kind, not a sentence, so `localiseTree()` must not try to translate
+         * it, and setting it afterwards keeps it out of that pass entirely.
+         */
+        var shown = buildInfo();
+        if (shown.version) {
+            versionLabel.text = shown.version + (shown.trial
+                ? " " + M("Trial / 試用版") : "");
+            versionLabel.preferredSize = [-1, versionLabel.preferredSize.height];
         }
         languagePicker.onChange = function () {
             UI_LANGUAGE = languageCodes[languagePicker.selection ? languagePicker.selection.index : 0];
