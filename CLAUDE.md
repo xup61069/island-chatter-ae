@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.4.0` (Windows x64).
+- Current public release: `v3.5.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -298,8 +298,17 @@ effect.
    **An eighth field was the first attempt and is the thing not to go back to.** It rehashes
    every entry including the three cloud providers', so the first Speak after an update
    re-fetches a line somebody has already paid for. 8ab says a purchase must not sit behind a
-   keystroke; it must not sit behind an update either. For the same reason the defaults spell
-   as an **empty** string: an offline line cached before 3.4.0 keeps its file name.
+   keystroke; it must not sit behind an update either.
+
+   **The defaults spell out in full, and 3.4.0 had this the other way round.** They spelled as
+   an empty string so an untuned line kept its cache file. One release was enough to show why
+   that is wrong: an empty spelling records *"whatever this build's defaults are"* rather than
+   the numbers, so the moment a default changes, every entry already named that way claims a
+   sound it does not contain — one line of a project cached, the next fresh, and the two
+   different with nothing on screen to say why. A default did change in 3.5.0, which is how it
+   was noticed. Spelling costs one re-render per offline line: four seconds of CPU and no
+   money, which is exactly the distinction that makes it affordable here and not for a
+   provider. **A saving that changes what a key means is not a saving.**
 
    **Speed is inverted at the tensor, not in the dialog.** `length_scale` multiplies duration,
    so it runs backwards from what anybody means by speed. It had been pinned at 1 on the
@@ -315,16 +324,40 @@ effect.
    The duplication is survivable in the way that matters: an unknown *name* is refused by the
    tool rather than ignored, so drift fails loudly on the first press.
 
+   **The numbers are MeloTTS's own, and they were checked rather than inherited.** Upstream's
+   `tts_to_file` defaults to `noise_scale=0.6, noise_scale_w=0.8, speed=1.0`. Until 3.5.0
+   `variation` was **0.667**, which is sherpa-onnx's generic VITS default and arrived when this
+   file still went through sherpa-onnx; dropping the library left its constant behind. Its
+   fourth knob, `sdp_ratio=0.2`, is baked into the export and is not an input this model takes.
+
+   **There is no speaker to choose, and that is checked three ways.** Upstream's config gives
+   `spk2id = {"ZH": 1}` and `{"JP": 0}`; both ONNX files carry `n_speakers = 1` in their own
+   metadata; and the `n_speakers: 256` in upstream's config is the **size of the embedding
+   table**, not a count of voices. One trained voice each, 255 empty slots — which is exactly
+   why an untrained index renders silence rather than failing. 3.4.0 offered a number box and
+   caught the silence afterwards; 3.5.0 does not offer it. The field stays on the wire for a
+   model that does have more than one, and because it is what lets the refusal name a number.
+
    **A speaker the model does not have renders silence, and the tool has to hear it.** Measured
-   on the shipped Chinese package: it declares `speaker_id: 1`, that one speaks, and 0 and 2
-   both come back the right length, the right rate, and peaking at 1 of 32767. Nothing in that
-   chain is an error — the embedding table is simply larger than the number of speakers that
-   were trained. A silent WAV imports cleanly, sits on the timeline, animates no mouth, and is
-   indistinguishable downstream from a line the analyser found nothing in, so the message the
-   user gets would be about their text. `speak()` therefore measures the waveform it is about
-   to write and refuses below `kAudibleFloor`, naming the speaker. This is 8aj's rule — an
-   option that appears and then fails reads as the feature being broken — applied to a number
-   the user typed rather than to a row in a menu.
+   on the shipped Chinese package: 0 and 2 both come back the right length, the right rate, and
+   peaking at 1 of 32767. Nothing in that chain is an error. A silent WAV imports cleanly, sits
+   on the timeline, animates no mouth, and is indistinguishable downstream from a line the
+   analyser found nothing in, so the message the user gets would be about their text. `speak()`
+   therefore measures the waveform it is about to write and refuses below `kAudibleFloor`,
+   naming the speaker. This is 8aj's rule — an option that appears and then fails reads as the
+   feature being broken — applied to a number the user typed rather than to a row in a menu.
+
+   **The dialog is a preset menu, three sliders and an audition, and each is load-bearing.**
+   3.4.0 was four decimals in four text boxes under a paragraph explaining them, which is not a
+   choice anybody can make. Only the first preset carries authority — it is MeloTTS's published
+   defaults and `npm test` compares it against `cloud.hpp` — and the rest are this product's own
+   starting points, which is why picking one immediately shows its numbers on the sliders and
+   moving a slider drops the menu to Custom. The audition renders through the real model into
+   the **temp** folder, never beside the project: it must work with no project open, which is
+   precisely when somebody is setting a voice up (8af). Playback is
+   `island_chatter_bake --play-hex`, because winmm and `SND_NODEFAULT` are already there and a
+   second copy would be a second place to forget the flag that stops a failure sounding like
+   a success.
 
 8ah. **Custom timbre is a vocal tract, not a recording, and what is not measured is derived.**
    Five vowels, F1 and F2 each, measured from recordings the user makes. They replace the

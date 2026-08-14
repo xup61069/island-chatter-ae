@@ -564,13 +564,18 @@ double number_in(const char* name, const std::string& value, double low, double 
 
 }  // namespace
 
+/*
+ * Spelled always, defaults included.
+ *
+ * 3.4.0 returned an empty string for the defaults so an untuned line kept its
+ * cache file, and 3.5.0 took that out. The header carries the argument: an
+ * empty spelling records "the defaults" rather than the numbers, so a build
+ * that changes a default silently reinterprets every file already named that
+ * way. `variation` changing from sherpa-onnx's 0.667 to MeloTTS's own 0.6 is
+ * that case, and it happened one release after the shortcut was introduced.
+ */
 std::string tuning_text(const Tuning& tuning) {
-    const auto spelled = spell_tuning(tuning);
-    // Empty for the defaults, so an offline line nobody has tuned keeps the
-    // cache file it had before this existed. Compared as text rather than field
-    // by field, because text is what the cache key sees.
-    static const std::string untouched = spell_tuning(Tuning{});
-    return spelled == untouched ? std::string() : spelled;
+    return spell_tuning(tuning);
 }
 
 Tuning tuning_from_text(const std::string& text) {

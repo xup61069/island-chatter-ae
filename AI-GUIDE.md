@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 3.4.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.5.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -236,7 +236,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
 - Controls and menu entries with a label: **87**
-- Distinct messages the panel can print: **109**
+- Distinct messages the panel can print: **108**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
 
@@ -674,7 +674,6 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | MIDI loaded: {0} — pick a track, then Sing | 已讀取 {0} —— 選好軌道後按「唱出來」 | 已读取 {0} —— 选好轨道后按「唱出来」 | MIDI を読み込みました：{0} —— トラックを選んで「歌わせる」 |
 | Measured {0} vowel(s); Apply writes them onto a layer | 已量到 {0} 個母音，按 Apply 才會寫到圖層上 | 已量到 {0} 个母音，按 Apply 才会写到图层上 | 母音を {0} つ測りました。レイヤーに書き込むには「適用」を押してください |
 | Model ready | 模型已就緒 | 模型已就绪 | モデルの準備ができました |
-| Model's own voice | 模型原本的聲音 | 模型原本的声音 | モデル本来の声 |
 | Models live in your own user folder, so removing Island Chatter leaves them alone. After Effects stops responding while one downloads. | 模型放在你自己的使用者資料夾，所以移除 Island Chatter 不會動到它們。下載時 After Effects 會沒有反應。 | 模型放在你自己的使用者文件夹，所以移除 Island Chatter 不会动到它们。下载时 After Effects 会没有反应。 | モデルはご自身のユーザーフォルダーに保存されるため、Island Chatter を削除しても残ります。ダウンロード中は After Effects が応答しなくなります。 |
 | Mouth on Time Remap | 嘴型已接上時間重映射 | 口型已接上时间重映射 | 口パクをタイムリマップにつなぎました |
 | Mouth switch on {0} layer(s) -> {1} | 已接上嘴型 {0} 層 -> {1} | 已接上口型 {0} 层 -> {1} | 口パクを {0} レイヤーにつなぎました -> {1} |

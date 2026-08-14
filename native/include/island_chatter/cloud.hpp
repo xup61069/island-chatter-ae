@@ -144,16 +144,43 @@ struct Params {
  * already paid for. Invariant 8ab says a purchase must not sit behind a
  * keystroke; it must not sit behind an update either.
  *
- * The defaults round-trip to an **empty** string rather than to a spelled-out
- * one, for the same reason: an untuned offline line keeps the cache file 3.3.0
- * gave it.
+ * **The defaults spell out in full, and 3.4.0 had this the other way round.**
+ * They spelled as an empty string so that an untuned offline line kept the
+ * cache file it already had. That saving was real and the reasoning was wrong:
+ * an empty spelling does not mean "these numbers", it means "whatever this
+ * build thinks the defaults are" — so the moment a default changes, the cache
+ * holds the old sound under a name that now claims the new one. Two lines of
+ * one project, one cached and one fresh, then sound different with nothing on
+ * screen to say why.
+ *
+ * A default did change, in 3.5.0, which is how this was noticed: `variation`
+ * was 0.667, sherpa-onnx's generic VITS number, inherited when this file was
+ * written against sherpa-onnx. MeloTTS's own `tts_to_file` defaults to **0.6**.
+ * Spelling the numbers means every offline line renders once more — four
+ * seconds of CPU each and no money, which is the whole reason this is
+ * affordable here and would not be for a cloud provider.
  */
 struct Tuning {
-    // -1 means "whatever the model says about itself", which is not 0: the
-    // published Chinese package declares one speaker and numbers it 1, and
-    // asking for 0 is a different voice rather than an error.
+    /*
+     * -1 means "whatever the model says about itself", which is not 0.
+     *
+     * Neither shipped model has a second voice to ask for, and that is checked
+     * rather than assumed: `myshell-ai/MeloTTS-Chinese/config.json` gives
+     * `spk2id = {"ZH": 1}` and the Japanese one `{"JP": 0}`, while both ONNX
+     * files carry `n_speakers = 1` in their own metadata. The 256 in the
+     * upstream config is the size of the embedding table, not a number of
+     * voices — which is exactly why an untrained index renders silence instead
+     * of failing, and why speak() measures what it is about to write.
+     *
+     * The panel therefore offers no speaker control at all from 3.5.0. The
+     * field stays on the wire for a model that does have more than one, and
+     * because it is what lets the silence refusal name a number.
+     */
     int speaker = -1;
-    double variation = 0.667;   // the model's noise_scale
+    // MeloTTS's own default, from `tts_to_file(... noise_scale=0.6,
+    // noise_scale_w=0.8, speed=1.0 ...)`. Its fourth knob, `sdp_ratio=0.2`, is
+    // baked into the export and is not an input this model takes.
+    double variation = 0.6;     // the model's noise_scale
     double timbre = 0.8;        // the model's noise_scale_w
     /*
      * Speed the way a person means it: larger is faster.
@@ -180,12 +207,17 @@ constexpr double kMaxSpeed = 4.0;
 /*
  * The canonical text, which is what reaches the cache key, and back again.
  *
- * `tuning_text()` writes all four fields or none: a partial string would make
- * the same voice depend on which defaults the version writing it happened to
- * have. `tuning_from_text()` accepts an empty string and the literal `default`
- * the provider table carries, and throws on anything else it cannot read — an
- * unrecognised key is a panel and a tool that disagree, and guessing past it
- * renders a voice nobody asked for.
+ * `tuning_text()` always writes all four fields, including when they are the
+ * defaults — see the note on `Tuning` for why the empty spelling 3.4.0 used was
+ * wrong. A *partial* string would be wrong for the same reason at a smaller
+ * scale: it would make the same voice depend on which defaults the build
+ * writing it happened to have.
+ *
+ * `tuning_from_text()` still accepts an empty string and the literal `default`
+ * the provider table carries, because both arrive from a panel that has never
+ * opened the dialog — but what comes back out of `tuning_text()` is spelled.
+ * Anything it cannot read throws: an unrecognised key is a panel and a tool
+ * that disagree, and guessing past it renders a voice nobody asked for.
  */
 std::string tuning_text(const Tuning& tuning);
 Tuning tuning_from_text(const std::string& text);

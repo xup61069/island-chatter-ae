@@ -599,10 +599,12 @@ vm.runInContext([
     "TUNING_MIN_SPEED", "TUNING_MAX_SPEED", "TUNING_DEFAULT_SPEAKER",
     "TUNING_DEFAULT_VARIATION", "TUNING_DEFAULT_TIMBRE",
     "TUNING_DEFAULT_SPEED"].map(takeVariable),
+  takeVariable("IC_TUNING_PRESETS"),
   ...["clamp", "mouthForReading", "readingTone", "characterFromCode", "trim",
     "parseEnginePlan", "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo",
     "utf8FromHex", "parseTrackList", "parseSong", "parseVoiceReply",
-    "tuningNumber", "tuningFromText", "spellTuning", "tuningTextOf"].map(takeFunction),
+    "tuningNumber", "tuningFromText", "spellTuning", "tuningTextOf",
+    "tuningPresetIndex"].map(takeFunction),
 ].join("\n"), planner);
 
 // --- Reading what the engine says about a MIDI file -------------------------
@@ -746,15 +748,29 @@ vm.runInContext([
     `tuningTextOf({ speaker: ${speaker}, variation: ${variation}, ` +
     `timbre: ${timbre}, speed: ${speed} })`, planner);
 
-  if (spell(-1, 0.667, 0.8, 1) !== "") {
+  /*
+   * The defaults spell out, and 3.4.0 pinned the opposite.
+   *
+   * They spelled as "" so an untuned line kept its cache file. One release was
+   * enough to show why that is wrong: an empty spelling records "the defaults"
+   * rather than the numbers, so when `variation` moved from sherpa-onnx's 0.667
+   * to MeloTTS's own 0.6, every file already named that way would have gone on
+   * claiming a sound it does not contain — a cached line and a fresh line of
+   * the same project differing with nothing on screen to say why.
+   */
+  const spelledDefault = spell(-1, 0.6, 0.8, 1);
+  if (!spelledDefault) {
     throw new Error(
-      "The panel spells the untouched tuning as something. It has to spell as nothing, or " +
-      "every offline line cached before 3.4.0 is renamed and rendered again.");
+      "The panel spells the default tuning as nothing. An empty spelling means \"whatever " +
+      "this build's defaults are\", so the next time one changes, every cache entry named " +
+      "that way silently claims a sound it does not contain.");
   }
   for (const same of ['""', '"default"', '"  "']) {
     const read = vm.runInContext(`tuningTextOf(tuningFromText(${same}))`, planner);
-    if (read !== "") {
-      throw new Error(`The panel reads ${same} as a tuning (${read}); it is the model's own`);
+    if (read !== spelledDefault) {
+      throw new Error(
+        `The panel reads ${same} as ${read} rather than as the spelled defaults ` +
+        `${spelledDefault}; all three mean "the model's own settings"`);
     }
   }
 
@@ -766,11 +782,11 @@ vm.runInContext([
    * have tested nothing but string equality.
    */
   const distinct = new Set([
-    spell(-1, 0.667, 0.8, 1),
-    spell(0, 0.667, 0.8, 1),
+    spell(-1, 0.6, 0.8, 1),
+    spell(0, 0.6, 0.8, 1),
     spell(-1, 0.5, 0.8, 1),
-    spell(-1, 0.667, 0.5, 1),
-    spell(-1, 0.667, 0.8, 1.2),
+    spell(-1, 0.6, 0.5, 1),
+    spell(-1, 0.6, 0.8, 1.2),
   ]);
   if (distinct.size !== 5) {
     throw new Error(
@@ -816,6 +832,58 @@ vm.runInContext([
   }
 
   /*
+   * The presets, and the one row that is not this product's opinion.
+   *
+   * Four of the five are starting points chosen here and are allowed to be
+   * whatever reads well. The first claims to be MeloTTS's own defaults, and a
+   * row that says "official" while holding something else is worse than no row
+   * at all — so it is checked against `cloud.hpp`, which is checked against
+   * upstream by the comment above it.
+   */
+  const presetSource = takeVariable("IC_TUNING_PRESETS");
+  const official = presetSource.match(
+    /MeloTTS default[^}]*?variation:\s*([\d.]+),\s*timbre:\s*([\d.]+),\s*speed:\s*([\d.]+)/);
+  if (!official) {
+    throw new Error(
+      "IC_TUNING_PRESETS has no row claiming MeloTTS's own defaults; the preset menu needs " +
+      "one entry a user can trust over this product's taste");
+  }
+  const officialSpelled = spell(-1, official[1], official[2], official[3]);
+  if (officialSpelled !== spelledDefault) {
+    throw new Error(
+      `The "MeloTTS default" preset spells ${officialSpelled} but the defaults in cloud.hpp ` +
+      `spell ${spelledDefault}. A preset labelled official has to be the official numbers.`);
+  }
+  // Every preset must be reachable and distinct: two rows with the same numbers
+  // are one row wearing two names, and the Custom state could never be shown
+  // for either.
+  const presetSpellings = new Set();
+  const everyPreset =
+    presetSource.match(/variation:\s*([\d.]+),\s*timbre:\s*([\d.]+),\s*speed:\s*([\d.]+)/g) || [];
+  for (const row of everyPreset) {
+    const [, v, t, s] = row.match(/variation:\s*([\d.]+),\s*timbre:\s*([\d.]+),\s*speed:\s*([\d.]+)/);
+    presetSpellings.add(spell(-1, v, t, s));
+  }
+  if (presetSpellings.size !== everyPreset.length) {
+    throw new Error(
+      `Two presets hold the same numbers (${presetSpellings.size} distinct of ` +
+      `${everyPreset.length}); one of them can never be selected back from the sliders`);
+  }
+  // And each is round-trippable: tuningPresetIndex() is what puts the menu back
+  // on a named row when the dialog reopens, and it compares through the
+  // speller, so a preset written to more decimals than the wire carries would
+  // save fine and reopen as Custom.
+  for (let at = 0; at < everyPreset.length; at += 1) {
+    const found = vm.runInContext(
+      `tuningPresetIndex(tuningFromText(${JSON.stringify([...presetSpellings][at])}))`, planner);
+    if (found < 0) {
+      throw new Error(
+        `Preset ${at} does not survive a round trip through the wire format; it would save ` +
+        "correctly and reopen as Custom");
+    }
+  }
+
+  /*
    * And the two spellers agree on the wire format.
    *
    * `island_chatter_local --help` documents the format with a worked example,
@@ -831,9 +899,9 @@ vm.runInContext([
       "island_chatter_local's usage text no longer shows an example tuning, so there is " +
       "nothing for the panel's spelling to be compared against");
   }
-  if (spell(1, 0.667, 0.8, 1) !== documented[1]) {
+  if (spell(1, 0.6, 0.8, 1) !== documented[1]) {
     throw new Error(
-      `The panel spells a tuning as "${spell(1, 0.667, 0.8, 1)}" and island_chatter_local ` +
+      `The panel spells a tuning as "${spell(1, 0.6, 0.8, 1)}" and island_chatter_local ` +
       `documents "${documented[1]}". The tool refuses a name it does not know, so this would ` +
       "be an offline voice that fails on every press.");
   }
@@ -3186,8 +3254,68 @@ for (const releaseFile of [
       "the key button can reach askForCloudKey() for a source that runs on this machine; " +
       "there is no account behind one, and the tuning dialog must return before it");
   }
-  if (!/askForVoiceTuning\(picked\.label,/.test(keyHandler)) {
+  if (!/askForVoiceTuning\(picked,/.test(keyHandler)) {
     throw new Error("the key button does not offer an offline model its voice settings");
+  }
+  // The audition speaks the line the user is looking at. A dialog that judged
+  // a voice on some fixed sample sentence would be judging the wrong thing,
+  // and previewText() is the same source the engine's own Preview uses.
+  if (!/askForVoiceTuning\(picked,[\s\S]{0,120}previewText\(\)\)/.test(keyHandler)) {
+    throw new Error(
+      "the tuning dialog auditions something other than the line on screen");
+  }
+
+  /*
+   * What the tuning dialog is, from 3.5.0.
+   *
+   * 3.4.0 was four decimals in four text boxes under a paragraph explaining
+   * them, and there is no reading of that which is usable. Each of these is a
+   * property that the redo exists for, so each is pinned rather than left to
+   * be quietly undone by the next edit to the function.
+   */
+  const tuningDialog = takeFunction("askForVoiceTuning");
+  if (/speakerField|M\("Speaker/.test(tuningDialog)) {
+    throw new Error(
+      "the tuning dialog offers a speaker again. Both models carry n_speakers = 1 in their " +
+      "own metadata and upstream gives spk2id {\"ZH\": 1} / {\"JP\": 0} — there is one voice " +
+      "in each, so a number box can only produce the silence 3.4.0 had to refuse.");
+  }
+  for (const [needed, why] of [
+    [/presetMenu = presetRow\.add\("dropdownlist"/, "a preset menu, which is the actual control"],
+    [/row\.add\("slider", undefined, value, low, high\)/,
+      "sliders rather than boxes to type decimals into"],
+    [/slider\.readout = readout/, "the number each slider is on, so a tuning can be written down"],
+    [/presetMenu\.selection = at < 0 \? IC_TUNING_PRESETS\.length : at/,
+      "the menu dropping to Custom when the sliders no longer match a preset"],
+    [/auditionVoiceTuning\(source, tuningTextOf\(readSliders\(\)\), said\)/,
+      "an audition of the tuning actually on the sliders"],
+  ]) {
+    if (!needed.test(tuningDialog)) {
+      throw new Error(`The tuning dialog no longer has ${why}`);
+    }
+  }
+  /*
+   * The audition writes into the temp folder, never beside the project.
+   *
+   * Invariant 8af: Preview touches nothing. A dialog that wrote a WAV into
+   * somebody's project folder to let them hear a slider would also fail
+   * outright with no project open, which is exactly when somebody is setting
+   * a voice up.
+   */
+  const audition = takeFunction("auditionVoiceTuning");
+  if (!/Folder\.temp\.fsName[\s\S]{0,120}AUDITION_FOLDER_NAME/.test(audition)) {
+    throw new Error(
+      "auditionVoiceTuning() does not render into the temp folder; an audition must not " +
+      "write beside somebody's project and must work with no project open (invariant 8af)");
+  }
+  if (/bakeFolder\(|cloudFolder\(/.test(audition)) {
+    throw new Error("auditionVoiceTuning() reaches for the project's own audio folder");
+  }
+  if (!/played\.indexOf\("PLAYED"\) < 0/.test(audition)) {
+    throw new Error(
+      "auditionVoiceTuning() does not check that playback happened. callSystem() reports no " +
+      "exit status, so a failed play is indistinguishable from a short silence — which is " +
+      "the one thing this dialog exists to judge.");
   }
 
   /*

@@ -271,7 +271,7 @@
         }
         var wasSeconds = voiced.plan.duration;
         var slow = cloudVoiceLine(comp, textLayer,
-            tuningOf("speaker=-1;variation=0.667;timbre=0.800;speed=0.500"), options);
+            tuningOf("speaker=-1;variation=0.600;timbre=0.800;speed=0.500"), options);
         check(slow.cached === false,
             "a tuned line is a cache miss, so the tuning really is in the cache key");
         check(slow.plan.events.length > 0,
@@ -299,11 +299,54 @@
         var refused = "";
         try {
             cloudVoiceLine(comp, textLayer,
-                tuningOf("speaker=0;variation=0.667;timbre=0.800;speed=1.000"), options);
+                tuningOf("speaker=0;variation=0.600;timbre=0.800;speed=1.000"), options);
         } catch (silent) { refused = String(silent.message || silent); }
         check(refused !== "" && refused.indexOf("speaker 0") >= 0,
             "a speaker the model does not have is refused by number, not imported as " +
             "silence: " + (refused || "it was accepted"));
+
+        /*
+         * The defaults spell out, so the wire carries numbers rather than a
+         * promise about them.
+         *
+         * 3.4.0 spelled them as "" to keep a cache file. That records "whatever
+         * this build's defaults are", and the very next release changed one —
+         * `variation` from sherpa-onnx's 0.667 to MeloTTS's own 0.6 — which
+         * would have left every file named that way claiming a sound it does
+         * not contain. Asked of the tool, because the tool is what names the
+         * file.
+         */
+        var named = parseVoiceReply(system.callSystem(quoted(picked.tool.fsName) +
+            " --cache-path --provider " + picked.id +
+            " --text " + hexUtf8(said) +
+            " --cache-dir " + hexUtf8(Folder.temp.fsName))).path;
+        var spelled = parseVoiceReply(system.callSystem(quoted(picked.tool.fsName) +
+            " --cache-path --provider " + picked.id +
+            " --text " + hexUtf8(said) +
+            " --voice " + hexUtf8("speaker=-1;variation=0.600;timbre=0.800;speed=1.000") +
+            " --cache-dir " + hexUtf8(Folder.temp.fsName))).path;
+        check(named === spelled,
+            "an unspecified voice and the spelled defaults name the same file, so they are " +
+            "one cache entry rather than two holding identical audio");
+
+        /*
+         * The audition, which is what makes the tuning dialog usable at all.
+         *
+         * It renders through the real model and plays the result, so this is
+         * the only check that covers `--play-hex` and the temp-folder rule
+         * together. It makes a noise for about two seconds; that is the point.
+         */
+        var auditioned = "";
+        try {
+            auditionVoiceTuning(picked,
+                "speaker=-1;variation=0.600;timbre=0.800;speed=1.200", "早安");
+        } catch (quiet) { auditioned = String(quiet.message || quiet); }
+        check(auditioned === "",
+            "the tuning dialog can render and play a line: " + (auditioned || "it did"));
+        var auditions = new Folder(Folder.temp.fsName.replace(/\\/g, "/") +
+            "/island-chatter-audition");
+        check(auditions.exists && (auditions.getFiles() || []).length > 0,
+            "and it wrote into the temp folder rather than beside the project");
 
         // Back to the model's own voice, and back to the file it already had.
         var untuned = cloudVoiceLine(comp, textLayer, how, options);

@@ -289,6 +289,10 @@ std::string play_file(const std::string& path) {
         "island_chatter_bake --analyse-hex <hex-utf8-path> [--rate N]\n"
         "                    [--sensitivity 0..1] [--vowels 0|1]\n"
         "\n"
+        "island_chatter_bake --play-hex <hex-utf8-path>\n"
+        "  Plays a WAV this tool did not render and prints PLAYED, for the\n"
+        "  offline voice's tuning dialog. Nothing else is done.\n"
+        "\n"
         "island_chatter_bake --measure-vowel <hex-utf8-path>\n"
         "  One sustained vowel, for custom timbre. Prints\n"
         "  VOWEL <f1> <f2> <frames> <seconds>.\n"
@@ -340,6 +344,20 @@ int main(int argc, char** argv) {
             if (flag == "--build") { want_build_kind = true; continue; }
             // Renders and then plays it, for the panel's Preview.
             if (flag == "--play") { play = true; continue; }
+            /*
+             * Play a file this tool did not render, and do nothing else.
+             *
+             * The offline voice's tuning dialog needs to audition a line, and
+             * the line comes from island_chatter_local rather than from the
+             * engine. Playback stays here because this is where PlaySound and
+             * winmm already are — putting a second copy in the offline tool
+             * would mean two places that have to remember SND_NODEFAULT, which
+             * is the flag whose absence makes a failure sound like a success.
+             */
+            if (flag == "--play-hex" && index + 1 < argc) {
+                std::cout << play_file(decode_hex(argv[++index])) << "\n";
+                return 0;
+            }
             if (flag == "--list-tracks") { list_tracks = true; continue; }
             if (flag == "--dump-song") { dump_song = true; continue; }
             if (index + 1 >= argc) usage();

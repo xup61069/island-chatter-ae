@@ -9,7 +9,7 @@
     // 1 implicit input + 278 registered parameters. After Effects also reports a
     // trailing built-in group, so the scripted count matches by construction.
     var EXPECTED_PARAMETERS = 290;
-    var EXPECTED_VERSION = "3.4.0";
+    var EXPECTED_VERSION = "3.5.0";
     var ownsProject = false;
 
     function writeReport(message) {

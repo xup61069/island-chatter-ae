@@ -648,11 +648,34 @@ void test_local_sources_are_representable() {
  */
 void test_local_tuning() {
     const cloud::Tuning untouched;
-    require(cloud::tuning_text(untouched).empty(),
-            "an untuned voice spells as nothing, so it keeps the cache file it already had");
+    /*
+     * The defaults are MeloTTS's own, checked against upstream rather than
+     * inherited. `tts_to_file(... noise_scale=0.6, noise_scale_w=0.8,
+     * speed=1.0 ...)`. Until 3.5.0 variation was 0.667, which is sherpa-onnx's
+     * generic VITS number and came in with the sherpa-onnx era of this file.
+     */
+    require(untouched.variation == 0.6 && untouched.timbre == 0.8 &&
+                untouched.speed == 1.0 && untouched.speaker == -1,
+            "the defaults are the ones MeloTTS publishes");
+
+    /*
+     * And they spell out, where 3.4.0 spelled them as nothing.
+     *
+     * The empty spelling saved a re-render and recorded the wrong thing: it
+     * means "whatever this build's defaults are", so the change on the line
+     * above would have silently reinterpreted every cache entry named that
+     * way. Spelling costs one re-render per offline line, which is CPU rather
+     * than money — the distinction that makes it affordable here and not for a
+     * provider.
+     */
+    require(!cloud::tuning_text(untouched).empty(),
+            "the defaults spell out, so a cache entry records numbers rather than a promise");
     require(cloud::tuning_from_text("").speaker == -1 &&
                 cloud::tuning_from_text("default").variation == untouched.variation,
             "an empty voice and the table's \"default\" are both the model's own settings");
+    require(cloud::tuning_text(cloud::tuning_from_text("")) ==
+                cloud::tuning_text(cloud::tuning_from_text("default")),
+            "and both spell the same way, so they are one cache entry rather than two");
 
     cloud::Tuning tuned;
     tuned.speaker = 2;
@@ -671,6 +694,11 @@ void test_local_tuning() {
     require(cloud::tuning_text(cloud::tuning_from_text("speaker=2;variation=0.4;timbre=1.25;"
                                                        "speed=1.5")) == spelled,
             "a hand-written tuning canonicalises to the same text");
+    // A tuning naming only one setting still spells all four, so what is
+    // recorded is the whole voice and not the part somebody typed.
+    require(cloud::tuning_text(cloud::tuning_from_text("speed=1.500")) ==
+                "speaker=-1;variation=0.600;timbre=0.800;speed=1.500",
+            "a partial tuning is completed from the defaults and spelled in full");
 
     /*
      * Each field separately, and each one carried through `tuning_text()`

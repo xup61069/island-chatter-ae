@@ -727,12 +727,18 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
         "--voice carries the tuning, because that is what a voice is for a model\n"
         "that runs here, and because it is already part of the cache key:\n"
         "\n"
-        "  speaker=1;variation=0.667;timbre=0.800;speed=1.000\n"
+        "  speaker=1;variation=0.600;timbre=0.800;speed=1.000\n"
         "\n"
-        "speaker -1 leaves the model's own; variation and timbre are 0 to 2;\n"
-        "speed is 0.25 to 4 and larger is faster. Omitted or 'default' is the\n"
-        "model's published voice, which is what every line rendered before\n"
-        "3.4.0 used and what those lines' cache files are still named after.\n";
+        "Those are MeloTTS's own defaults. speaker -1 leaves whatever the model\n"
+        "says about itself, which is what to use: both published models were\n"
+        "trained with one voice each and an untrained index renders silence,\n"
+        "which is refused rather than written. variation and timbre are 0 to 2;\n"
+        "speed is 0.25 to 4 and larger is faster.\n"
+        "\n"
+        "Omitted or 'default' means the defaults, and they are written back out\n"
+        "in full: an empty spelling would record 'whatever this build's\n"
+        "defaults are', so changing one would silently reinterpret every cache\n"
+        "entry already named that way.\n";
     std::exit(2);
 }
 

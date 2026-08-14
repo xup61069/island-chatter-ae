@@ -2514,6 +2514,10 @@
     // Beside the bakes, one level down, because these are named after a hash
     // rather than after a line and a folder of them is not worth reading.
     var CLOUD_FOLDER_NAME = "cloud";
+    // Auditions go under the temp folder instead, never beside a project: the
+    // tuning dialog must work with nothing open and must leave no trace in
+    // somebody's project directory (invariant 8af).
+    var AUDITION_FOLDER_NAME = "island-chatter-audition";
     var CLOUD_SUFFIX = " (voice)";
     /*
      * On the *text* layer, not on the audio.
@@ -2588,14 +2592,60 @@
     var TUNING_MAX_VARIATION = 2;
     var TUNING_MIN_SPEED = 0.25;
     var TUNING_MAX_SPEED = 4;
-    // -1 is not a speaker. It means "leave whatever the model says about
-    // itself", which is 1 in the published Chinese package — asking for 0
-    // instead is a different voice rather than an error, so the two cannot be
-    // collapsed.
+    /*
+     * -1 is not a speaker. It means "leave whatever the model says about
+     * itself" — 1 in the Chinese package, 0 in the Japanese one.
+     *
+     * **There is no speaker control in the panel, and that is a finding rather
+     * than an omission.** Both models were checked three ways: upstream's
+     * `spk2id` is `{"ZH": 1}` and `{"JP": 0}`, both ONNX files carry
+     * `n_speakers = 1` in their own metadata, and the 256 in upstream's config
+     * is the embedding table's size. One trained voice each, in a table with
+     * 255 empty slots — which is why an untrained index renders silence
+     * instead of failing. 3.4.0 offered a number box and caught the silence
+     * afterwards; there is nothing to offer, so 3.5.0 does not offer it.
+     */
     var TUNING_DEFAULT_SPEAKER = -1;
-    var TUNING_DEFAULT_VARIATION = 0.667;
+    // MeloTTS's own defaults, from `tts_to_file(... noise_scale=0.6,
+    // noise_scale_w=0.8, speed=1.0 ...)`. Until 3.5.0 variation was 0.667,
+    // which is sherpa-onnx's generic VITS number and was inherited when the
+    // offline voice still went through sherpa-onnx.
+    var TUNING_DEFAULT_VARIATION = 0.6;
     var TUNING_DEFAULT_TIMBRE = 0.8;
     var TUNING_DEFAULT_SPEED = 1;
+
+    /*
+     * Named starting points, because three unlabelled decimals are not a
+     * choice anybody can make.
+     *
+     * The first row is the only one with authority behind it: those are
+     * MeloTTS's published defaults, and `tests/validate-script.js` checks them
+     * against `cloud.hpp` so the two cannot drift. **The rest are this
+     * product's own**, and they are not dressed up as anything else — each is
+     * a starting point derived from what the two knobs actually do, and
+     * picking one immediately shows its numbers on the sliders, so nothing
+     * about a preset is hidden behind its name.
+     *
+     * `variation` is the spread of the latent the decoder samples: low is the
+     * same performance every time, high is a different reading each render.
+     * `timbre` is the same spread in the *duration* predictor, so it is
+     * rhythm rather than colour — low is metronomic, high is loose.
+     */
+    var IC_TUNING_PRESETS = [
+        { label: "MeloTTS default / MeloTTS 官方預設",
+          variation: 0.6, timbre: 0.8, speed: 1 },
+        { label: "Steady / 穩定",
+          variation: 0.3, timbre: 0.4, speed: 1 },
+        { label: "Lively / 活潑",
+          variation: 0.9, timbre: 1, speed: 1.1 },
+        { label: "Narration / 旁白",
+          variation: 0.6, timbre: 0.55, speed: 0.9 },
+        { label: "Hurried / 急促",
+          variation: 0.75, timbre: 0.9, speed: 1.35 }
+    ];
+    // Shown when the sliders do not match any row. Never written to a project:
+    // what gets stored is always the numbers.
+    var TUNING_CUSTOM_LABEL = "Custom / 自訂";
 
     // Not parseFloat, which reads "1.5x" as 1.5: a typo accepted here is a
     // render nobody can account for. The whole string has to be the number.
@@ -2666,17 +2716,35 @@
     }
 
     /*
-     * The defaults spell as **nothing**, and that is the compatibility.
+     * Always spelled, defaults included — 3.4.0 returned "" for them.
      *
-     * An offline line rendered before any of this existed was cached under an
-     * empty voice. Spelling the defaults out would rename every one of those
-     * files and re-render, on a machine, lines that had not changed. The
-     * comparison is against the same speller rather than a written-out string,
-     * so there is one copy of the format in this file.
+     * The saving was real: an untuned line kept the cache file it already had.
+     * The reasoning was wrong, and one release was enough to show it. An empty
+     * spelling records "the defaults", not the numbers, so when `variation`
+     * moved from 0.667 to MeloTTS's own 0.6 every file already named that way
+     * quietly started claiming a sound it does not contain. Spelling costs one
+     * re-render per offline line, which is four seconds of CPU and no money.
      */
     function tuningTextOf(tuning) {
+        return spellTuning(tuning);
+    }
+
+    // Which preset these numbers are, or -1 for none. Compared through the
+    // speller rather than field by field, so "the same tuning" means exactly
+    // what the cache key means by it.
+    function tuningPresetIndex(tuning) {
         var spelled = spellTuning(tuning);
-        return spelled === spellTuning(tuningFromText("")) ? "" : spelled;
+        var index;
+        for (index = 0; index < IC_TUNING_PRESETS.length; index += 1) {
+            var row = IC_TUNING_PRESETS[index];
+            if (spellTuning({
+                speaker: TUNING_DEFAULT_SPEAKER,
+                variation: row.variation,
+                timbre: row.timbre,
+                speed: row.speed
+            }) === spelled) { return index; }
+        }
+        return -1;
     }
 
     // The first offline row in a source list, or "" when none is installed.
@@ -2933,7 +3001,7 @@
      * askForCloudKey() gives: it is created on demand, when the language is
      * already known.
      */
-    function askForVoiceTuning(sourceLabel, existing) {
+    function askForVoiceTuning(source, existing, sampleText) {
         var tuning;
         try {
             tuning = tuningFromText(existing);
@@ -2947,69 +3015,213 @@
         dialog.orientation = "column";
         dialog.alignChildren = ["fill", "top"];
         dialog.margins = 14;
-        dialog.spacing = 8;
+        dialog.spacing = 9;
         dialog.add("statictext", undefined,
-            M("Voice settings for {0} / {0} 的聲音設定", sourceLabel));
+            M("Voice settings for {0} / {0} 的聲音設定", source.label));
 
-        function tuningRow(caption, value) {
+        /*
+         * The preset menu is the control, and the sliders are what it shows.
+         *
+         * 3.4.0 asked for four decimals in four text boxes with a paragraph
+         * underneath explaining what they meant. Nobody can pick 0.667 out of
+         * a paragraph. A named row picks all three at once and the sliders
+         * then say exactly what it picked, so the menu is a shortcut rather
+         * than a black box, and moving any slider drops the menu to Custom
+         * instead of leaving it claiming a preset that is no longer selected.
+         */
+        var presetRow = dialog.add("group");
+        presetRow.orientation = "row";
+        var presetTitle = presetRow.add("statictext", undefined, M("Preset / 預設"));
+        presetTitle.preferredSize.width = 92;
+        var presetMenu = presetRow.add("dropdownlist", undefined, []);
+        var pick;
+        for (pick = 0; pick < IC_TUNING_PRESETS.length; pick += 1) {
+            presetMenu.add("item", T(IC_TUNING_PRESETS[pick].label));
+        }
+        presetMenu.add("item", T(TUNING_CUSTOM_LABEL));
+        presetMenu.preferredSize.width = 250;
+
+        /*
+         * A slider and the number it is on, because either alone is worse.
+         *
+         * The number without the slider is 3.4.0. The slider without the
+         * number cannot be written down, copied to another machine, or
+         * checked against the preset that claims to have set it.
+         */
+        function tuningSlider(caption, value, low, high) {
             var row = dialog.add("group");
             row.orientation = "row";
             var title = row.add("statictext", undefined, caption);
-            title.preferredSize.width = 150;
-            var field = row.add("edittext", undefined, value);
-            field.characters = 8;
-            return field;
+            title.preferredSize.width = 92;
+            var slider = row.add("slider", undefined, value, low, high);
+            slider.preferredSize.width = 210;
+            var readout = row.add("statictext", undefined, "0.00");
+            // Filled *before* it is measured: preferredSize on an empty
+            // statictext is ignored, which is the trap invariant 8z records.
+            readout.preferredSize.width = 40;
+            var hint = row.add("statictext", undefined,
+                M("{0} to {1} / {0} 到 {1}", String(low), String(high)));
+            hint.preferredSize.width = 78;
+            slider.readout = readout;
+            return slider;
         }
 
-        // Blank rather than -1 on screen: "the model's own" is a state, and a
-        // negative number in a box asking for a speaker reads as a mistake.
-        var speakerField = tuningRow(M("Speaker / 語者"),
-            tuning.speaker < 0 ? "" : String(tuning.speaker));
-        var variationField = tuningRow(M("Variation / 變化"), tuning.variation.toFixed(3));
-        var timbreField = tuningRow(M("Timbre variation / 音色變化"), tuning.timbre.toFixed(3));
-        var speedField = tuningRow(M("Speed / 語速"), tuning.speed.toFixed(3));
+        var variationSlider = tuningSlider(M("Variation / 變化"), tuning.variation,
+            TUNING_MIN_VARIATION, TUNING_MAX_VARIATION);
+        var timbreSlider = tuningSlider(M("Rhythm / 節奏變化"), tuning.timbre,
+            TUNING_MIN_VARIATION, TUNING_MAX_VARIATION);
+        var speedSlider = tuningSlider(M("Speed / 語速"), tuning.speed,
+            TUNING_MIN_SPEED, TUNING_MAX_SPEED);
+
+        // Rounded to what the wire format carries, so what is shown is what is
+        // stored and two sliders a pixel apart are not two cache entries.
+        function readSliders() {
+            return {
+                speaker: TUNING_DEFAULT_SPEAKER,
+                variation: Number(variationSlider.value.toFixed(3)),
+                timbre: Number(timbreSlider.value.toFixed(3)),
+                speed: Number(speedSlider.value.toFixed(3))
+            };
+        }
+
+        function showNumbers() {
+            variationSlider.readout.text = variationSlider.value.toFixed(2);
+            timbreSlider.readout.text = timbreSlider.value.toFixed(2);
+            speedSlider.readout.text = speedSlider.value.toFixed(2);
+        }
+
+        function showPreset() {
+            var at = tuningPresetIndex(readSliders());
+            presetMenu.selection = at < 0 ? IC_TUNING_PRESETS.length : at;
+        }
+
+        var settingSliders = false;
+        function sliderMoved() {
+            showNumbers();
+            // Guarded, or applying a preset re-enters through onChanging and
+            // reads the sliders back before they have all been set — which
+            // lands on Custom the instant a preset is chosen.
+            if (!settingSliders) { showPreset(); }
+        }
+        variationSlider.onChanging = sliderMoved;
+        variationSlider.onChange = sliderMoved;
+        timbreSlider.onChanging = sliderMoved;
+        timbreSlider.onChange = sliderMoved;
+        speedSlider.onChanging = sliderMoved;
+        speedSlider.onChange = sliderMoved;
+
+        presetMenu.onChange = function () {
+            if (!presetMenu.selection) { return; }
+            var at = presetMenu.selection.index;
+            // The Custom row is a state, not a choice: selecting it changes
+            // nothing, because there is nothing it could mean.
+            if (at < 0 || at >= IC_TUNING_PRESETS.length) { return; }
+            var row = IC_TUNING_PRESETS[at];
+            settingSliders = true;
+            variationSlider.value = row.variation;
+            timbreSlider.value = row.timbre;
+            speedSlider.value = row.speed;
+            settingSliders = false;
+            showNumbers();
+        };
 
         var explain = dialog.add("statictext", undefined, M(
-            "Speaker picks which voice in the model; leave it blank for the model's own. Both models here were trained with one voice, so a speaker number is usually refused — the tool renders it, hears silence, and says so rather than importing a line nobody can hear. Variation and timbre run 0 to 2 — higher is less predictable. Speed runs 0.25 to 4 and larger is faster; this is the offline model's own speed, because the Speed slider belongs to the built-in voice and does not reach a line an offline model spoke. / 「語者」是挑模型裡的哪一個聲音，留白就用模型原本的。這裡的兩個模型都只訓練了一個聲音，所以填語者編號通常會被拒絕——工具會先算出來，發現是無聲的就直接講，而不是匯入一段沒人聽得到的音檔。「變化」和「音色變化」是 0 到 2，越大越不固定。「語速」是 0.25 到 4，越大越快；這是離線模型自己的語速，因為面板上的 Speed 滑桿是內建聲音在用的，碰不到離線模型唸出來的句子。"),
+            "Variation is how much the voice may differ from one render to the next; rhythm is the same thing for how long each syllable is held. Speed is this model's own — the panel's Speed slider belongs to the built-in voice and never reaches a line an offline model spoke. There is no speaker to choose: both models were trained with one voice each. / 「變化」是每次算出來可以差多少，「節奏變化」是同一件事、但作用在每個字拉多長。「語速」是這個模型自己的——面板上的 Speed 滑桿是內建聲音在用的，碰不到離線模型唸出來的句子。沒有語者可以選：這兩個模型各自都只訓練了一個聲音。"),
             { multiline: true });
-        explain.preferredSize = [440, 118];
+        explain.preferredSize = [430, 62];
 
         var buttons = dialog.add("group");
         buttons.orientation = "row";
-        buttons.alignment = ["right", "top"];
+        buttons.alignment = ["fill", "top"];
+        /*
+         * Audition, which is the reason any of the rest is usable.
+         *
+         * Three numbers describing how a voice varies cannot be judged by
+         * reading them. It renders through the real model with the real
+         * tuning, into the temp folder rather than beside the project, so this
+         * touches nothing — invariant 8af, the same rule the engine's Preview
+         * follows. First press pays the model load, so it says so.
+         */
+        var playButton = buttons.add("button", undefined, M("Play / 試聽"));
+        var playReadout = buttons.add("statictext", undefined,
+            M("First press loads the model / 第一次按要先載入模型"));
+        playReadout.preferredSize.width = 240;
         var saveButton = buttons.add("button", undefined, M("Save / 儲存"));
-        var resetButton = buttons.add("button", undefined, M("Reset / 回到預設"));
         var cancelButton = buttons.add("button", undefined, M("Cancel / 取消"));
-        var answer = null;
-        saveButton.onClick = function () {
-            var wanted = trim(String(speakerField.text));
-            try {
-                answer = {
-                    voice: tuningTextOf({
-                        speaker: wanted
-                            ? tuningNumber("speaker", wanted, 0, TUNING_MAX_SPEAKER, true)
-                            : TUNING_DEFAULT_SPEAKER,
-                        variation: tuningNumber("variation", trim(String(variationField.text)),
-                            TUNING_MIN_VARIATION, TUNING_MAX_VARIATION, false),
-                        timbre: tuningNumber("timbre", trim(String(timbreField.text)),
-                            TUNING_MIN_VARIATION, TUNING_MAX_VARIATION, false),
-                        speed: tuningNumber("speed", trim(String(speedField.text)),
-                            TUNING_MIN_SPEED, TUNING_MAX_SPEED, false)
-                    })
-                };
-            } catch (error) {
-                // The dialog stays open on a bad number, so the other three
-                // fields are not lost to a typo in the fourth.
-                answer = null;
-                alert(String(error.message || error));
+
+        playButton.onClick = function () {
+            var said = trim(String(sampleText || ""));
+            if (!said) {
+                alert(M("Type a line first, so there is something to hear. / 請先打一句話，才有東西可以聽。"));
                 return;
             }
+            playReadout.text = M("Rendering… / 計算中…");
+            dialog.update();
+            try {
+                auditionVoiceTuning(source, tuningTextOf(readSliders()), said);
+                playReadout.text = M("Played / 已播放");
+            } catch (error) {
+                playReadout.text = M("Could not play / 無法播放");
+                alert(String(error.message || error));
+            }
+        };
+        var answer = null;
+        saveButton.onClick = function () {
+            answer = { voice: tuningTextOf(readSliders()) };
             dialog.close();
         };
-        resetButton.onClick = function () { answer = { voice: "" }; dialog.close(); };
         cancelButton.onClick = function () { answer = null; dialog.close(); };
+
+        showNumbers();
+        showPreset();
         dialog.show();
         return answer;
+    }
+
+    /*
+     * Hear a tuning without committing to it.
+     *
+     * Two tools, and the split is where the code already is: the offline tool
+     * renders, because it is the one that owns the model, and the engine tool
+     * plays, because that is where PlaySound and winmm live and a second copy
+     * would be a second place to remember SND_NODEFAULT (without which Windows
+     * substitutes its own ding for a file it cannot play, and a failure sounds
+     * like a success).
+     *
+     * The cache folder is under the temp directory, not beside the project:
+     * an audition must not write into somebody's project folder, and it must
+     * work with no project open at all. Repeat presses on the same tuning are
+     * then free, because the offline tool's cache does its usual job.
+     */
+    function auditionVoiceTuning(source, voice, text) {
+        var tool = source.tool || toolFile(LOCAL_TOOL_NAME);
+        if (!tool) {
+            throw new Error(M("{0} is missing. Reinstall Island Chatter. / 找不到 {0}，請重新安裝 Island Chatter。",
+                LOCAL_TOOL_NAME));
+        }
+        var folder = new Folder(Folder.temp.fsName.replace(/\\/g, "/") + "/" + AUDITION_FOLDER_NAME);
+        if (!folder.exists && !folder.create()) {
+            throw new Error(M("Could not create {0} / 無法建立 {0}", folder.fsName));
+        }
+        var spoken = parseVoiceReply(system.callSystem(quoted(tool.fsName) +
+            " --speak --provider " + source.id +
+            " --text " + hexUtf8(text) +
+            (voice ? " --voice " + hexUtf8(voice) : "") +
+            " --cache-dir " + hexUtf8(folder.fsName)));
+        var file = new File(spoken.path);
+        if (!file.exists) {
+            throw new Error(M("The cloud voice reported success but wrote no file. / 雲端語音回報成功卻沒有寫出檔案。") +
+                "\n\n" + spoken.path);
+        }
+        // PLAYED is checked because callSystem() reports no exit status, so a
+        // playback that failed is otherwise indistinguishable from a short
+        // silence — which is exactly what this dialog is for judging.
+        var played = String(system.callSystem(quoted(requireEngineTool().fsName) +
+            " --play-hex " + hexUtf8(file.fsName)));
+        if (played.indexOf("PLAYED") < 0) {
+            throw new Error(M("Windows could not play the preview. / Windows 無法播放試聽的聲音。") +
+                "\n\n" + played);
+        }
     }
 
     function cloudArguments(settings) {
@@ -4064,15 +4276,30 @@
         // because such a source has no account and does have a voice.
         "Tuning… / 調音…": "声の調整…",
         "Voice settings for {0} / {0} 的聲音設定": "{0} の声の設定",
-        "Speaker / 語者": "話者",
+        // No "Speaker" row from 3.5.0: both models were trained with one voice
+        // each, so there was never anything to choose.
+        "Preset / 預設": "プリセット",
+        "MeloTTS default / MeloTTS 官方預設": "MeloTTS の既定",
+        "Steady / 穩定": "安定",
+        "Lively / 活潑": "いきいき",
+        "Narration / 旁白": "ナレーション",
+        "Hurried / 急促": "早口",
+        "Custom / 自訂": "カスタム",
         "Variation / 變化": "ゆらぎ",
-        "Timbre variation / 音色變化": "声色のゆらぎ",
+        "Rhythm / 節奏變化": "リズムのゆらぎ",
         "Speed / 語速": "はやさ",
-        "Speaker picks which voice in the model; leave it blank for the model's own. Both models here were trained with one voice, so a speaker number is usually refused — the tool renders it, hears silence, and says so rather than importing a line nobody can hear. Variation and timbre run 0 to 2 — higher is less predictable. Speed runs 0.25 to 4 and larger is faster; this is the offline model's own speed, because the Speed slider belongs to the built-in voice and does not reach a line an offline model spoke. / 「語者」是挑模型裡的哪一個聲音，留白就用模型原本的。這裡的兩個模型都只訓練了一個聲音，所以填語者編號通常會被拒絕——工具會先算出來，發現是無聲的就直接講，而不是匯入一段沒人聽得到的音檔。「變化」和「音色變化」是 0 到 2，越大越不固定。「語速」是 0.25 到 4，越大越快；這是離線模型自己的語速，因為面板上的 Speed 滑桿是內建聲音在用的，碰不到離線模型唸出來的句子。":
-            "「話者」はモデルの中のどの声を使うかです。空欄ならモデル本来の声になります。ここにある二つのモデルはどちらも声が一つしか学習されていないため、話者番号は多くの場合ことわられます——ツールがいったん合成し、無音だと分かった時点でそう伝えます。誰にも聞こえない行を読み込ませないためです。「ゆらぎ」と「声色のゆらぎ」は 0 から 2 で、大きいほど毎回の変化が増えます。「はやさ」は 0.25 から 4 で、大きいほど速くなります。これはオフラインモデル自身のはやさです。パネルの Speed スライダーは内蔵の音声のもので、オフラインモデルがしゃべった行には届きません。",
-        "Reset / 回到預設": "既定に戻す",
+        "{0} to {1} / {0} 到 {1}": "{0}～{1}",
+        "Play / 試聽": "試聴",
+        "First press loads the model / 第一次按要先載入模型":
+            "最初の一回はモデルの読み込みが入ります",
+        "Rendering… / 計算中…": "合成中…",
+        "Played / 已播放": "再生しました",
+        "Could not play / 無法播放": "再生できませんでした",
+        "Type a line first, so there is something to hear. / 請先打一句話，才有東西可以聽。":
+            "先に一行入力してください。聞くものがありません。",
+        "Variation is how much the voice may differ from one render to the next; rhythm is the same thing for how long each syllable is held. Speed is this model's own — the panel's Speed slider belongs to the built-in voice and never reaches a line an offline model spoke. There is no speaker to choose: both models were trained with one voice each. / 「變化」是每次算出來可以差多少，「節奏變化」是同一件事、但作用在每個字拉多長。「語速」是這個模型自己的——面板上的 Speed 滑桿是內建聲音在用的，碰不到離線模型唸出來的句子。沒有語者可以選：這兩個模型各自都只訓練了一個聲音。":
+            "「ゆらぎ」は合成するたびに声がどれだけ変わってよいか、「リズムのゆらぎ」は同じことを一音ごとの長さに当てはめたものです。「はやさ」はこのモデル自身のもので、パネルの Speed スライダーは内蔵の音声のものなので、オフラインモデルがしゃべった行には届きません。話者は選べません。どちらのモデルも声が一つしか学習されていないためです。",
         "Voice tuned / 已調過音": "声を調整しました",
-        "Model's own voice / 模型原本的聲音": "モデル本来の声",
         "“{0}” is not written as name=value. / 「{0}」不是「名稱=值」的寫法。":
             "「{0}」が name=value の形になっていません。",
         "There is no voice setting called “{0}”. / 沒有叫「{0}」的聲音設定。":
@@ -7249,16 +7476,19 @@
                  * that is the field already in the cache key.
                  */
                 if (picked.onThisMachine) {
-                    var tuned = askForVoiceTuning(picked.label,
-                        trim(String(cloudVoiceField.text)));
+                    /*
+                     * The line the audition speaks is the one the user is
+                     * looking at — `previewText()` takes the selected layer's
+                     * text and falls back to the Speak box, exactly as the
+                     * engine's own Preview does. Judging a voice on a sentence
+                     * somebody else chose is judging the wrong thing.
+                     */
+                    var tuned = askForVoiceTuning(picked,
+                        trim(String(cloudVoiceField.text)), previewText());
                     if (!tuned) { return; }
-                    // "default" rather than an empty box, so what is on screen
-                    // is what will be sent and what will come back next time.
-                    cloudVoiceField.text = tuned.voice ? tuned.voice : "default";
+                    cloudVoiceField.text = tuned.voice;
                     rememberProviderFields();
-                    cloudReadout.text = tuned.voice
-                        ? M("Voice tuned / 已調過音")
-                        : M("Model's own voice / 模型原本的聲音");
+                    cloudReadout.text = M("Voice tuned / 已調過音");
                     return;
                 }
                 var answer = askForCloudKey(picked.label, storedKey(picked.id));
