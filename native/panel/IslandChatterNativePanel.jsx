@@ -4195,7 +4195,7 @@
          * and "Sing & dub / 唱歌與配音".
          */
         "Lines & animation / 句子與動畫": "セリフとアニメーション",
-        "Voice settings / 聲音參數": "声のパラメーター",
+        "Voice / 聲音": "声",
         "Lip-sync from audio / 音檔轉口型": "音声から口を動かす",
         "Sensitivity / 靈敏度": "感度",
         "Vowels / 判斷母音": "母音を判定",
@@ -4417,7 +4417,9 @@
             "このコンポには共有リグがありません。",
         "Type-On / 逐字顯示": "一文字ずつ表示",
         "Center / 維持置中": "中央ぞろえを保つ",
-        "Leave / 離開": "出るカーブ",
+        // Was "Leave / 離開" until 3.7.0, which named the side of the keyframe
+        // the influence sits on rather than what moving it does.
+        "Ease / 緩動": "動きのため",
         "Smoothness / 平滑": "なめらかさ",
         "Apply to selected text layers / 套用到選取文字圖層": "選択したテキストレイヤーに適用",
         "Bake / 轉成音訊": "音声ファイルに書き出す",
@@ -4653,8 +4655,8 @@
         "係": "系", "價": "价", "欄": "栏", "費": "费",
         // Added with the offline model.
         "載": "载", "統": "统", "員": "员", "權": "权",
-        // Added with the two-page panel: 聲音參數.
-        "參": "参"
+        // Added with the two-page panel: 聲音參數, 緩動.
+        "參": "参", "緩": "缓"
     };
 
     function simplify(text) {
@@ -5597,40 +5599,41 @@
             return tab;
         }
         /*
-         * Two pages from 3.6.0, split by a question rather than by subject:
-         * **can you do this anywhere else?**
+         * Two pages: **the line, and the voice.**
          *
-         * Everything on the second page is an effect parameter. Once a line has
-         * been applied, all thirteen of those rows exist again in After
-         * Effects' own Effect Controls, where they can be keyframed and where
-         * anybody working on that layer will already be looking. The panel's
-         * copies matter only until the first Apply.
+         * The first is the line and what moves on screen — the text, how it is
+         * read, how it is laid out in time, the rig, the mouth switch, Type-On,
+         * the markers, importing a script. The second is the voice: what it
+         * sounds like, and where the sound comes from.
          *
-         * Everything on the first page has no other home. A script, a MIDI
-         * file, a recording, an offline model, the rig, the mouth switch,
-         * Type-On, the markers, reading a layer back — none of it is a
-         * parameter and none of it can be reached from the effect. That is what
-         * somebody opened this panel for, so it is what the panel opens on.
+         * It started from a sharper rule — *can you do this anywhere else?* —
+         * because every effect parameter on the second page exists again in
+         * After Effects' own Effect Controls once a line is applied, where it
+         * can be keyframed and where anybody working on that layer is already
+         * looking. That rule is why the parameters are on the second page and
+         * not the first, and it still holds. What it could not do on its own is
+         * decide where MIDI, a recording and a cloud or offline model go: none
+         * of them is a parameter, but all of them are the voice.
          *
-         * The count has always been a measured number and this time it is a
-         * measured *cost*. 2.2.0 went to four pages because one column of forty
-         * rows wanted 1354 px against the ~900 px a 1080p dock gives — a docked
-         * ScriptUI panel does not scroll, it clips, and what was clipped was
-         * every verb the product has. 2.4.0 went to three. Two does **not**
-         * fit that budget: the panel-only rows are 27 of the 40 and want 932 px
-         * on their own, against the 570 a page had.
+         * **The count and the balance are both measured.** 2.2.0 went to four
+         * pages because one column of forty rows wanted 1354 px against the
+         * ~900 px a 1080p dock gives — a docked ScriptUI panel does not scroll,
+         * it clips, and what was clipped was every verb the product has. 2.4.0
+         * went to three. 3.6.0 went to two on the parameter rule alone and came
+         * out at 968 and 396 px: the second page a third full, the first one
+         * needing the height limits raised well past that dock. 3.7.0 moves the
+         * saved characters, MIDI, lip-sync and the voice sources across, and
+         * measures **628 and 736, with the panel at 964**.
          *
-         * **So the limits were raised rather than the content hidden, and that
-         * is a decision with a price.** `TALLEST_PAGE` and `TALLEST_PANEL` in
-         * ae-language-verify.jsx are now 980 and 1210. On a dock shorter than
-         * that the first page clips, and what clips is the bottom of it — the
-         * voice-source rows. The verbs are safe: Apply, Re-sync, Re-flow and
-         * the status line live outside the tabbed panel and always have. The
-         * alternative was hiding a row per mode until its mode was on, which
-         * buys exactly 224 px and leaves nothing for the next row anybody adds.
+         * That is still ~60 px over what a 1080p dock gives, and that is the
+         * remaining price: on a dock that short the bottom of the *second* page
+         * clips, which is the offline-model row. The verbs are safe — Apply,
+         * Re-sync, Re-flow and the status line live outside the tabbed panel
+         * and always have. `TALLEST_PAGE` and `TALLEST_PANEL` in
+         * ae-language-verify.jsx are 780 and 1010, one row of headroom each.
          */
         var mainTab = addTab("Lines & animation / 句子與動畫");
-        var voiceTab = addTab("Voice settings / 聲音參數");
+        var voiceTab = addTab("Voice / 聲音");
         tabs.selection = mainTab;
 
         /*
@@ -5648,8 +5651,27 @@
         var speakTab = mainTab;
         var characterTab = mainTab;
         var animationTab = mainTab;
-        var performTab = mainTab;
-        var scriptTab = mainTab;
+        /*
+         * MIDI, a recording and a cloud or offline model are all on the second
+         * page, and they are not effect parameters — so the rule the split
+         * started from needed one more word.
+         *
+         * It is not "is this an effect parameter", it is **what is this
+         * about**: the second page is the *voice* — what it sounds like and
+         * where the sound comes from — and the first is the *line* and what
+         * moves on screen. Every effect parameter is still on the second page,
+         * because a parameter is by definition about the sound; what joins them
+         * is the three other ways audio arrives, and the saved characters,
+         * which are those parameters under a name.
+         *
+         * The reason to do it is measured. Split on the parameter rule alone
+         * the pages were 968 and 396 px, so the second one was a third full
+         * while the first needed the height limits raised past what a 1080p
+         * dock gives. Moving these ten rows makes them 628 and 736, and brings
+         * the whole panel from 1196 px down to about 964.
+         */
+        var performTab = voiceTab;
+        var scriptTab = voiceTab;
         var timbreTab = voiceTab;
 
         speakTab.add("statictext", undefined, "Direct text-layer voice / 文字圖層直接發聲");
@@ -5981,13 +6003,11 @@
 
         // Saved characters sit with the timbre they mostly carry.
         /*
-         * Panel-only, and this is the row that makes the second page optional.
-         *
-         * A saved character *is* the thirteen parameters, under a name. Picking
-         * one here sets all of them without anybody opening the second page,
-         * which is why the sliders being one tab away costs so little.
+         * A saved character *is* the thirteen parameters under a name, so it
+         * belongs beside them: picking one here moves every slider on this
+         * page at once, and that is only legible if the sliders are in sight.
          */
-        var characterRow = mainTab.add("group");
+        var characterRow = voiceTab.add("group");
         var preset = characterRow.add("dropdownlist", undefined, BUILT_IN_CHARACTERS.slice(0));
         preset.selection = 0;
         var randomButton = characterRow.add("button", undefined, "Random / 隨機");
@@ -6212,7 +6232,17 @@
         // One influence shapes both the reveal and the recentring glide; the
         // arriving side is always full, so motion settles rather than stopping
         // dead. Low leaves at full speed, which is the fast-to-slow default.
-        var easeLeave = addSlider(animationTab, "Leave / 離開", MIN_INFLUENCE, MAX_INFLUENCE,
+        /*
+         * "Ease", not "Leave".
+         *
+         * The old label named the *mechanism* — this is the temporal ease
+         * influence on the outgoing side of each keyframe — and nobody reading
+         * a panel is thinking about which side of a keyframe an influence sits
+         * on. What the control does is decide whether the typing snaps or
+         * drifts, and next to "Smoothness", which softens each character's
+         * fade, "Ease" says which of the two motions it is about.
+         */
+        var easeLeave = addSlider(animationTab, "Ease / 緩動", MIN_INFLUENCE, MAX_INFLUENCE,
             DEFAULT_LEAVE_INFLUENCE);
         tip(easeLeave, "leave");
         var smoothness = addSlider(animationTab, "Smoothness / 平滑", 0, 100, DEFAULT_SMOOTHNESS);

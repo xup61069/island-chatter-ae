@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 3.6.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.7.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -268,6 +268,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Delete | 刪除 | 删除 | 削除 |
 | Direct text-layer voice | 文字圖層直接發聲 | 文本图层直接发声 | テキストレイヤーが直接しゃべる |
 | Droid | 機器 | 机器 | ドロイド |
+| Ease | 緩動 | 缓动 | 動きのため |
 | Edit text, then apply | 修改文字後按套用 | 修改文字后按应用 | テキストを直したら適用を押す |
 | Elder | 年長 | 年长 | エルダー |
 | Fit Duration | 配合長度 | 配合长度 | 長さを合わせる |
@@ -280,7 +281,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Hold | 接到下一句 | 接到下一句 | 次までのばす |
 | Import script | 匯入劇本 | 导入剧本 | 台本を読み込む |
 | Key | 唱名調 | 唱名调 | 階名のド |
-| Leave | 離開 | 离开 | 出るカーブ |
 | Lip-sync from audio | 音檔轉口型 | 音文件转口型 | 音声から口を動かす |
 | Markers | 逐字標記 | 逐字标记 | マーカー |
 | Metallic | 金屬 | 金属 | メタリック |

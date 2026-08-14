@@ -292,29 +292,28 @@
          * gets, and for the same reason: shortening the words never reaches the
          * number.
          *
-         * **3.6.0 raised them, deliberately, and this is the record of what it
-         * costs.** The panel was reorganised around one question — can you do
-         * this anywhere else? — which puts every effect parameter on a second
-         * page and everything else on the first. That is the right split and it
-         * does not fit: the panel-only rows are 27 of the 40 and want 932 px on
-         * their own. Splitting them again would put the answer back to three
-         * pages, which is the arrangement being replaced.
+         * **3.6.0 raised them deliberately and 3.7.0 won most of it back.**
+         * The panel went to two pages: the second is the voice — what it sounds
+         * like and where the sound comes from — and the first is the line and
+         * what moves on screen. Split on the effect-parameter rule alone the
+         * pages were 968 and 396, so the short one was a third full while the
+         * long one needed a limit far past what a 1080p dock gives. Moving the
+         * saved characters, MIDI, lip-sync and the voice sources across makes
+         * them **628 and 736**, and the panel **964**.
          *
-         * So the numbers below are now what the *panel needs* rather than what
-         * a 1080p dock gives, and on a dock shorter than that the first page
-         * clips. **What clips is the bottom of the first page**, currently the
-         * voice-source rows; the verbs that 2.2.0 lost are outside the tabbed
-         * panel and cannot be reached by this. That was the trade the limits
-         * were raised for, and anyone lowering them again is choosing three
-         * pages, not choosing tidiness.
+         * So these are still above what a 1080p dock gives, by about 60 px of
+         * panel, and that is the remaining cost: on a dock that short the
+         * bottom of the *second* page clips now, which is the offline-model
+         * row. The verbs 2.2.0 lost are outside the tabbed panel and cannot be
+         * reached by this. Three pages is what buys the last 60 px back, and
+         * three pages is the arrangement being replaced.
          *
-         * They are still limits and they are still measured. 3.6.0 wants
-         * **968 px** for the first page, 396 for the second and 1196 for the
-         * panel; these are those numbers plus ~40 px, which is one more row.
-         * A second row is meant to fail here.
+         * Measured 628 / 736 / 964, plus ~44 px, which is one more row. A
+         * second row is meant to fail here, and that was confirmed by setting
+         * the page limit under the measurement and watching it report.
          */
-        var TALLEST_PANEL = 1240;
-        var TALLEST_PAGE = 1010;
+        var TALLEST_PANEL = 1010;
+        var TALLEST_PAGE = 780;
         var tooWide = [];
         var tooTall = [];
         var widestSeen = 0;

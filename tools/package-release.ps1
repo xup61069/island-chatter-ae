@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [string]$Version = "3.6.0",
+    [string]$Version = "3.7.0",
     # Empty means "find the newest build". Pass a path to pin one explicitly.
     [string]$AexPath = "",
     # Package the trial instead of the product. The payload is identical — the

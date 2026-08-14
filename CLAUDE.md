@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.6.0` (Windows x64).
+- Current public release: `v3.7.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -647,38 +647,44 @@ effect.
    the only way to overflow a row is still to put too many controls in it, exactly as the
    eleven-control sing row did.
 
-   **Two pages from 3.6.0, split by a question rather than by subject: can you do this
-   anywhere else?** Everything on the second page is an effect parameter — voice, emotion,
-   size, pitch, speed, volume, consonant, clarity, cuteness, formant, source, vibrato, rate,
-   seed — and every one of them exists again in After Effects' own Effect Controls once a line
-   is applied, where it can be keyframed and where anyone working on that layer is already
-   looking. The panel's copies matter only until the first Apply. Nothing on the first page has
-   another home: a script, a MIDI file, a recording, an offline model, the rig, the mouth
-   switch, Type-On, the markers, reading a layer back. **A saved character is what makes the
-   second page optional** — it is those thirteen parameters under a name, set from the first
-   page in one click.
+   **Two pages from 3.6.0: the line, and the voice.** The first page is the line and what
+   moves on screen — text, pronunciation, tempo, Preview, the rig, the mouth switch, Type-On,
+   the markers, importing a script. The second is the voice: the thirteen effect parameters,
+   the saved characters, and the three other ways audio arrives (MIDI, a recording, a cloud or
+   offline model).
 
-   Custom timbre stays on the first page even though it writes parameters `279-289`: the
+   It started from a sharper rule — *can you do this anywhere else?* — and that rule is why the
+   parameters are on the second page: every one of them exists again in Effect Controls once a
+   line is applied, where it can be keyframed and where anybody working on that layer is
+   already looking, so the panel's copies matter only until the first Apply. What the rule
+   could not decide on its own was MIDI, lip-sync and the voice sources: none is a parameter,
+   all are the voice. **A saved character is those thirteen parameters under a name**, so it
+   sits beside them — picking one moves every slider on the page, which is only legible if the
+   sliders are in sight.
+
+   Custom timbre stays on the *first* page even though it writes parameters `279-289`: the
    parameters are visible in Effect Controls, but *measuring a vowel from a recording* is not
    something Effect Controls can do. The test is what the control does, not what it writes.
 
-   **The limits were raised for this, and that is the cost of it.** The panel-only rows are 27
-   of the 40 and want **968 px** on their own; the old page limit was 570, and splitting them
-   again is three pages, which is the arrangement being replaced. So `TALLEST_PAGE` and
-   `TALLEST_PANEL` are **1010 and 1240**, and they now describe what the panel needs rather
-   than what a 1080p dock gives. On a shorter dock the first page clips from the bottom, which
-   today is the voice-source rows; the verbs 2.2.0 lost are outside the tabbed panel and cannot
-   be reached by this. Measured: 968 / 396 / 1196, ~40 px of headroom, which is one more row.
-   The guard was confirmed to still fail by setting the page limit to 900 and watching it
-   report `zh the 句子與動畫 page needs 968 px`.
+   **The balance is measured, and so is what it costs.** On the parameter rule alone the pages
+   came out **968 and 396** — the second a third full, the first needing limits well past what
+   a 1080p dock gives. Moving those ten rows across gives **628 and 736, panel 964**, so
+   `TALLEST_PAGE` and `TALLEST_PANEL` are **780 and 1010**, one row of headroom each. That is
+   still ~60 px over a 1080p dock: on one that short the bottom of the *second* page clips,
+   which is the offline-model row. The verbs 2.2.0 lost are outside the tabbed panel and cannot
+   be reached by this. Three pages is what buys the last 60 px back, and three pages is the
+   arrangement being replaced. The guard was confirmed still live by setting the page limit
+   under the measurement and watching it name the page and the number.
 
-   **Anyone lowering those numbers again is choosing three pages, not choosing tidiness.**
+   Two seams this leaves, both deliberate and both one line to change. **Tempo** is on the
+   first page and writes the **Speed** slider on the second; its readout prints the Speed it
+   computed, which is why it is a seam rather than a break. **Preview** is on the first page
+   and the sliders it previews are on the second.
 
-   One seam this split introduces and did not resolve: Tempo is panel-only so it is on the
-   first page, but everything it does is write the Speed slider, which is on the second. The
-   readout beside it prints the Speed it computed, which is why this is a seam rather than a
-   break — moving the tempo row to sit beside Speed is a one-line change if it ever reads
-   worse than it measures.
+   **A label names what moving it does, not the mechanism behind it.** Type-On's ease slider
+   read `Leave / 離開` until 3.7.0 — the temporal ease influence on the outgoing side of each
+   keyframe, which is exactly right and tells a user nothing. It is `Ease / 緩動` now, beside
+   `Smoothness / 平滑`, so the pair says which of the two motions each one is about.
 
    `remeasure()` resets **both** axes on a `tab` and a `tabbedpanel` rather than carrying the
    height over. Apply's 34 px is a deliberate number and is kept; a page's height is whatever
