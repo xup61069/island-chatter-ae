@@ -558,8 +558,26 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
 
     Ort::Env environment(ORT_LOGGING_LEVEL_ERROR, "island_chatter");
     Ort::SessionOptions options;
-    // Two, as sherpa-onnx used. More threads help a longer line and cost a
-    // short one, and a line of dialogue is short.
+    /*
+     * Two, as sherpa-onnx used. More threads help a longer line and cost a
+     * short one, and a line of dialogue is short.
+     *
+     * **This model does not render the same line the same way twice, and it is
+     * not the threads.** Five renders of 早安 gave five different waveforms at
+     * two threads and five more at one, so it is not a reduction order — it is
+     * `noise_scale`, which is an amplitude on noise the decoder samples, doing
+     * exactly what it says. ONNX Runtime exposes no seed for it: `SetSeed`
+     * lives in the *training* API, which an inference build does not ship.
+     *
+     * The frame count is stable, so this was invisible until the padding was
+     * trimmed — and it is why re-rendering a line can move its length by tens
+     * of milliseconds. The cache is what keeps that out of anybody's way: a
+     * line is rendered once and reused, so within a project a line does not
+     * change under you. Deleting the cache is what re-rolls it.
+     *
+     * Do not "fix" this by setting noise_scale to 0. That is not determinism,
+     * it is the flat, buzzy reading the parameter exists to avoid.
+     */
     options.SetIntraOpNumThreads(2);
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     Ort::Session session(environment, (root / "model.onnx").wstring().c_str(), options);
@@ -705,7 +723,19 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
         pcm.push_back(static_cast<unsigned char>((value >> 8) & 0xFF));
     }
     *rate_out = rate;
-    return cloud::wav_from_pcm16(pcm, rate);
+    /*
+     * The padding comes off here, before anything downstream sees the file.
+     *
+     * The model puts 100-210 ms in front of the first syllable and up to
+     * 160 ms after the last, and a different amount for every line. Left on,
+     * it is not just untidy: Fit Duration sizes the layer to the file and
+     * Re-flow lays the next line after it, so a scene on the beat is not.
+     * Trimming here rather than in the panel means the *file* is the
+     * utterance, which is what makes an offline line behave like an engine
+     * one everywhere — the analyser, the markers, the rig and the gaps all
+     * read the same thing.
+     */
+    return cloud::wav_from_pcm16(cloud::trim_silence(pcm, rate), rate);
 }
 
 [[noreturn]] void usage() {

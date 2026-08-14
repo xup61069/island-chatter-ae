@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.7.0` (Windows x64).
+- Current public release: `v3.8.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -358,6 +358,44 @@ effect.
    `island_chatter_bake --play-hex`, because winmm and `SND_NODEFAULT` are already there and a
    second copy would be a second place to forget the flag that stops a failure sounding like
    a success.
+
+8al. **A neural model pads, the padding varies per line, and it is trimmed in the tool.**
+   Measured with this product's own analyser on the shipped Chinese model: **100-210 ms before
+   the first syllable and 2-160 ms after the last, different for every line.** On a long
+   sentence that is 7%; on 「好」 it is 0.132 s of silence around 0.205 s of speech. That is the
+   whole of "the AI voice is sometimes longer and sometimes shorter" — not the speech, the
+   padding.
+
+   It reaches everything downstream, which is why it is not cosmetic. Fit Duration sizes the
+   layer to the *file*, Re-flow lays the next line after it, so a scene placed on the beat is
+   not. An engine-rendered line has no padding at all, so this is a difference between the two
+   voices rather than a property of speech. `trim_silence()` therefore runs in
+   `island_chatter_local` before the WAV is written: the file *is* the utterance, and the
+   analyser, the markers, the rig and the gaps all read the same thing.
+
+   **Three things this got wrong first, each now a test.**
+
+   *A sample-level threshold is unstable.* Walking to the first sample above a floor cut the
+   padding and turned a render whose length had been identical every time into one that varied
+   by 60 ms. A mean over 10 ms windows does not move when a few samples change by a bit, and
+   quantises the answer so a flip costs 10 ms rather than 60.
+
+   *This model does not render the same line twice, and it is not the threads.* Five renders of
+   早安 gave five waveforms at two intra-op threads and five more at one — it is `noise_scale`,
+   an amplitude on noise the decoder samples, doing what it says. **ONNX Runtime exposes no
+   seed for it: `SetSeed` is in the *training* API, which an inference build does not ship.**
+   The frame count is stable, so this was invisible until the padding came off. The cache is
+   what keeps it out of the way — a line renders once and is reused. Do not "fix" it by setting
+   `noise_scale` to 0; that is the flat reading the parameter exists to avoid.
+
+   *A trim that can delete speech is worse than the padding it removes.* At a floor of peak/32,
+   one render of 等一下 came back at **0.155 s against a normal 0.45** — its quieter half fell
+   inside the threshold. No threshold is clever enough to trust here, so the floor dropped to
+   peak/64 **and the damage is bounded**: `kTrimMostMs` is 300, above the worst padding ever
+   measured and below any syllable. The cap is the guard, not the threshold.
+
+   The cloud path is **not** trimmed. Its providers pad far less, its replies are already WAVs
+   that would have to be parsed, and re-rendering to find out costs money (8ab).
 
 8ah. **Custom timbre is a vocal tract, not a recording, and what is not measured is derived.**
    Five vowels, F1 and F2 each, measured from recordings the user makes. They replace the

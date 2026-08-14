@@ -761,6 +761,118 @@ void test_local_tuning() {
     }
 }
 
+/*
+ * The padding a neural model puts round a line, and what must survive taking
+ * it off.
+ *
+ * Measured on the shipped Chinese model: 100-210 ms before the first syllable
+ * and 2-160 ms after the last, different for every line. On 「好」 that is
+ * 0.132 s of silence around 0.205 s of speech. Fit Duration sizes the layer to
+ * the file and Re-flow lays the next line after it, so the padding is why an
+ * offline line does not land where an engine line would.
+ */
+void test_silence_is_trimmed() {
+    const std::uint32_t rate = 44100;
+    const auto pcm16 = [](const std::vector<int>& samples) {
+        std::vector<unsigned char> out;
+        out.reserve(samples.size() * 2U);
+        for (const int value : samples) {
+            const auto word = static_cast<std::uint16_t>(static_cast<std::int16_t>(value));
+            out.push_back(static_cast<unsigned char>(word & 0xFF));
+            out.push_back(static_cast<unsigned char>((word >> 8) & 0xFF));
+        }
+        return out;
+    };
+
+    // A tenth of a second of silence, a tenth of speech, a tenth of silence.
+    const std::size_t tenth = rate / 10U;
+    std::vector<int> built;
+    for (std::size_t at = 0; at < tenth; ++at) { built.push_back(0); }
+    for (std::size_t at = 0; at < tenth; ++at) {
+        built.push_back((at % 2U) ? 8000 : -8000);
+    }
+    for (std::size_t at = 0; at < tenth; ++at) { built.push_back(0); }
+    const auto padded = pcm16(built);
+    const auto trimmed = cloud::trim_silence(padded, rate);
+    require(trimmed.size() < padded.size(), "silence at both ends is removed");
+
+    /*
+     * The speech itself is never touched, and the margins are why this is
+     * checked as a range rather than an equality: a soft consonant starts
+     * below the floor, so the trim deliberately keeps 15 ms in front and
+     * 30 ms after. What must not happen is losing a sample of the speech.
+     */
+    const std::size_t kept = trimmed.size() / 2U;
+    const std::size_t head = rate * cloud::kTrimHeadMs / 1000U;
+    const std::size_t tail = rate * cloud::kTrimTailMs / 1000U;
+    require(kept >= tenth, "the speech survives the trim (" + std::to_string(kept) +
+                               " of " + std::to_string(tenth) + " frames)");
+    require(kept == tenth + head + tail,
+            "exactly the margins are kept round the speech (" + std::to_string(kept) +
+                " against " + std::to_string(tenth + head + tail) + ")");
+
+    /*
+     * A line with no padding is returned untouched.
+     *
+     * This is the case a trim that always cut a fixed amount would fail, and
+     * it is the one the cloud providers produce.
+     */
+    std::vector<int> flat;
+    for (std::size_t at = 0; at < tenth; ++at) { flat.push_back((at % 2U) ? 9000 : -9000); }
+    const auto solid = pcm16(flat);
+    require(cloud::trim_silence(solid, rate).size() == solid.size(),
+            "audio that is speech from end to end is not trimmed at all");
+
+    /*
+     * A quiet line is not mistaken for silence.
+     *
+     * The floor is a fraction of the file's *own* peak precisely so that a
+     * whisper survives; an absolute threshold would delete it. This is the
+     * check that fails if somebody replaces the relative floor with a
+     * constant.
+     */
+    std::vector<int> whisper;
+    for (std::size_t at = 0; at < tenth; ++at) { whisper.push_back((at % 2U) ? 300 : -300); }
+    const auto quiet = pcm16(whisper);
+    require(cloud::trim_silence(quiet, rate).size() == quiet.size(),
+            "a quiet line is kept rather than treated as silence");
+
+    /*
+     * The cap, which is the guard that matters most.
+     *
+     * A line whose second half is far quieter than its first had the second
+     * half removed: 等一下 came back at 0.155 s against a normal 0.45. No
+     * threshold is clever enough to be trusted here, so the damage is bounded
+     * instead — never more than kTrimMostMs from either end, which is above
+     * the 210 ms of padding ever measured and below any syllable.
+     */
+    std::vector<int> lopsided;
+    const std::size_t second = rate / 2U;
+    for (std::size_t at = 0; at < second; ++at) {
+        // A whole half-second that is quiet but real, under any relative floor
+        // a loud first half would set.
+        lopsided.push_back((at % 2U) ? 40 : -40);
+    }
+    for (std::size_t at = 0; at < tenth; ++at) {
+        lopsided.push_back((at % 2U) ? 20000 : -20000);
+    }
+    const auto loudAtEnd = pcm16(lopsided);
+    const auto capped = cloud::trim_silence(loudAtEnd, rate);
+    const std::size_t most = rate * cloud::kTrimMostMs / 1000U;
+    require(capped.size() / 2U >= (loudAtEnd.size() / 2U) - most,
+            "no more than the cap comes off, so a quiet half cannot be deleted (" +
+                std::to_string(capped.size() / 2U) + " of " +
+                std::to_string(loudAtEnd.size() / 2U) + " frames)");
+
+    // Degenerate input comes back as itself rather than as a crash.
+    require(cloud::trim_silence({}, rate).empty(), "no audio trims to no audio");
+    const std::vector<unsigned char> allZero(1000, 0);
+    require(cloud::trim_silence(allZero, rate).size() == allZero.size(),
+            "a file that is silent throughout is left for speak() to refuse");
+    require(cloud::trim_silence(padded, 0).size() == padded.size(),
+            "a rate of zero cannot produce a margin, so nothing is cut");
+}
+
 }  // namespace
 
 int main() {
@@ -779,6 +891,7 @@ int main() {
     test_broken_replies_are_refused_by_name();
     test_local_sources_are_representable();
     test_local_tuning();
+    test_silence_is_trimmed();
 
     if (failures) {
         std::cerr << failures << " cloud test(s) failed\n";

@@ -665,6 +665,112 @@ std::string cache_file_name(const Provider& provider, const Params& params) {
     return std::string(provider.id) + "-" + cache_key(provider, params).substr(0, 32) + ".wav";
 }
 
+std::vector<unsigned char> trim_silence(const std::vector<unsigned char>& pcm,
+                                        std::uint32_t rate) {
+    const std::size_t frames = pcm.size() / 2U;
+    if (frames == 0U || rate == 0U) { return pcm; }
+    // Little-endian 16-bit, which is what every path into here produces.
+    const auto sample_at = [&pcm](std::size_t index) {
+        const auto low = static_cast<unsigned>(pcm[index * 2U]);
+        const auto high = static_cast<unsigned>(pcm[index * 2U + 1U]);
+        return static_cast<int>(static_cast<std::int16_t>(
+            static_cast<std::uint16_t>(low | (high << 8))));
+    };
+    const auto level_at = [&sample_at](std::size_t index) {
+        const int value = sample_at(index);
+        return value < 0 ? -value : value;
+    };
+
+    /*
+     * Decided over windows, not sample by sample, and that is the whole
+     * difference between a trim that works and one that makes things worse.
+     *
+     * The first version walked to the first sample above a threshold. It cut
+     * the padding — and turned a render that had been the same length every
+     * time into one that varied by 60 ms, 15% of a two-syllable word.
+     * Measured: five renders of 早安 gave five different files.
+     *
+     * The model's output is not bit-identical between runs; ONNX Runtime is
+     * asked for two intra-op threads and a threaded reduction does not add in
+     * a fixed order, so the low bits move. That is inaudible in itself. What
+     * made it audible was asking *where does the first sample cross a line* —
+     * on a consonant that rises slowly out of the noise floor, one bit of
+     * difference moves that answer by hundreds of samples.
+     *
+     * A mean over 10 ms suppresses it: 441 samples averaged do not move when
+     * a few of them change by a bit. The answer is then quantised to a window,
+     * so the worst a flip can cost is 10 ms rather than 60 — and it takes a
+     * real change in the audio to flip one.
+     */
+    const std::size_t window = static_cast<std::size_t>(rate) / 100U;   // 10 ms
+    if (window == 0U) { return pcm; }
+    const std::size_t windows = (frames + window - 1U) / window;
+    std::vector<int> loudness(windows, 0);
+    std::size_t at;
+    for (at = 0; at < windows; ++at) {
+        const std::size_t from = at * window;
+        const std::size_t to = (from + window < frames) ? from + window : frames;
+        long long total = 0;
+        for (std::size_t index = from; index < to; ++index) { total += level_at(index); }
+        const std::size_t span = to - from;
+        loudness[at] = span ? static_cast<int>(total / static_cast<long long>(span)) : 0;
+    }
+
+    int peak = 0;
+    for (at = 0; at < windows; ++at) { if (loudness[at] > peak) { peak = loudness[at]; } }
+    if (peak == 0) { return pcm; }
+    /*
+     * Relative to the loudest window, with an absolute floor under it.
+     *
+     * peak/64 is about 36 dB below the loudest part of the line: under any
+     * speech, over the model's padding. Relative rather than absolute so a
+     * quietly spoken line is not trimmed away entirely; the constant stops a
+     * very quiet render treating its own noise as signal.
+     *
+     * It was peak/32 for one afternoon and that is too close to speech. A
+     * render of 等一下 came back at 0.155 s against a normal 0.45 — a line
+     * whose second half happened to be far quieter than its first, with the
+     * quiet half inside the threshold. Half a line is a much worse failure
+     * than the padding this exists to remove.
+     */
+    int quiet = peak / 64;
+    if (quiet < 24) { quiet = 24; }
+
+    std::size_t firstWindow = 0;
+    while (firstWindow < windows && loudness[firstWindow] < quiet) { ++firstWindow; }
+    std::size_t lastWindow = windows;
+    while (lastWindow > firstWindow && loudness[lastWindow - 1U] < quiet) { --lastWindow; }
+    if (firstWindow >= lastWindow) { return pcm; }
+
+    /*
+     * And never more than this from either end, whatever the levels say.
+     *
+     * The measured padding is 210 ms at its worst, so a cap above that removes
+     * all of it and still cannot remove a syllable. Without a cap the failure
+     * mode is unbounded: a line whose quiet half falls under the threshold
+     * loses the quiet half, which is exactly what a 0.155 s 等一下 was. **A
+     * trim that can delete speech is worse than the padding it removes**, so
+     * the bound is on the damage rather than on the cleverness of the
+     * threshold.
+     */
+    const std::size_t cap = static_cast<std::size_t>(rate) * kTrimMostMs / 1000U;
+    const std::size_t capWindows = cap / window;
+    if (firstWindow > capWindows) { firstWindow = capWindows; }
+    if (windows - lastWindow > capWindows) { lastWindow = windows - capWindows; }
+
+    std::size_t first = firstWindow * window;
+    std::size_t last = lastWindow * window;
+    if (last > frames) { last = frames; }
+
+    const std::size_t head = static_cast<std::size_t>(rate) * kTrimHeadMs / 1000U;
+    const std::size_t tail = static_cast<std::size_t>(rate) * kTrimTailMs / 1000U;
+    first = first > head ? first - head : 0U;
+    last = last + tail < frames ? last + tail : frames;
+    if (first == 0U && last == frames) { return pcm; }
+    return std::vector<unsigned char>(pcm.begin() + static_cast<std::ptrdiff_t>(first * 2U),
+                                      pcm.begin() + static_cast<std::ptrdiff_t>(last * 2U));
+}
+
 std::vector<unsigned char> wav_from_pcm16(const std::vector<unsigned char>& pcm,
                                           std::uint32_t rate) {
     // An odd byte count cannot be whole 16-bit samples. The half sample at the

@@ -1187,10 +1187,40 @@ for (const bpm of [60, 90, 120, 174]) {
         `The language picker offers ${nameCount} names for ${codeCount} language codes; ` +
         "they are matched by position, so the extra code can never be chosen");
     }
+    /*
+     * All four languages must still be *built*; the menu may offer fewer.
+     *
+     * 简体中文 came off the menu in 3.8.0 and is still generated, because it is
+     * derived from the Traditional half rather than written out (invariant 8i)
+     * — deleting it would take the term table, the character map and the
+     * classification guard with it, and that guard is what catches an
+     * unclassified Han character in *any* language.
+     *
+     * So a language that is not offered has to be *declared* not offered. A
+     * code that had simply been deleted from both lists would pass a check that
+     * only looked at the menu, and the Simplified layer would rot untested with
+     * nothing to say it had been dropped on purpose.
+     */
+    const hidden = nativePanelSource.match(/var HIDDEN_LANGUAGE_CODES = (\[[^\]]*\]);/);
+    if (!hidden) throw new Error("The panel has no HIDDEN_LANGUAGE_CODES");
     for (const code of ["zh", "cn", "en", "ja"]) {
-      if (!codes[1].includes(`"${code}"`)) {
-        throw new Error(`The panel no longer offers the "${code}" interface language`);
+      if (!codes[1].includes(`"${code}"`) && !hidden[1].includes(`"${code}"`)) {
+        throw new Error(
+          `The "${code}" interface language is neither offered nor declared hidden. If it is ` +
+          "meant to be gone from the menu, put it in HIDDEN_LANGUAGE_CODES so the layer keeps " +
+          "being tested; if it is meant to be gone entirely, that is a bigger change than this.");
       }
+      if (codes[1].includes(`"${code}"`) && hidden[1].includes(`"${code}"`)) {
+        throw new Error(`The "${code}" language is both offered and hidden`);
+      }
+    }
+    // And a hidden language must land somewhere visible rather than leaving the
+    // picker blank while the panel speaks something no row names.
+    if (!/HIDDEN_LANGUAGE_CODES\[hiddenIndex\] === stored\) \{ UI_LANGUAGE = "zh"; \}/
+      .test(nativePanelSource)) {
+      throw new Error(
+        "A stored language that is no longer offered is not brought back to a visible one, " +
+        "so the picker would show nothing while the panel spoke Simplified");
     }
   }
 
@@ -1364,14 +1394,74 @@ for (const bpm of [60, 90, 120, 174]) {
       }
     }
   }
-  // Every body must be reachable, and every tip() must have one to reach.
+  /*
+   * Every body must be reachable, and every tip must have one to reach.
+   *
+   * `tipOnce()` counts as reaching. It is the same helpTip on a control that
+   * lives inside an on-demand dialog, which must *not* be registered for a
+   * language switch — the switch would walk a list of destroyed ScriptUI
+   * objects. What both spellings share is the only thing this guard is about:
+   * the body ends up on a control somebody can hover.
+   */
   for (const id of ids) {
-    if (!new RegExp(`tip\\([^,]+,\\s*"${id}"`).test(nativePanelSource)) {
+    if (!new RegExp(`tip(Once)?\\([^,]+,\\s*"${id}"`).test(nativePanelSource)) {
       throw new Error(`The "${id}" tooltip is written but no control shows it`);
     }
   }
-  for (const [, id] of nativePanelSource.matchAll(/\btip\([^,]+,\s*"([^"]+)"/g)) {
+  for (const [, , id] of nativePanelSource.matchAll(/\btip(Once)?\([^,]+,\s*"([^"]+)"/g)) {
     if (ids.indexOf(id) < 0) throw new Error(`tip(..., "${id}") has no body in IC_HELP`);
+  }
+
+  /*
+   * A wrapped paragraph is never given a height by hand.
+   *
+   * `statictext` with `multiline: true` keeps the height it is handed and the
+   * window around it is sized from what its children claim to need — so a
+   * paragraph that wraps to more lines than its number allows is not scrolled
+   * or squashed, it is cut off, and it takes whatever is underneath it with it.
+   * The offline-models window lost its footer and its Close button exactly that
+   * way: `[420, 32]` is two lines and the sentence is three in every language.
+   *
+   * One number cannot be right for four interface languages anyway — Han and
+   * kana are about twice the width of Latin — so the height has to come from
+   * the text. `addWrapped()` is the only way to add one.
+   */
+  // addWrapped() is the one place allowed to add one, so its own body is cut
+  // out before the search rather than special-cased inside it.
+  const outsideHelper = nativePanelSource.replace(takeFunction("addWrapped"), "");
+  /*
+   * The match may not cross another `.add(`.
+   *
+   * Written as a plain `[\s\S]{0,600}?` first, it ran from an ordinary
+   * one-line statictext, past it, and into the `multiline: true` of the text
+   * box declared underneath — reporting a paragraph that is not there. A
+   * tempered match keeps each hit inside the one call it started in.
+   */
+  const wrappedAdds = [...outsideHelper.matchAll(
+    /\.add\("statictext"(?:(?!\.add\()[\s\S]){0,400}?multiline:\s*true/g)];
+  for (const [block] of wrappedAdds) {
+    const where = block.replace(/\s+/g, " ").slice(0, 90);
+    throw new Error(
+      "A multiline statictext is added directly instead of through addWrapped(), so its " +
+      "height is whatever somebody typed. That is how the offline-models window lost its " +
+      `Close button. Near: ${where}`);
+  }
+  /*
+   * And addWrapped() may not go back to being one control with a height.
+   *
+   * Computing the height rather than hardcoding it was the first fix and it did
+   * not work — the window came back with the same missing Close button on a
+   * measured number. A guard that only banned the *hardcoded* height would have
+   * passed that version happily, so this one bans the control.
+   */
+  if (/multiline/.test(takeFunction("addWrapped"))) {
+    throw new Error(
+      "addWrapped() is back to a multiline statictext. That was tried with a computed height " +
+      "and the offline-models window was still cut off: ScriptUI does not use the height such " +
+      "a control is given. One single-line statictext per line is the fix that worked.");
+  }
+  if (!/wrapLines\(text, width\)/.test(takeFunction("addWrapped"))) {
+    throw new Error("addWrapped() no longer breaks the text into lines itself");
   }
 
   for (const [language, expected] of [

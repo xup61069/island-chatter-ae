@@ -320,6 +320,47 @@ std::vector<unsigned char> wav_from_reply(const Provider& provider,
  * rate field. The rate is a parameter rather than a provider's because a local
  * model states its own at runtime.
  */
+/*
+ * Head and tail silence, taken off before the WAV is written.
+ *
+ * A neural model pads. Measured on the shipped Chinese model: 100-210 ms
+ * before the first syllable and 2-160 ms after the last, and **the amount is
+ * different for every line**. On a long sentence that is 7% of the file and
+ * nobody notices; on 「好」 it is 0.132 s of silence around 0.205 s of speech,
+ * so the line is 60% longer than the word in it. That is the whole of "the AI
+ * voice is sometimes longer and sometimes shorter": it is not the speech that
+ * varies, it is the padding.
+ *
+ * It matters beyond looking untidy, because the padding reaches everything
+ * downstream. Fit Duration sizes the layer to the file, Re-flow lays the next
+ * line after it, and the gap between two lines is a note value plus however
+ * much silence each model happened to add — so a scene laid out on the beat
+ * is not. An engine-rendered line has no padding at all, which is what makes
+ * this a difference between the two voices rather than a property of speech.
+ *
+ * Silence is judged against the file's own peak rather than an absolute level,
+ * or a quietly spoken line would be trimmed away entirely. A margin is left on
+ * both sides: a soft consonant starts below the floor, and cutting to the
+ * first loud sample clips the attack off it.
+ *
+ * Returns the input unchanged when there is nothing to trim, including when
+ * the whole thing is below the floor — deciding that a file is silent is
+ * `speak()`'s job, and it has already refused by the time this runs.
+ */
+constexpr std::uint32_t kTrimHeadMs = 15;
+constexpr std::uint32_t kTrimTailMs = 30;
+/*
+ * The most that may come off either end, whatever the levels say.
+ *
+ * The measured padding is 210 ms at its worst, so this removes all of it and
+ * still cannot remove a syllable. The bound is on the *damage* rather than on
+ * the threshold being clever: without it, a line whose quieter half fell under
+ * the floor lost the quieter half — a 0.155 s 等一下 against a normal 0.45.
+ */
+constexpr std::uint32_t kTrimMostMs = 300;
+std::vector<unsigned char> trim_silence(const std::vector<unsigned char>& pcm,
+                                        std::uint32_t rate);
+
 std::vector<unsigned char> wav_from_pcm16(const std::vector<unsigned char>& pcm,
                                           std::uint32_t rate);
 

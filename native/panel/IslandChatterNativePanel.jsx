@@ -2587,6 +2587,11 @@
      * rather than ignored, so a panel that drifted would say so on the first
      * press instead of quietly rendering a voice nobody asked for.
      */
+    // The two modal windows, in one place because the wrapped paragraphs
+    // inside them are measured against these numbers.
+    var MODEL_WINDOW_WIDTH = 520;
+    var TUNING_WINDOW_WIDTH = 470;
+
     var TUNING_MAX_SPEAKER = 255;
     var TUNING_MIN_VARIATION = 0;
     var TUNING_MAX_VARIATION = 2;
@@ -2758,12 +2763,23 @@
     /*
      * Which source a panel with no remembered choice starts on.
      *
-     * Azure, because its default voice is `zh-TW-HsiaoChenNeural` — Taiwan
-     * Mandarin — and this product is Traditional Chinese first. The others
-     * default to China-accented Chinese, which is the wrong first
-     * impression for the audience this is built for. Not a reordering of the
-     * table: the remembered choice is an index, so moving rows would switch
-     * anybody who had already picked one.
+     * **An installed offline model first, from 3.8.0.** It costs nothing to
+     * press, sends nothing anywhere, needs no account, and cannot fail on a
+     * missing key — so it is the only source that is certain to work the first
+     * time somebody presses the button. A default that can produce a bill or an
+     * error about a credential is a bad first press whatever it sounds like.
+     *
+     * Azure is the fallback and the reason it is *the* fallback has not
+     * changed: its default voice is `zh-TW-HsiaoChenNeural`, Taiwan Mandarin,
+     * and this product is Traditional Chinese first. Every other cloud row
+     * defaults to China-accented Chinese. The offline model is China-accented
+     * too — which is said out loud in the model manager before the download,
+     * not discovered afterwards — so anybody who wants Taiwan Mandarin is
+     * still one row away, and `offlineSourceId()` returning "" leaves them
+     * exactly where 2.5.0 put them.
+     *
+     * Neither is a reordering of the table: the remembered choice is stored as
+     * an index, so moving rows would switch anybody who had already picked one.
      */
     var PREFERRED_PROVIDER_ID = "azure";
 
@@ -2784,7 +2800,7 @@
         var lines = String(reply).split(/[\r\n]+/);
         if (!lines.length || lines[0].indexOf("VOICE ") !== 0) {
             throw new Error(
-                M("Island Chatter could not run the cloud voice tool. / Island Chatter 無法執行雲端語音工具。") +
+                M("Island Chatter could not run the AI voice tool. / Island Chatter 無法執行 AI 語音工具。") +
                 "\n\n" + reply);
         }
         var answer = {
@@ -2956,16 +2972,57 @@
      * The dialog is built with M() rather than through localiseTree(), because
      * it is created on demand, after the language is already known.
      */
-    function askForCloudKey(providerLabel, existing) {
+    function askForCloudKey(provider, existing, account) {
         var dialog = new Window("dialog", SCRIPT_NAME);
         dialog.orientation = "column";
         dialog.alignChildren = ["fill", "top"];
         dialog.margins = 14;
         dialog.spacing = 8;
         dialog.add("statictext", undefined,
-            M("API key for {0} / {0} 的 API 金鑰", providerLabel));
-        var field = dialog.add("edittext", undefined, existing, { noecho: true });
-        field.characters = 44;
+            M("{0} account / {0} 帳號設定", provider.label));
+
+        /*
+         * `helpTip` set from `H()` directly rather than through `tip()`.
+         *
+         * `tip()` also registers a control so a language switch can rewrite it,
+         * and there is nothing to rewrite here: the dialog is built on demand,
+         * after the language is known, and closes before it can change. That is
+         * the same reason its labels go through `M()` rather than
+         * `localiseTree()`.
+         */
+        function accountRow(caption, value, wide, secret) {
+            var row = dialog.add("group");
+            row.orientation = "row";
+            var title = row.add("statictext", undefined, caption);
+            title.preferredSize.width = 108;
+            var field = row.add("edittext", undefined, value,
+                secret ? { noecho: true } : undefined);
+            field.characters = wide;
+            return field;
+        }
+
+        var field = accountRow(M("API key / 金鑰"), existing, 40, true);
+        tipOnce(field, "cloudKey");
+        /*
+         * The three that used to sit on the page.
+         *
+         * They only ever meant anything to a cloud account, and they were on
+         * screen whichever source was selected — including an offline model,
+         * which has no account, no voice id and no region. Here they are with
+         * the one other thing an account needs, and the page carries none of
+         * it.
+         */
+        var voiceField = accountRow(M("Voice ID / 音色代號"), account.voice, 32, false);
+        tipOnce(voiceField, "cloudVoiceId");
+        var modelField = accountRow(M("Model / 模型"), account.model, 32, false);
+        tipOnce(modelField, "cloudModel");
+        var regionField = accountRow(M("Region / 區域"), account.region, 16, false);
+        tipOnce(regionField, "cloudRegion");
+        // Only one provider has a per-region endpoint, and a field nobody needs
+        // is a field somebody fills in wrongly once. Disabled rather than
+        // hidden, so the dialog does not change shape between providers.
+        regionField.enabled = provider.needsRegion;
+
         // Said plainly rather than implied. There is no key store in
         // ExtendScript, and an encryption whose key shipped in this same file
         // would be theatre.
@@ -2978,11 +3035,31 @@
         var forgetButton = buttons.add("button", undefined, M("Forget / 清除"));
         var cancelButton = buttons.add("button", undefined, M("Cancel / 取消"));
         var answer = null;
+        function readFields() {
+            return {
+                voice: trim(String(voiceField.text)),
+                model: trim(String(modelField.text)),
+                region: trim(String(regionField.text))
+            };
+        }
         saveButton.onClick = function () {
-            answer = { key: trim(String(field.text)) };
+            answer = readFields();
+            answer.key = trim(String(field.text));
             dialog.close();
         };
-        forgetButton.onClick = function () { answer = { key: "" }; dialog.close(); };
+        /*
+         * Forget clears the key and *keeps* the rest.
+         *
+         * "Take my credential off this machine" is not "forget which voice I
+         * use". Clearing all four would mean anybody taking a key off a shared
+         * machine also loses the settings they would have to type again on the
+         * next one.
+         */
+        forgetButton.onClick = function () {
+            answer = readFields();
+            answer.key = "";
+            dialog.close();
+        };
         cancelButton.onClick = function () { answer = null; dialog.close(); };
         dialog.show();
         return answer;
@@ -3125,10 +3202,12 @@
             showNumbers();
         };
 
-        var explain = dialog.add("statictext", undefined, M(
+        // Measured rather than guessed, for the reason addWrapped() gives: this
+        // paragraph is five lines in Chinese and six in Japanese, and it had
+        // been given four.
+        addWrapped(dialog, M(
             "Variation is how much the voice may differ from one render to the next; rhythm is the same thing for how long each syllable is held. Speed is this model's own — the panel's Speed slider belongs to the built-in voice and never reaches a line an offline model spoke. There is no speaker to choose: both models were trained with one voice each. / 「變化」是每次算出來可以差多少，「節奏變化」是同一件事、但作用在每個字拉多長。「語速」是這個模型自己的——面板上的 Speed 滑桿是內建聲音在用的，碰不到離線模型唸出來的句子。沒有語者可以選：這兩個模型各自都只訓練了一個聲音。"),
-            { multiline: true });
-        explain.preferredSize = [430, 62];
+            TUNING_WINDOW_WIDTH);
 
         var buttons = dialog.add("group");
         buttons.orientation = "row";
@@ -3210,7 +3289,7 @@
             " --cache-dir " + hexUtf8(folder.fsName)));
         var file = new File(spoken.path);
         if (!file.exists) {
-            throw new Error(M("The cloud voice reported success but wrote no file. / 雲端語音回報成功卻沒有寫出檔案。") +
+            throw new Error(M("The AI voice reported success but wrote no file. / AI 語音回報成功卻沒有寫出檔案。") +
                 "\n\n" + spoken.path);
         }
         // PLAYED is checked because callSystem() reports no exit status, so a
@@ -3263,7 +3342,7 @@
         }
         var file = new File(answer.path);
         if (!file.exists) {
-            throw new Error(M("The cloud voice reported success but wrote no file. / 雲端語音回報成功卻沒有寫出檔案。") +
+            throw new Error(M("The AI voice reported success but wrote no file. / AI 語音回報成功卻沒有寫出檔案。") +
                 "\n\n" + answer.path);
         }
         return { file: file, cached: answer.cached, unspoken: answer.unspoken };
@@ -4148,7 +4227,16 @@
         };
     }
 
-    function addSlider(parent, label, minimum, maximum, value) {
+    function addSlider(parent, label, minimum, maximum, value, decimals) {
+        /*
+         * Two decimals unless the caller says otherwise, which only Seed does.
+         *
+         * A seed is a whole number and was drawn as `271.00`. Two decimal
+         * places on a value that cannot have any read as though the control
+         * were finer than it is, and as though 271.00 and 271.01 were different
+         * voices. They are the same voice; the second is not expressible.
+         */
+        var places = decimals === undefined ? 2 : decimals;
         var group = parent.add("group");
         group.orientation = "row";
         var title = group.add("statictext", undefined, label);
@@ -4158,13 +4246,13 @@
         title.icFixedWidth = true;
         var slider = group.add("slider", undefined, value, minimum, maximum);
         slider.alignment = ["fill", "center"];
-        var field = group.add("edittext", undefined, value.toFixed(2));
+        var field = group.add("edittext", undefined, value.toFixed(places));
         field.characters = 5;
-        slider.onChanging = function () { field.text = slider.value.toFixed(2); };
+        slider.onChanging = function () { field.text = slider.value.toFixed(places); };
         field.onChange = function () {
             var parsed = parseFloat(field.text);
             slider.value = clamp(isNaN(parsed) ? value : parsed, minimum, maximum);
-            field.text = slider.value.toFixed(2);
+            field.text = slider.value.toFixed(places);
         };
         slider.valueField = field;
         return slider;
@@ -4195,6 +4283,17 @@
          * and "Sing & dub / 唱歌與配音".
          */
         "Lines & animation / 句子與動畫": "セリフとアニメーション",
+        // The Voice page's section headings, added in 3.8.0. The page was five
+        // unrelated things in one column and read as one long list of sliders.
+        "— Character / 角色 —": "— キャラクター —",
+        "— Timbre / 音色 —": "— 音色 —",
+        "— Listen / 試聽與自訂音色 —": "— 試聴と自分の声 —",
+        "— Sing from MIDI / 用 MIDI 唱歌 —": "— MIDI で歌わせる —",
+        "— Mouth from a recording / 用錄音對嘴 —": "— 録音から口を動かす —",
+        // The sound-source dropdown had no label at all until 3.8.0; it showed
+        // only its own value, which read as a list of voices rather than as
+        // what replaces the vocal folds.
+        "Sound source / 發聲源": "音源",
         "Voice / 聲音": "声",
         "Lip-sync from audio / 音檔轉口型": "音声から口を動かす",
         "Sensitivity / 靈敏度": "感度",
@@ -4234,11 +4333,14 @@
             "試聴用の音声を生成できませんでした。",
         "Windows could not play the preview. / Windows 無法播放試聽的聲音。":
             "Windows が試聴用の音声を再生できませんでした。",
-        "Cloud voice / 雲端語音": "クラウド音声",
+        // "Cloud voice" until 3.8.0. Both kinds of source are a neural model,
+        // so the pair below has to keep saying which one leaves the machine —
+        // that is the whole of invariant 8aj's argument about this button.
+        "AI voice / AI 語音": "AI 音声",
         "API key / 金鑰": "APIキー",
         "Offline models… / 離線模型…": "オフラインモデル…",
         "Offline models / 離線模型": "オフラインモデル",
-        "Offline voice / 離線語音": "オフライン音声",
+        "Offline AI voice / 離線 AI 語音": "オフライン AI 音声",
         "Download / 下載": "ダウンロード",
         "Remove / 移除": "取り除く",
         "Close / 關閉": "閉じる",
@@ -4267,7 +4369,9 @@
         "Voice ID / 音色代號": "ボイスID",
         "Model / 模型": "モデル",
         "Region / 區域": "リージョン",
-        "API key for {0} / {0} 的 API 金鑰": "{0} の APIキー",
+        // The key dialog holds the voice id, model and region too from 3.8.0,
+        // so it is the account rather than just the key.
+        "{0} account / {0} 帳號設定": "{0} のアカウント設定",
         "Kept in this computer's After Effects preferences, in plain text. / 會存在這台電腦的 After Effects 偏好設定裡，是明碼。":
             "このパソコンの After Effects 環境設定に、平文のまま保存されます。",
         "Save / 儲存": "保存",
@@ -4328,15 +4432,15 @@
         "Speak {0} line(s), {1} characters, with {2}?\n\nThis runs on your own computer: nothing is sent anywhere and nothing is billed. / 要用 {2} 唸出 {0} 句、共 {1} 個字嗎？\n\n這是在你自己的電腦上算的，不會送出任何東西，也不會產生費用。":
             "{0} 行・{1} 文字を {2} でしゃべらせますか？\n\nこれはあなたのパソコンの中で動きます。どこにも送信されず、費用もかかりません。",
         "{0} new, {1} reused / 新增 {0}、沿用 {1}": "新規 {0} 件・再利用 {1} 件",
-        "Cloud voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音":
+        "AI voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音":
             "{1} で {0} レイヤーに声を当てました",
         "{0} is missing. Reinstall Island Chatter. / 找不到 {0}，請重新安裝 Island Chatter。":
             "{0} が見つかりません。Island Chatter を再インストールしてください。",
-        "Island Chatter could not run the cloud voice tool. / Island Chatter 無法執行雲端語音工具。":
-            "Island Chatter はクラウド音声ツールを実行できませんでした。",
+        "Island Chatter could not run the AI voice tool. / Island Chatter 無法執行 AI 語音工具。":
+            "Island Chatter は AI 音声ツールを実行できませんでした。",
         "Could not write the temporary key file. / 無法寫入暫存金鑰檔。":
             "一時的なキーファイルを書き込めませんでした。",
-        "The cloud voice reported success but wrote no file. / 雲端語音回報成功卻沒有寫出檔案。":
+        "The AI voice reported success but wrote no file. / AI 語音回報成功卻沒有寫出檔案。":
             "クラウド音声は成功と答えましたが、ファイルが作られていません。",
         "Direct text-layer voice / 文字圖層直接發聲": "テキストレイヤーが直接しゃべる",
         // What a character saved by 1.0.2 is called: it had one unnamed slot.
@@ -4400,7 +4504,7 @@
         "Speak / 改回講話": "しゃべりに戻す",
         "Key / 唱名調": "階名のド",
         "Transpose / 移調": "移調",
-        "Tone / 聲調": "声調",
+        "Tone % / 聲調 %": "声調 %",
         "Re-sync / 重新同步": "文字だけ更新",
         "Re-flow / 重新排列": "並べ直す",
         "There are no Island Chatter lines here. / 這個合成裡沒有台詞圖層。":
@@ -4851,7 +4955,7 @@
         "\nエンジン自身がしゃべった行を正解として測ると、約 3 分の 2 が一致します。");
 
     help("cloudVoice",
-        "Have a cloud model speak the selected lines, then drive the mouth from" +
+        "Have an AI model speak the selected lines, then drive the mouth from" +
         " what it sent back." +
         "\n\nThe text leaves this computer: it is sent to the provider you" +
         " chose, using your own API key, and they bill you for it. Nothing is" +
@@ -4865,7 +4969,7 @@
         " is muted, the built-in voice comes back, and the layer is marked" +
         " (stale) until you press this again — because a keystroke should not" +
         " spend money.",
-        "讓雲端模型唸出選取的句子，再用回傳的聲音驅動嘴型。" +
+        "讓 AI 模型唸出選取的句子，再用回傳的聲音驅動嘴型。" +
         "\n\n文字會離開這台電腦：送到你選的那家供應商，用你自己的 API 金鑰，帳單也是你的。" +
         "\n按下去並確認字數之前，什麼都不會送出。" +
         "\n\n它不是即時效果，也不可能是：要等網路回來的聲音沒辦法在音訊執行緒上算。" +
@@ -5480,6 +5584,150 @@
         return control;
     }
 
+    /*
+     * The same tooltip, on a control that will not outlive the language.
+     *
+     * `tip()` registers a control so a language switch can rewrite its
+     * helpTip. A dialog built on demand must not be registered: it is created
+     * after the language is known and destroyed before it can change, and the
+     * switch would then be walking a list of dead ScriptUI objects. Same
+     * reason a dialog's labels go through `M()` rather than `localiseTree()`.
+     */
+    function tipOnce(control, id) {
+        control.helpTip = H(id);
+        return control;
+    }
+
+    /*
+     * Why this file breaks its own paragraphs, in two failures.
+     *
+     * A `statictext` with `multiline: true` is given a height and keeps it. It
+     * does not grow to fit, and the window around it is sized from what its
+     * children *claim* to need — so a paragraph that wraps to more lines than
+     * its number allows is not scrolled or squashed, it is **cut off, and the
+     * window is cut off with it**. The offline-models window lost its footer
+     * and its Close button that way, on `[420, 32]`.
+     *
+     * The first fix computed the height instead of hardcoding it, which is the
+     * obvious answer and was **still cut off** — the window came back with the
+     * same missing button on a height that was measured rather than guessed.
+     * Whatever ScriptUI does with a multiline control, it is not "use the
+     * number it was given", and no arithmetic outside the control can fix
+     * something the control ignores.
+     *
+     * So there is no multiline control here. `wrapLines()` breaks the text and
+     * `addWrapped()` adds one ordinary single-line statictext per line, which
+     * ScriptUI has always sized correctly. Nothing claims a height, so nothing
+     * can claim the wrong one.
+     *
+     * That leaves one number to get right — where the line breaks — and it is
+     * wrong in the safe direction on purpose: a break too early is a shorter
+     * line, a break too late is a clipped one.
+     */
+    /*
+     * Roughly one Latin character at the panel's font, rounded *up*. A Han
+     * character or a kana counts as two of them, which is what makes one
+     * number work for all four interface languages.
+     *
+     * Bigger is safer and that is the whole reason for the value. A larger
+     * width per character means fewer characters fit on a line, which means
+     * more lines, which means a taller box — and the two errors are not
+     * symmetrical: a line too many is 16 px of window nobody looks at, a line
+     * too few eats whatever was underneath. Measured, Han renders near 12 px
+     * and Latin near 7, so counting Han as 16 and Latin as 8 leaves slack in
+     * both directions.
+     */
+    var WRAP_UNIT_WIDTH = 8;
+
+    function unitsIn(text) {
+        var said = String(text);
+        var units = 0;
+        var index;
+        for (index = 0; index < said.length; index += 1) {
+            // U+2E80 is where the CJK radicals start; everything this panel
+            // shows above it is full-width.
+            units += said.charCodeAt(index) >= 0x2E80 ? 2 : 1;
+        }
+        return units;
+    }
+
+    /*
+     * The paragraph, broken into lines here rather than by ScriptUI.
+     *
+     * Computing a height and handing it to a `multiline` statictext was the
+     * *second* attempt and it was still cut off — a measured 32 px for a
+     * two-line sentence, and the window still lost its Close button. Whatever
+     * ScriptUI does with a multiline control's height, it is not "use the
+     * number it was given", and no amount of arithmetic outside it fixes that.
+     *
+     * So there is no multiline control any more. A column of ordinary
+     * single-line statictexts is something ScriptUI sizes correctly and always
+     * has, and the only question left — where do the lines break — is one this
+     * file can answer exactly rather than estimate.
+     *
+     * Latin breaks at the last space so words stay whole; Han and kana break
+     * anywhere, which is what they do.
+     */
+    function wrapLines(text, width) {
+        var perLine = Math.max(8, Math.floor(width / WRAP_UNIT_WIDTH));
+        var lines = [];
+        var paragraphs = String(text).split("\n");
+        var at;
+        for (at = 0; at < paragraphs.length; at += 1) {
+            var said = paragraphs[at];
+            var current = "";
+            var units = 0;
+            var index;
+            for (index = 0; index < said.length; index += 1) {
+                var letter = said.charAt(index);
+                var wide = said.charCodeAt(index) >= 0x2E80;
+                var cost = wide ? 2 : 1;
+                if (units + cost > perLine && current.length) {
+                    // A wide character may follow a Latin word without a space
+                    // between them, so the break point is looked for either way
+                    // and simply not found when there is none.
+                    var space = current.lastIndexOf(" ");
+                    if (!wide && space > 0) {
+                        lines.push(current.substring(0, space));
+                        current = current.substring(space + 1) + letter;
+                        units = unitsIn(current);
+                    } else {
+                        lines.push(current);
+                        current = letter;
+                        units = cost;
+                    }
+                } else {
+                    current += letter;
+                    units += cost;
+                }
+            }
+            lines.push(current);
+        }
+        return lines;
+    }
+
+    /*
+     * The only way a paragraph should be added.
+     *
+     * One statictext per line, in a column, each of them the ordinary
+     * single-line kind. Nothing here claims a height, so nothing here can claim
+     * the wrong one.
+     */
+    function addWrapped(parent, text, width) {
+        var column = parent.add("group");
+        column.orientation = "column";
+        column.alignChildren = ["left", "top"];
+        column.spacing = 2;
+        column.margins = 0;
+        var lines = wrapLines(text, width);
+        var index;
+        for (index = 0; index < lines.length; index += 1) {
+            var line = column.add("statictext", undefined, lines[index]);
+            line.preferredSize.width = width;
+        }
+        return column;
+    }
+
     function looksBilingual(value) {
         return typeof value === "string" && value.indexOf(" / ") > 0;
     }
@@ -5562,11 +5810,29 @@
         var languageRow = panel.add("group");
         languageRow.orientation = "row";
         languageRow.alignment = ["left", "top"];
-        // Stored by code, never by index, so adding one here does not disturb
-        // anybody's saved preference.
-        var languageCodes = ["zh", "cn", "en", "ja"];
+        /*
+         * Stored by code, never by index, so hiding one here does not disturb
+         * anybody's saved preference — and does not have to move `simplify()`.
+         *
+         * **简体中文 is off the menu from 3.8.0 and is still built.** It is
+         * *derived* from the Traditional half (invariant 8i), so it costs
+         * nothing to keep and everything to delete: dropping it would mean
+         * losing the term table, the character map and the guard that every Han
+         * character the panel can show is classified — the guard that catches
+         * an unclassified character in *any* language. What is hidden is the
+         * row, not the language.
+         *
+         * A preference that already says `cn` falls back to `zh` rather than
+         * being honoured, and that is the deliberate half. Honouring it would
+         * leave the picker showing nothing while the panel spoke a language no
+         * row offers — and 简体中文 is derived from 繁體中文, so the nearest
+         * visible language is the one it was made from. Putting the row back is
+         * one entry in each of the two lists below.
+         */
+        var languageCodes = ["zh", "en", "ja"];
+        var HIDDEN_LANGUAGE_CODES = ["cn"];
         var languagePicker = languageRow.add("dropdownlist", undefined,
-            ["繁體中文", "简体中文", "English", "日本語"]);
+            ["繁體中文", "English", "日本語"]);
         tip(languagePicker, "language");
 
         /*
@@ -5637,6 +5903,33 @@
         tabs.selection = mainTab;
 
         /*
+         * The Voice page is five unrelated things in one column, and it read
+         * as one long list of sliders.
+         *
+         * The character, the mouth it is made with, hearing it, singing it
+         * from a file, and taking the timing out of a recording — nothing on
+         * screen said where one ended and the next began, so "選 MIDI" looked
+         * like another property of the voice above it.
+         *
+         * **This costs no panel height, and that is a constraint rather than a
+         * boast.** The panel is as tall as its *taller* page, which is Lines &
+         * animation at 700 px; Voice had 632 and so had room — but not enough:
+         * five headings at 16 px come to 80, and at the shared 8 px spacing the
+         * page lands at 706 and takes the panel with it.
+         *
+         * So the headings are paid for out of the spacing they replace. At 5 px
+         * the page measures ~683 and the panel does not move. A heading
+         * separates two groups better than three pixels of nothing does, so the
+         * page reads as *more* spaced out while measuring less.
+         */
+        voiceTab.spacing = 5;
+        function addHeading(parent, label) {
+            var heading = parent.add("statictext", undefined, label);
+            heading.icHeading = true;
+            return heading;
+        }
+
+        /*
          * Aliases, not a rename.
          *
          * The rows below are written where they read naturally — timbre with
@@ -5649,7 +5942,6 @@
          * says which parameter it is.
          */
         var speakTab = mainTab;
-        var characterTab = mainTab;
         var animationTab = mainTab;
         /*
          * MIDI, a recording and a cloud or offline model are all on the second
@@ -5670,7 +5962,6 @@
          * dock gives. Moving these ten rows makes them 628 and 736, and brings
          * the whole panel from 1196 px down to about 964.
          */
-        var performTab = voiceTab;
         var scriptTab = voiceTab;
         var timbreTab = voiceTab;
 
@@ -5730,6 +6021,7 @@
          * speed `3`, volume `4`, consonant `5`, clarity `73`, cuteness `74`.
          * Every one of them is in Effect Controls once a line is applied.
          */
+        addHeading(voiceTab, "— Character / 角色 —");
         var characterRowTop = voiceTab.add("group");
         characterRowTop.orientation = "row";
         var voice = characterRowTop.add("dropdownlist", undefined, [
@@ -5756,17 +6048,33 @@
         // per line, and Speak is the page that decides how tall the panel is.
         // Every default reproduces 1.0.x, so nothing here changes an existing
         // layer until it is moved.
+        addHeading(timbreTab, "— Timbre / 音色 —");
         var formant = addSlider(timbreTab, "Formant / 共鳴", 0.25, 4.00, 1.00);
         tip(formant, "formant");
-        var source = timbreTab.add("dropdownlist", undefined, [
+        /*
+         * The one control on this page that said only its own value.
+         *
+         * It was a bare full-width dropdown reading "人聲", sitting between
+         * Formant and Vibrato with nothing to say what it was choosing — so it
+         * read as a list of voices rather than as what replaces the vocal
+         * folds. Now it is a titled row in the same 110 px column the sliders
+         * start in, which is also what makes the page scan as one thing.
+         */
+        var sourceRow = timbreTab.add("group");
+        sourceRow.orientation = "row";
+        var sourceTitle = sourceRow.add("statictext", undefined, "Sound source / 發聲源");
+        sourceTitle.preferredSize.width = 110;
+        sourceTitle.icFixedWidth = true;
+        var source = sourceRow.add("dropdownlist", undefined, [
             "Voice / 人聲", "Reed / 簧片", "Chip / 電子", "Metallic / 金屬",
             "Granular / 破碎", "Growl / 低吼"
         ]);
+        source.alignment = ["fill", "center"];
         source.selection = 0;
         tip(source, "source");
         var vibrato = addSlider(timbreTab, "Vibrato / 顫音", 0.00, 4.00, 1.00);
         var vibratoRate = addSlider(timbreTab, "Vibrato Rate / 顫音速率", 0.00, 30.00, 9.20);
-        var seed = addSlider(timbreTab, "Seed / 種子", 0, 999999, 0);
+        var seed = addSlider(timbreTab, "Seed / 種子", 0, 999999, 0, 0);
 
         // Tempo. Speed stays the underlying control; these just drive it, which
         // is why they stay on the same page as the Speed slider they write to.
@@ -5873,9 +6181,23 @@
          * 8z), so a row that could be measured wrong is not worth the 30 px
          * this one costs on a page that has 80 to spare.
          */
-        // Panel-only, so the first page: nothing in Effect Controls renders a
-        // WAV and asks Windows to play it.
-        var previewRow = mainTab.add("group");
+        /*
+         * On the second page from 3.8.0, and this is the seam 3.7.0 wrote down
+         * and left open.
+         *
+         * Both buttons are about the voice and nothing else. Preview auditions
+         * the twelve sliders directly above it — having it a tab away from them
+         * meant adjusting a number on one page and pressing Play on another.
+         * "My voice…" measures five vowels into parameters `279-289`, which are
+         * the last four rows of this same page.
+         *
+         * It stays *panel-only* work — nothing in Effect Controls renders a WAV
+         * or measures a formant — so it is not here because the parameter rule
+         * moved it. It is here because the page is the voice, which is the rule
+         * 3.7.0 settled on.
+         */
+        addHeading(voiceTab, "— Listen / 試聽與自訂音色 —");
+        var previewRow = voiceTab.add("group");
         var previewButton = previewRow.add("button", undefined, "Preview / 試聽");
         tip(previewButton, "preview");
 
@@ -6003,11 +6325,17 @@
 
         // Saved characters sit with the timbre they mostly carry.
         /*
-         * A saved character *is* the thirteen parameters under a name, so it
-         * belongs beside them: picking one here moves every slider on this
-         * page at once, and that is only legible if the sliders are in sight.
+         * Back on the first page from 3.8.0, at the user's asking, and the
+         * reason it is defensible is that a saved character is the *opposite*
+         * of the second page rather than a part of it.
+         *
+         * 3.7.0 put it beside the sliders because it moves all of them at
+         * once. But that argument is about watching it work, and picking a
+         * character is not something anybody wants to watch — it is the
+         * shortcut that means never opening the second page at all. A shortcut
+         * belongs where the work is.
          */
-        var characterRow = voiceTab.add("group");
+        var characterRow = mainTab.add("group");
         var preset = characterRow.add("dropdownlist", undefined, BUILT_IN_CHARACTERS.slice(0));
         preset.selection = 0;
         var randomButton = characterRow.add("button", undefined, "Random / 隨機");
@@ -6290,6 +6618,7 @@
          * row that was already 350 px too wide. No amount of shorter wording
          * reaches 414 from 762, so the row is split instead.
          */
+        addHeading(scriptTab, "— Sing from MIDI / 用 MIDI 唱歌 —");
         var singRow = scriptTab.add("group");
         singRow.orientation = "row";
         var midiButton = singRow.add("button", undefined, "Choose MIDI / 選 MIDI");
@@ -6310,7 +6639,10 @@
         solfegeKey.selection = 0;
         solfegeKey.preferredSize.width = 60;
         tip(solfegeKey, "key");
-        singRowTwo.add("statictext", undefined, "Tone / 聲調");
+        // "Tone / 聲調" until 3.8.0, next to a box reading 15 — which parses as
+        // "tone number 15" and is not a thing. It is a percentage of how much
+        // of the Mandarin tone contour survives the melody, so it says so.
+        singRowTwo.add("statictext", undefined, "Tone % / 聲調 %");
         var toneBlendField = singRowTwo.add("edittext", undefined, "15");
         toneBlendField.characters = 4;
         tip(toneBlendField, "toneBlend");
@@ -6338,6 +6670,7 @@
          * Animation page, the same one everything else binds to — a second copy
          * of it here would be a second thing to keep in step.
          */
+        addHeading(scriptTab, "— Mouth from a recording / 用錄音對嘴 —");
         var lipSyncButton = scriptTab.add("button", undefined,
             "Lip-sync from audio / 音檔轉口型");
         tip(lipSyncButton, "lipSync");
@@ -6366,9 +6699,22 @@
          * Three rows because two would not fit under 460 px in Japanese, and
          * because the region only means anything to one provider.
          */
-        var cloudRow = scriptTab.add("group");
+        /*
+         * The voice sources, on the first page and offline first.
+         *
+         * Two rows from 3.8.0 where there were three, and the row that went was
+         * the cloud one: Voice ID, Model and Region are three text fields that
+         * only ever mean anything to a cloud account, and they sat on the page
+         * whichever source was selected. They live in the key dialog now — the
+         * dialog that already exists for the *other* thing only a cloud account
+         * needs — so the page carries the source, the button that configures
+         * it, and the offline models. A local source's tuning was already
+         * behind that same button, so both kinds of source are now one press
+         * away rather than one being spread across the page.
+         */
+        var cloudRow = mainTab.add("group");
         cloudRow.orientation = "row";
-        var cloudButton = cloudRow.add("button", undefined, "Cloud voice / 雲端語音");
+        var cloudButton = cloudRow.add("button", undefined, "AI voice / AI 語音");
         tip(cloudButton, "cloudVoice");
         /*
          * "Voice source", not "provider", and the name is the forward
@@ -6388,23 +6734,28 @@
         var keyButton = cloudRow.add("button", undefined, "API key / 金鑰");
         tip(keyButton, "cloudKey");
 
-        var cloudRowTwo = scriptTab.add("group");
-        cloudRowTwo.orientation = "row";
-        cloudRowTwo.add("statictext", undefined, "Voice ID / 音色代號");
-        var cloudVoiceField = cloudRowTwo.add("edittext", undefined, "");
-        cloudVoiceField.characters = 13;
-        tip(cloudVoiceField, "cloudVoiceId");
-        cloudRowTwo.add("statictext", undefined, "Model / 模型");
-        var cloudModelField = cloudRowTwo.add("edittext", undefined, "");
-        cloudModelField.characters = 13;
-        tip(cloudModelField, "cloudModel");
+        /*
+         * Voice ID, Model and Region stopped being controls in 3.8.0 and became
+         * state. They are plain objects with a `.text`, which is the whole of
+         * what the six places that touch them ever used.
+         *
+         * Not a hidden control and not a `Window` nobody shows: either would be
+         * a real ScriptUI object that the width and height walks can reach and
+         * that a future edit could accidentally add to a page. An object with
+         * one property cannot be laid out at all, which is the point.
+         *
+         * `.enabled` is still assigned to the region one by
+         * `showProviderFields()`. On a plain object that is a property nobody
+         * reads, and it is left in place on purpose: the field is edited in the
+         * key dialog now, and *that* dialog is where the region has to be
+         * refused for a provider that has none.
+         */
+        var cloudVoiceField = { text: "" };
+        var cloudModelField = { text: "" };
+        var cloudRegionField = { text: "" };
 
-        var cloudRowThree = scriptTab.add("group");
+        var cloudRowThree = mainTab.add("group");
         cloudRowThree.orientation = "row";
-        cloudRowThree.add("statictext", undefined, "Region / 區域");
-        var cloudRegionField = cloudRowThree.add("edittext", undefined, "");
-        cloudRegionField.characters = 9;
-        tip(cloudRegionField, "cloudRegion");
         /*
          * Fetching the offline model, which is the one thing in this product
          * that downloads anything.
@@ -7443,8 +7794,8 @@
              * After Effects renders the overflow as an ellipsis (invariant 8z).
              */
             cloudButton.text = picked.onThisMachine
-                ? M("Offline voice / 離線語音")
-                : M("Cloud voice / 雲端語音");
+                ? M("Offline AI voice / 離線 AI 語音")
+                : M("AI voice / AI 語音");
             cloudButton.preferredSize = [-1, cloudButton.preferredSize.height];
             try { cloudButton.parent.layout.layout(true); } catch (noLayout) { /* not built yet */ }
         }
@@ -7506,10 +7857,18 @@
                     wanted = byId < 0 ? undefined : byId;
                 }
                 if (wanted === undefined) {
+                    /*
+                     * Offline first, then Azure, then row zero. Asked of the
+                     * table rather than written as a second list of ids:
+                     * `offlineSourceId()` returns "" when nothing is installed,
+                     * which is most first runs, and the fallback is then the
+                     * one 2.5.0 chose for its accent.
+                     */
                     wanted = 0;
+                    var preferredId = offlineSourceId(cloudTable) || PREFERRED_PROVIDER_ID;
                     var pick;
                     for (pick = 0; pick < cloudTable.length; pick += 1) {
-                        if (cloudTable[pick].id === PREFERRED_PROVIDER_ID) { wanted = pick; }
+                        if (cloudTable[pick].id === preferredId) { wanted = pick; }
                     }
                 }
                 providerList.selection = clamp(Math.round(wanted), 0, cloudTable.length - 1);
@@ -7555,8 +7914,20 @@
                     cloudReadout.text = M("Voice tuned / 已調過音");
                     return;
                 }
-                var answer = askForCloudKey(picked.label, storedKey(picked.id));
+                var answer = askForCloudKey(picked, storedKey(picked.id), {
+                    voice: String(cloudVoiceField.text),
+                    model: String(cloudModelField.text),
+                    region: String(cloudRegionField.text)
+                });
                 if (!answer) { return; }
+                // Back into the state the speak path reads, then persisted per
+                // provider — the fields used to save themselves on every
+                // keystroke and now save once, on Save, which is the moment
+                // that actually means something.
+                cloudVoiceField.text = answer.voice;
+                cloudModelField.text = answer.model;
+                cloudRegionField.text = answer.region;
+                rememberProviderFields();
                 rememberKey(picked.id, answer.key);
                 cloudReadout.text = answer.key
                     ? M("Key saved / 已存下金鑰")
@@ -7610,6 +7981,16 @@
                 return;
             }
 
+            /*
+             * Wider than it was, which is half of why it was too small.
+             *
+             * The other half was the wrapped paragraphs claiming two lines and
+             * needing three; `addWrapped()` fixes that. Width helps as well
+             * though, and in the same direction for every language: a wider
+             * paragraph is fewer lines, so the window gets shorter as it gets
+             * wider. This is a modal, so it is not bound by the 460 px a docked
+             * panel has to live inside (invariant 8z).
+             */
             var dialog = new Window("dialog", M("Offline models / 離線模型"));
             dialog.orientation = "column";
             dialog.alignChildren = "fill";
@@ -7622,10 +8003,9 @@
                 rows.push(addModelRow(dialog, catalogue[index], local));
             }
 
-            var footer = dialog.add("statictext", undefined, M(
+            addWrapped(dialog, M(
                 "Models live in your own user folder, so removing Island Chatter leaves them alone. After Effects stops responding while one downloads. / 模型放在你自己的使用者資料夾，所以移除 Island Chatter 不會動到它們。下載時 After Effects 會沒有反應。"),
-                { multiline: true });
-            footer.preferredSize = [420, 32];
+                MODEL_WINDOW_WIDTH);
 
             var closeRow = dialog.add("group");
             closeRow.alignment = "right";
@@ -7653,8 +8033,10 @@
 
             var note = IC_SOURCE_NOTES[model.id];
             if (note && note.caveat) {
-                var caveat = box.add("statictext", undefined, M(note.caveat), { multiline: true });
-                caveat.preferredSize = [400, 32];
+                // The accent caveat is the longest sentence in this window and
+                // it is three lines in Chinese, four in English and Japanese.
+                // It was given two.
+                addWrapped(box, M(note.caveat), MODEL_WINDOW_WIDTH - 40);
             }
 
             var row = box.add("group");
@@ -7803,7 +8185,7 @@
                     "Send {0} line(s), {1} characters, to {2}?\n\nThe text leaves this computer. Lines already fetched with the same settings are reused and cost nothing. / 要把 {0} 句、共 {1} 個字送到 {2} 嗎？\n\n文字會離開這台電腦。文字和設定都沒變的句子會直接沿用上次的檔案，不會再花錢。",
                     ready.length, characters, picked.label + " · " + picked.host));
             if (!agreed) { return; }
-            app.beginUndoGroup(SCRIPT_NAME + " - Cloud voice");
+            app.beginUndoGroup(SCRIPT_NAME + " - AI voice");
             try {
                 rememberProviderFields();
                 var options = currentOptions();
@@ -7841,7 +8223,7 @@
                 }
                 cloudReadout.text = M("{0} new, {1} reused / 新增 {0}、沿用 {1}",
                     ready.length - reused, reused);
-                status.text = M("Cloud voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音",
+                status.text = M("AI voice on {0} layer(s) via {1} / 已用 {1} 為 {0} 層配音",
                     ready.length, picked.label);
                 /*
                  * Said after the work rather than instead of it.
@@ -7895,19 +8277,13 @@
         alsoRemember(toneBlendField, "onChange");
         alsoRemember(solfegeKey, "onChange");
         alsoRemember(providerList, "onChange");
-        // A voice id or a model name typed and not yet used is still worth
-        // keeping, and it belongs to the provider rather than to the panel, so
-        // it goes to its own setting rather than into the flat state string.
-        var cloudFields = [cloudVoiceField, cloudModelField, cloudRegionField];
-        var cloudFieldAt;
-        for (cloudFieldAt = 0; cloudFieldAt < cloudFields.length; cloudFieldAt += 1) {
-            cloudFields[cloudFieldAt].onChange = (function (existing) {
-                return function () {
-                    if (existing) { existing.call(this); }
-                    rememberProviderFields();
-                };
-            }(cloudFields[cloudFieldAt].onChange));
-        }
+        /*
+         * The voice id, model and region used to be typed into the page, so
+         * each carried an onChange that saved it. They are edited in the key
+         * dialog now and that dialog calls `rememberProviderFields()` itself on
+         * Save, which is a better moment than every keystroke: a half-typed
+         * model name is not worth storing against a provider.
+         */
         // The gap is stated in beats, so its seconds move when either does.
         bpmField.onChange = (function (existing) {
             return function () { if (existing) { existing.call(this); } refreshGap(); };
@@ -7923,6 +8299,17 @@
             var storedIndex;
             for (storedIndex = 0; storedIndex < languageCodes.length; storedIndex += 1) {
                 if (languageCodes[storedIndex] === stored) { UI_LANGUAGE = stored; }
+            }
+            /*
+             * A language that is built but no longer offered falls back rather
+             * than being honoured, or the picker shows nothing while the panel
+             * speaks something no row names. `HIDDEN_LANGUAGE_CODES` is what
+             * makes that a decision instead of the loop above quietly not
+             * matching.
+             */
+            var hiddenIndex;
+            for (hiddenIndex = 0; hiddenIndex < HIDDEN_LANGUAGE_CODES.length; hiddenIndex += 1) {
+                if (HIDDEN_LANGUAGE_CODES[hiddenIndex] === stored) { UI_LANGUAGE = "zh"; }
             }
         }
         var pickerIndex;

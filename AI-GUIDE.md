@@ -8,7 +8,7 @@ This is the single authoritative usage reference. `README.md` / `README.en.md` /
 `README.ja.md` are the same material written for people to browse; the panel itself also speaks 简体中文;
 `CLAUDE.md` is for maintainers changing the code and will mislead you about usage.
 
-Everything below describes **version 3.7.0**. Facts that changed recently are marked with the
+Everything below describes **version 3.8.0**. Facts that changed recently are marked with the
 version that changed them.
 
 ## Contents
@@ -235,7 +235,7 @@ Grouped by what they are for. Exact strings in all four languages are in
 Generated from the panel; if a user reports a label, it is in this table.
 
 <!-- BEGIN COUNTS -->
-- Controls and menu entries with a label: **87**
+- Controls and menu entries with a label: **85**
 - Distinct messages the panel can print: **108**
 - Languages: **4** (繁體中文, 简体中文, English, 日本語), switched by the dropdown at the top left
 <!-- END COUNTS -->
@@ -247,6 +247,7 @@ Generated from the panel; if a user reports a label, it is in this table.
 | 2 per beat | 每拍 2 字 | 每拍 2 字 | 1拍に2音 |
 | 3 per beat | 每拍 3 字 | 每拍 3 字 | 1拍に3音 |
 | 4 per beat | 每拍 4 字 | 每拍 4 字 | 1拍に4音 |
+| AI voice | AI 語音 | AI 语音 | AI 音声 |
 | API key | 金鑰 | 金钥 | APIキー |
 | Adult | 成熟 | 成熟 | おとな |
 | Angry | 生氣 | 生气 | おこり |
@@ -261,7 +262,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Choose MIDI | 選 MIDI | 选 MIDI | MIDI を選ぶ |
 | Clarity | 清晰度 | 清晰度 | はっきりさ |
 | Clear | 清除 | 清除 | 消去 |
-| Cloud voice | 雲端語音 | 云端语音 | クラウド音声 |
 | Consonant | 聲母 | 声母 | しいん |
 | Cozy | 溫厚 | 温厚 | コージー |
 | Cuteness | 可愛度 | 可爱度 | かわいさ |
@@ -284,7 +284,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Lip-sync from audio | 音檔轉口型 | 音文件转口型 | 音声から口を動かす |
 | Markers | 逐字標記 | 逐字标记 | マーカー |
 | Metallic | 金屬 | 金属 | メタリック |
-| Model | 模型 | 模型 | モデル |
 | Mouth switch | 建立嘴型切換 | 创建口型切换 | 口パクをつなぐ |
 | My voice… | 我的聲音… | 我的声音… | 自分の声… |
 | Neutral | 中性 | 中性 | ふつう |
@@ -301,7 +300,6 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Read selected layer | 讀取選取圖層 | 读取选中图层 | 選択レイヤーを読み込む |
 | Rebuild | 重建 | 重建 | 作り直す |
 | Reed | 簧片 | 簧片 | リード |
-| Region | 區域 | 区域 | リージョン |
 | Remove | 移除 | 移除 | 取り除く |
 | Rig | 動畫控制 | 动画控制 | リグ |
 | Robot | 機器人 | 机器人 | ロボット |
@@ -313,19 +311,19 @@ Generated from the panel; if a user reports a label, it is in this table.
 | Sing | 唱出來 | 唱出来 | 歌わせる |
 | Sleepy | 疲倦 | 疲倦 | ねむい |
 | Smoothness | 平滑 | 平滑 | なめらかさ |
+| Sound source | 發聲源 | 发声源 | 音源 |
 | Speak | 改回講話 | 改回讲话 | しゃべりに戻す |
 | Speakers | 含角色名 | 含角色名 | 話者名つき |
 | Speed | 速度 | 速度 | はやさ |
 | Sunny | 明亮 | 明亮 | サニー |
 | Tempo | 節拍 | 节拍 | テンポ |
 | Tiny | 迷你 | 迷你 | タイニー |
-| Tone | 聲調 | 声调 | 声調 |
+| Tone % | 聲調 % | 声调 % | 声調 % |
 | Transpose | 移調 | 移调 | 移調 |
 | Type-On | 逐字顯示 | 逐字显示 | 一文字ずつ表示 |
 | Vibrato | 顫音 | 颤音 | ビブラート |
 | Vibrato Rate | 顫音速率 | 颤音速率 | ビブラート速度 |
 | Voice | 人聲 | 人声 | ボイス |
-| Voice ID | 音色代號 | 音色代号 | ボイスID |
 | Volume | 音量 | 音量 | おんりょう |
 | Vowels | 判斷母音 | 判断母音 | 母音を判定 |
 | Whisper | 耳語 | 耳语 | ウィスパー |
@@ -644,6 +642,7 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 |   sixteenth | 　十六分 | 　十六分 | 　16 分 |
 |   stale bake x{0} | 　轉檔過期 x{0} | 　导出过期 x{0} | 　書き出し古い x{0} |
 | = 0s  no grid | = 0s　無格線 | = 0s　无格线 | = 0s　グリッドなし |
+| AI voice on {0} layer(s) via {1} | 已用 {1} 為 {0} 層配音 | 已用 {1} 为 {0} 层配音 | {1} で {0} レイヤーに声を当てました |
 | Add a character on the Animation page first. | 請先在「動畫」頁新增角色。 | 请先在「动画」页新增角色。 | 先に「アニメーション」ページでキャラクターを追加してください。 |
 | Applied to {0} layer(s) | 已套用 {0} 個圖層 | 已应用 {0} 个图层 | {0} レイヤーに適用しました |
 | Apply Island Chatter first, then bake. | 請先按 Apply 再轉成音訊。 | 请先按 Apply 再转成音频。 | 先に適用してから書き出してください。 |
@@ -658,7 +657,6 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | Choose a track first. | 請先選一個軌道。 | 请先选一个轨道。 | 先にトラックを選んでください。 |
 | Choose or create a character first. | 請先選擇或新增角色。 | 请先选择或新增角色。 | 先にキャラを選ぶか追加してください。 |
 | Close | 關閉 | 关闭 | 閉じる |
-| Cloud voice on {0} layer(s) via {1} | 已用 {1} 為 {0} 層配音 | 已用 {1} 为 {0} 层配音 | {1} で {0} レイヤーに声を当てました |
 | Download | 下載 | 下载 | ダウンロード |
 | Download failed | 下載失敗 | 下载失败 | ダウンロードに失敗しました |
 | Download {0}? ⏎  ⏎ About {1} MB, once. After that this voice needs no network and no account — it runs on this computer. ⏎  ⏎ After Effects will not respond while it downloads. | 要下載{0}嗎？ ⏎  ⏎ 大約 {1} MB，只下載這一次。之後這個語音不用連網、不用帳號，完全在這台電腦上算。 ⏎  ⏎ 下載時 After Effects 會沒有反應。 | 要下载{0}吗？ ⏎  ⏎ 大约 {1} MB，只下载这一次。之后这个语音不用连网、不用账号，完全在这台电脑上算。 ⏎  ⏎ 下载时 After Effects 会没有反应。 | {0} をダウンロードしますか？ ⏎  ⏎ 約 {1} MB、一度だけです。以後この音声はネットワークもアカウントも不要で、このパソコンの中だけで動きます。 ⏎  ⏎ ダウンロード中は After Effects が応答しなくなります。 |
@@ -682,9 +680,9 @@ complete and current. `{0}` and `{1}` are filled in with counts or names at runt
 | None of those were singing | 選取的圖層沒有旋律 | 选中的图层没有旋律 | 選んだレイヤーにメロディがありません |
 | Not downloaded · {0} MB | 尚未下載 · {0} MB | 尚未下载 · {0} MB | 未ダウンロード・{0} MB |
 | Now editing {0} | 目前角色：{0} | 目前角色：{0} | 編集中のキャラ：{0} |
+| Offline AI voice | 離線 AI 語音 | 离线 AI 语音 | オフライン AI 音声 |
 | Offline model installed ({0} MB) | 離線模型已安裝（{0} MB） | 离线模型已安装（{0} MB） | オフラインモデルを入れました（{0} MB） |
 | Offline models | 離線模型 | 离线模型 | オフラインモデル |
-| Offline voice | 離線語音 | 离线语音 | オフライン音声 |
 | Only the first {0} UTF-16 units are spoken; the rest of the Source Text was cut: ⏎  ⏎ {1} | 只會唸出前 {0} 個 UTF-16 字元，超出的 Source Text 已截斷： ⏎  ⏎ {1} | 只会念出前 {0} 个 UTF-16 字符，超出的 Source Text 已截断： ⏎  ⏎ {1} | しゃべるのは最初の {0} UTF-16 単位までです。残りのソーステキストは切りました： ⏎  ⏎ {1} |
 | Open an active composition first. | 請先開啟合成。 | 请先开启合成。 | 先にコンポジションを開いてください。 |
 | Overlapping lines: {0} | 台詞重疊：{0} | 台词重叠：{0} | セリフが重なっています：{0} |
