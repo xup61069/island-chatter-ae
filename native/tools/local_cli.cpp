@@ -534,7 +534,7 @@ std::string metadata_value(const Ort::ModelMetadata& metadata, const char* key,
 }
 
 std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem::path& root,
-                                 const std::string& text,
+                                 const std::string& text, const cloud::Tuning& tuning,
                                  std::uint32_t* rate_out, std::string* unspoken_out) {
     const auto tokens = melo::Tokens::parse(read_text_file(root / "tokens.txt"));
     const auto lexicon = melo::Lexicon::parse(read_text_file(root / "lexicon.txt"),
@@ -581,6 +581,16 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
         throw std::runtime_error("the model states a sample rate of " + std::to_string(rate) +
                                  ", which is not a rate After Effects can import");
     }
+    /*
+     * The user's choice wins over the metadata, and only when there is one.
+     *
+     * -1 is not a speaker: it is "this line was never tuned", and it has to be
+     * distinguishable from 0, which is a real speaker and a different voice
+     * from the 1 the Chinese package declares. Collapsing the two is how the
+     * default voice changes for everybody who never opened the dialog.
+     */
+    const std::int64_t declared = speaker;
+    if (tuning.speaker >= 0) { speaker = tuning.speaker; }
 
     auto x = plan.tokens;
     auto tones = plan.tones;
@@ -588,13 +598,29 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
     std::array<std::int64_t, 2> sequence_shape{1, static_cast<std::int64_t>(x.size())};
     std::array<std::int64_t, 1> single_shape{1};
     std::vector<std::int64_t> speaker_value{speaker};
-    // The model's own published defaults. noise_scale and noise_scale_w are how
-    // much variation the decoder is allowed; length_scale is speed, left at 1
-    // because the panel's Speed belongs to the engine's synthesizer and running
-    // two speed controls that do different things is worse than having one.
-    std::vector<float> noise_scale{0.667F};
-    std::vector<float> length_scale{1.0F};
-    std::vector<float> noise_scale_w{0.8F};
+    /*
+     * The model's own published defaults until 3.4.0, and the user's since.
+     *
+     * noise_scale and noise_scale_w are how much variation the decoder is
+     * allowed - the first across the whole utterance, the second in the
+     * duration predictor, which is why the panel calls the second one timbre
+     * rather than giving the user two controls named "variation".
+     *
+     * length_scale is the one that changed its mind. It was pinned at 1 on the
+     * argument that the panel already has a Speed and two speed controls doing
+     * different things is worse than one - but the panel's Speed belongs to the
+     * *engine's* synthesizer, and an offline line is a WAV that was imported.
+     * The engine is muted for it. So Speed does not reach this line at all, and
+     * the model needed its own or the line had none.
+     *
+     * Inverted here rather than in the dialog: length_scale multiplies
+     * duration, so it runs backwards from what anybody means by speed. The
+     * divisor cannot be zero - cloud::tuning_from_text refuses anything below
+     * kMinSpeed, which is 0.25.
+     */
+    std::vector<float> noise_scale{static_cast<float>(tuning.variation)};
+    std::vector<float> length_scale{static_cast<float>(1.0 / tuning.speed)};
+    std::vector<float> noise_scale_w{static_cast<float>(tuning.timbre)};
 
     const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::vector<Ort::Value> inputs;
@@ -630,6 +656,46 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
     }
     const float* samples = outputs[0].GetTensorData<float>();
 
+    /*
+     * A speaker the model does not have renders silence, and says nothing.
+     *
+     * Measured on the shipped Chinese package: it declares `speaker_id: 1` and
+     * that one speaks, while 0 and 2 both come back the right length, the right
+     * rate, and peaking at 1 out of 32767 — a WAV that imports cleanly, sits on
+     * the timeline, and animates no mouth. There is no error anywhere in that
+     * chain, because nothing in it is an error: the embedding table is simply
+     * bigger than the number of speakers that were trained.
+     *
+     * So the tool measures the thing it is about to write. An option that
+     * appears and then fails when pressed reads as the feature being broken —
+     * invariant 8aj's rule, applied here to a number the user typed rather than
+     * to a row in a menu. This is where it has to be caught: a silent WAV is
+     * indistinguishable downstream from a line the analyser found no syllables
+     * in, which is the message the user would otherwise get.
+     *
+     * The floor is three orders of magnitude below speech. The same line by the
+     * model's own speaker peaks around 6000 of 32767 (0.18), and a line quiet
+     * enough to fail this is a line nobody could hear.
+     */
+    const float kAudibleFloor = 0.001F;
+    // Written as a comparison rather than std::max: windows.h is included here
+    // for WinHTTP and defines `max` as a macro, which turns std::max( into a
+    // syntax error at the `::`.
+    float loudest = 0.0F;
+    for (std::size_t index = 0; index < count; ++index) {
+        const float level = std::fabs(samples[index]);
+        if (level > loudest) { loudest = level; }
+    }
+    if (loudest < kAudibleFloor) {
+        if (tuning.speaker >= 0) {
+            throw std::runtime_error(
+                "this model has no speaker " + std::to_string(tuning.speaker) +
+                ": it renders silence for one. Leave the speaker blank to use the model's "
+                "own, which is " + std::to_string(declared) + ".");
+        }
+        throw std::runtime_error("the model rendered silence for that line");
+    }
+
     std::vector<unsigned char> pcm;
     pcm.reserve(count * 2U);
     for (std::size_t index = 0; index < count; ++index) {
@@ -652,11 +718,21 @@ std::vector<unsigned char> speak(const LocalModel& model, const std::filesystem:
         "island_chatter_local --remove --provider <id> [--model-dir <hex-utf8-path>]\n"
         "island_chatter_local --cache-path --text <hex-utf8> --cache-dir <hex-utf8-path>\n"
         "island_chatter_local --speak --text <hex-utf8> --cache-dir <hex-utf8-path>\n"
-        "                     [--model-dir <hex-utf8-path>]\n"
+        "                     [--voice <hex-utf8-tuning>] [--model-dir <hex-utf8-path>]\n"
         "\n"
         "Speaks with a model on this machine. No network, no account, no key —\n"
         "--key-file is accepted and ignored so the panel can drive every voice\n"
-        "source through one code path.\n";
+        "source through one code path.\n"
+        "\n"
+        "--voice carries the tuning, because that is what a voice is for a model\n"
+        "that runs here, and because it is already part of the cache key:\n"
+        "\n"
+        "  speaker=1;variation=0.667;timbre=0.800;speed=1.000\n"
+        "\n"
+        "speaker -1 leaves the model's own; variation and timbre are 0 to 2;\n"
+        "speed is 0.25 to 4 and larger is faster. Omitted or 'default' is the\n"
+        "model's published voice, which is what every line rendered before\n"
+        "3.4.0 used and what those lines' cache files are still named after.\n";
     std::exit(2);
 }
 
@@ -740,6 +816,19 @@ int main(int argc, char** argv) {
         auto params = command.params;
         const auto row = provider_for(model);
         params.provider = row.id;
+        /*
+         * The voice of a model that runs here is its tuning, and it is read
+         * before anything is named.
+         *
+         * Read first so a setting this tool cannot understand is refused now,
+         * with the name of the setting, rather than after a four-second render
+         * that produced the wrong voice. Written back in canonical form so that
+         * two spellings of the same numbers - "0.8" and "0.800" - are one cache
+         * entry rather than two files holding identical audio, and so that an
+         * untuned line still names the file 3.3.0 named.
+         */
+        const auto tuning = cloud::tuning_from_text(params.voice);
+        params.voice = cloud::tuning_text(tuning);
         // The cache key carries the provider id, so the same sentence rendered
         // by the Chinese model and by the Japanese one cannot collide — which
         // it otherwise would, being the same text at the same rate.
@@ -762,7 +851,7 @@ int main(int argc, char** argv) {
 
         std::uint32_t rate = 0;
         std::string unspoken;
-        const auto wav = speak(model, root, params.text, &rate, &unspoken);
+        const auto wav = speak(model, root, params.text, tuning, &rate, &unspoken);
         std::error_code ignored;
         std::filesystem::create_directories(folder, ignored);
         write_atomically(destination, wav);

@@ -546,7 +546,17 @@ for (const [label, pluginPattern, panelPattern] of [
 }
 // Pull individual functions out of the panel so they can be exercised here. The
 // panel is one big closure meant for ScriptUI, so there is nothing to require.
-const planner = { Math, String, parseInt, parseFloat, isNaN, Error };
+/*
+ * `M` is stubbed rather than lifted out of the panel, because the real one
+ * carries three language tables and the only thing the functions below need
+ * from it is *a* message. What each message actually says is the translation
+ * guards' job, and they check all three languages; here a refusal only has to
+ * be distinguishable from a success and has to name the setting it is about.
+ */
+const planner = {
+  Math, String, Number, parseInt, parseFloat, isNaN, Error,
+  M: (key, ...values) => String(key).replace(/\{(\d)\}/g, (_, at) => String(values[at])),
+};
 vm.createContext(planner);
 const takeFunction = (name) => {
   const start = nativePanelSource.indexOf(`function ${name}(`);
@@ -585,9 +595,14 @@ const takeVariable = (name) => {
 vm.runInContext([
   takeVariable("SYLLABLE_STRIDE"),
   takeVariable("ENGINE_SAMPLE_RATE"),
+  ...["TUNING_MAX_SPEAKER", "TUNING_MIN_VARIATION", "TUNING_MAX_VARIATION",
+    "TUNING_MIN_SPEED", "TUNING_MAX_SPEED", "TUNING_DEFAULT_SPEAKER",
+    "TUNING_DEFAULT_VARIATION", "TUNING_DEFAULT_TIMBRE",
+    "TUNING_DEFAULT_SPEED"].map(takeVariable),
   ...["clamp", "mouthForReading", "readingTone", "characterFromCode", "trim",
     "parseEnginePlan", "styleSpeedMultiplier", "effectiveSpeed", "speedForTempo",
-    "utf8FromHex", "parseTrackList", "parseSong", "parseVoiceReply"].map(takeFunction),
+    "utf8FromHex", "parseTrackList", "parseSong", "parseVoiceReply",
+    "tuningNumber", "tuningFromText", "spellTuning", "tuningTextOf"].map(takeFunction),
 ].join("\n"), planner);
 
 // --- Reading what the engine says about a MIDI file -------------------------
@@ -713,6 +728,115 @@ vm.runInContext([
   try { vm.runInContext(`parseVoiceReply("")`, planner); }
   catch (error) { refusedVoice = true; }
   if (!refusedVoice) throw new Error("parseVoiceReply() accepted a reply that never came");
+}
+
+/*
+ * The offline model's tuning, as the panel spells it.
+ *
+ * There are two of these spellers — this one and `cloud::tuning_text` — because
+ * one of them is ExtendScript and cannot read a C++ header. The tool
+ * canonicalises whatever arrives, so a panel that spelled a *number* differently
+ * would still land on the right cache entry; what it cannot survive is a
+ * different **name**, which the tool refuses outright. So the last check here is
+ * the one that matters: the panel's spelling of the tool's own documented
+ * example has to be that example, character for character.
+ */
+{
+  const spell = (speaker, variation, timbre, speed) => vm.runInContext(
+    `tuningTextOf({ speaker: ${speaker}, variation: ${variation}, ` +
+    `timbre: ${timbre}, speed: ${speed} })`, planner);
+
+  if (spell(-1, 0.667, 0.8, 1) !== "") {
+    throw new Error(
+      "The panel spells the untouched tuning as something. It has to spell as nothing, or " +
+      "every offline line cached before 3.4.0 is renamed and rendered again.");
+  }
+  for (const same of ['""', '"default"', '"  "']) {
+    const read = vm.runInContext(`tuningTextOf(tuningFromText(${same}))`, planner);
+    if (read !== "") {
+      throw new Error(`The panel reads ${same} as a tuning (${read}); it is the model's own`);
+    }
+  }
+
+  /*
+   * Every field separately, and through the speller rather than hand-written.
+   *
+   * A field dropped from the spelling collapses into the untouched string, two
+   * of these become one, and the count fails. Hand-writing the strings would
+   * have tested nothing but string equality.
+   */
+  const distinct = new Set([
+    spell(-1, 0.667, 0.8, 1),
+    spell(0, 0.667, 0.8, 1),
+    spell(-1, 0.5, 0.8, 1),
+    spell(-1, 0.667, 0.5, 1),
+    spell(-1, 0.667, 0.8, 1.2),
+  ]);
+  if (distinct.size !== 5) {
+    throw new Error(
+      `Two different tunings spell the same way (${distinct.size} of 5). A field missing from ` +
+      "the spelling is a field missing from the cache key, and the line then keeps playing " +
+      "the previous setting's audio.");
+  }
+
+  // A tuning read back gives the numbers that made it, so the dialog opens on
+  // what is in the field rather than on the defaults.
+  const back = vm.runInContext(
+    'tuningFromText("speaker=2;variation=0.400;timbre=1.250;speed=1.500")', planner);
+  if (back.speaker !== 2 || back.variation !== 0.4 || back.timbre !== 1.25 ||
+    back.speed !== 1.5) {
+    throw new Error(`The panel misreads a tuning it wrote itself: ${JSON.stringify(back)}`);
+  }
+
+  /*
+   * What has to be refused, and refused by name. A setting quietly dropped
+   * renders a voice nobody asked for and reports success — the same argument
+   * `cloud::tuning_from_text` makes at the other end of the wire.
+   */
+  for (const [bad, mentions] of [
+    ["speaker=1.5", "speaker"],
+    ["speaker=256", "speaker"],
+    ["variation=3", "variation"],
+    ["speed=0", "speed"],
+    ["speed=1.0x", "speed"],
+    ["timbre=abc", "timbre"],
+    ["wobble=1", "wobble"],
+    ["speaker", "speaker"],
+  ]) {
+    let said = "";
+    try { vm.runInContext(`tuningFromText(${JSON.stringify(bad)})`, planner); }
+    catch (error) { said = String(error.message); }
+    if (!said) {
+      throw new Error(`The panel accepted the voice setting "${bad}" rather than refusing it`);
+    }
+    if (!said.includes(mentions)) {
+      throw new Error(
+        `The panel's refusal of "${bad}" does not say which setting it is about: ${said}`);
+    }
+  }
+
+  /*
+   * And the two spellers agree on the wire format.
+   *
+   * `island_chatter_local --help` documents the format with a worked example,
+   * which makes that example the one place both ends can be compared without a
+   * compiler. A rename on either side — `timbre` to `colour`, `;` to `,` —
+   * fails here rather than at a user's first press.
+   */
+  const localTool = fs.readFileSync(
+    path.join(root, "native", "tools", "local_cli.cpp"), "utf8");
+  const documented = localTool.match(/"\s+(speaker=-?[\d.;a-z=]+)\\n"/);
+  if (!documented) {
+    throw new Error(
+      "island_chatter_local's usage text no longer shows an example tuning, so there is " +
+      "nothing for the panel's spelling to be compared against");
+  }
+  if (spell(1, 0.667, 0.8, 1) !== documented[1]) {
+    throw new Error(
+      `The panel spells a tuning as "${spell(1, 0.667, 0.8, 1)}" and island_chatter_local ` +
+      `documents "${documented[1]}". The tool refuses a name it does not know, so this would ` +
+      "be an offline voice that fails on every press.");
+  }
 }
 
 // Tempo mode across every emotion and character size. The original version only
@@ -2801,6 +2925,56 @@ for (const releaseFile of [
         "first one renders Japanese text with the Chinese model, which reads as the model " +
         "being bad rather than as the wrong model");
     }
+    /*
+     * The tuning reaches the cache key, and it reaches it before the file is
+     * named.
+     *
+     * This is the one part of the offline voice's tuning that no unit test can
+     * see: cloud_tests.cpp pins that the spelling covers every field, but
+     * whether the *tool* puts that spelling into `params.voice` before
+     * `cache_file_name()` reads it lives here. Deleted, every tuning of one
+     * line shares one cache file — so the second setting silently plays the
+     * first one's audio and the dialog appears to do nothing.
+     *
+     * Positions rather than presence, because a `params.voice` assignment left
+     * *after* the naming would still match a search for it and would still be
+     * wrong.
+     */
+    const readsTuning = localTool.indexOf("cloud::tuning_from_text(params.voice)");
+    const writesTuning = localTool.indexOf("params.voice = cloud::tuning_text(tuning)");
+    const namesFile = localTool.indexOf("cloud::cache_file_name(row, params)");
+    if (readsTuning < 0 || writesTuning < 0 || namesFile < 0 ||
+      writesTuning < readsTuning || namesFile < writesTuning) {
+      throw new Error(
+        "island_chatter_local must read the tuning out of --voice and write it back in " +
+        "canonical form before it names the cache file. Otherwise every tuning of a line " +
+        "shares one cached WAV and changing a setting plays the previous setting's audio.");
+    }
+    // And the model is actually given it, rather than the tuning being parsed
+    // for validation and then dropped on the way to the tensors.
+    if (!/speak\(model, root, params\.text, tuning,/.test(localTool)) {
+      throw new Error(
+        "island_chatter_local names the cache file after a tuning it does not hand to the " +
+        "model; the file would then be right and its contents the default voice");
+    }
+    /*
+     * A speaker the model does not have renders silence, and the tool has to
+     * hear it.
+     *
+     * Measured on the shipped Chinese package: it declares speaker 1 and that
+     * one speaks, while 0 and 2 come back the right length and peak at 1 of
+     * 32767. Nothing downstream can tell that apart from a line the analyser
+     * found nothing in, so the message the user gets would be about their text.
+     * The branch is pinned rather than the constant, because a constant still
+     * appears in the comment that explains it.
+     */
+    if (!/if \(loudest < kAudibleFloor\) \{[\s\S]{0,400}throw std::runtime_error\(/
+      .test(localTool)) {
+      throw new Error(
+        "island_chatter_local writes whatever the model returned without checking that it " +
+        "makes a sound. A speaker the model does not have renders silence, which imports " +
+        "cleanly, animates no mouth, and reads as the user's text being at fault.");
+    }
     // Removing only the files it fetched, and only then the folder if it is
     // empty: a wildcard delete of a path built from a string is how the wrong
     // folder gets emptied.
@@ -2974,8 +3148,96 @@ for (const releaseFile of [
       "which is false — and training people through the one warning that matters is worse " +
       "than not having it");
   }
-  if (!/keyButton\.enabled = !picked\.onThisMachine/.test(takeFunction("showProviderFields"))) {
-    throw new Error("the API key button stays offered for a source that has no account");
+  /*
+   * The key button belongs to whichever source is selected, and for one that
+   * runs here that is not a key.
+   *
+   * 3.0.0 greyed it out, which was true and useless: it left the only control
+   * that configures a source doing nothing on the only sources this product can
+   * configure. From 3.4.0 it says "Tuning…" and opens the offline model's own
+   * voice settings, so both halves are pinned — the label follows the table,
+   * and the handler cannot reach the key dialog for a source that has no
+   * account.
+   */
+  const fieldsShown = takeFunction("showProviderFields");
+  if (!/keyButton\.text = picked\.onThisMachine\s*\n?\s*\? M\("Tuning/.test(fieldsShown)) {
+    throw new Error(
+      "the key button must follow the selected source: an offline model has no account, and " +
+      "a button marked API key over one either lies or does nothing");
+  }
+  if (!/keyButton\.preferredSize = \[-1, keyButton\.preferredSize\.height\]/.test(fieldsShown)) {
+    throw new Error(
+      "a control relabelled at run time must have its width reset, or the longer label is " +
+      "drawn into the shorter one's box and comes back as an ellipsis (invariant 8z)");
+  }
+  /*
+   * The shape, not the name. `askForVoiceTuning` appearing somewhere in the
+   * handler would still match with the `return` deleted, and the local source
+   * would then be asked for an API key straight afterwards — which is exactly
+   * the assumption invariant 8ab exists to stop.
+   */
+  const keyHandlerAt = nativePanelSource.indexOf("keyButton.onClick = function ()");
+  if (keyHandlerAt < 0) throw new Error("The panel has no API key button");
+  const keyHandler = nativePanelSource.slice(
+    keyHandlerAt, nativePanelSource.indexOf("\n        };", keyHandlerAt));
+  if (!/if \(picked\.onThisMachine\) \{[\s\S]*?\breturn;\s*\}\s*var answer = askForCloudKey\(/
+    .test(keyHandler)) {
+    throw new Error(
+      "the key button can reach askForCloudKey() for a source that runs on this machine; " +
+      "there is no account behind one, and the tuning dialog must return before it");
+  }
+  if (!/askForVoiceTuning\(picked\.label,/.test(keyHandler)) {
+    throw new Error("the key button does not offer an offline model its voice settings");
+  }
+
+  /*
+   * The tuning's names and limits are a second copy of the tool's, and this is
+   * what stops the copy drifting.
+   *
+   * They cannot be read from the header at run time — the panel is
+   * ExtendScript — so the numbers are written twice on purpose and compared
+   * here. Drift is not silent even without this check, because
+   * `cloud::tuning_from_text` refuses a name it does not know rather than
+   * ignoring it; what this catches is the *range* going out of step, where the
+   * panel would accept a number the tool then refuses on the press.
+   */
+  const cloudHeader = fs.readFileSync(
+    path.join(root, "native", "include", "island_chatter", "cloud.hpp"), "utf8");
+  for (const [inHeader, inPanel] of [
+    [/constexpr int kMaxSpeaker = (\d+);/, /var TUNING_MAX_SPEAKER = ([\d.]+);/],
+    [/constexpr double kMinVariation = ([\d.]+);/, /var TUNING_MIN_VARIATION = ([\d.]+);/],
+    [/constexpr double kMaxVariation = ([\d.]+);/, /var TUNING_MAX_VARIATION = ([\d.]+);/],
+    [/constexpr double kMinSpeed = ([\d.]+);/, /var TUNING_MIN_SPEED = ([\d.]+);/],
+    [/constexpr double kMaxSpeed = ([\d.]+);/, /var TUNING_MAX_SPEED = ([\d.]+);/],
+    [/int speaker = (-?\d+);/, /var TUNING_DEFAULT_SPEAKER = (-?[\d.]+);/],
+    [/double variation = ([\d.]+);/, /var TUNING_DEFAULT_VARIATION = ([\d.]+);/],
+    [/double timbre = ([\d.]+);/, /var TUNING_DEFAULT_TIMBRE = ([\d.]+);/],
+    [/double speed = ([\d.]+);/, /var TUNING_DEFAULT_SPEED = ([\d.]+);/],
+  ]) {
+    const theirs = cloudHeader.match(inHeader);
+    const ours = nativePanelSource.match(inPanel);
+    if (!theirs || !ours) {
+      throw new Error(
+        `The voice tuning limit ${inHeader} is missing from cloud.hpp or the panel`);
+    }
+    if (Number(theirs[1]) !== Number(ours[1])) {
+      throw new Error(
+        `The panel and cloud.hpp disagree about a voice tuning limit: ${ours[0]} against ` +
+        `${theirs[0]}. The panel would accept a value the tool refuses on the press.`);
+    }
+  }
+  // And the four names, which are the wire format. A name only the panel knows
+  // is refused by the tool rather than ignored, so this is a legibility check
+  // rather than a safety one — but a refusal nobody can act on is not much
+  // better than a silent one.
+  for (const setting of ["speaker", "variation", "timbre", "speed"]) {
+    if (!nativePanelSource.includes(`";${setting}="`) &&
+      !nativePanelSource.includes(`"${setting}="`)) {
+      throw new Error(`The panel does not spell the voice setting ${setting}`);
+    }
+    if (!cloudHeader.includes(setting)) {
+      throw new Error(`cloud.hpp has no voice setting called ${setting}`);
+    }
   }
 
   // Nothing else may reach a provider. Apply, Re-sync and a rig rebuild all run

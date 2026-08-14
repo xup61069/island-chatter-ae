@@ -632,6 +632,107 @@ void test_local_sources_are_representable() {
             "a local row is expressible today without one being shipped");
 }
 
+/*
+ * The tuning of a model that runs here, and the two things about it that would
+ * be wrong silently.
+ *
+ * The first is the cache. Every one of these four numbers changes the sound, so
+ * a tuning that did not reach the cache key would hand back the previous
+ * setting's audio for as long as the file existed — the line would simply not
+ * change when the dialog was closed, and nothing on screen would say why. It
+ * reaches the key by being the `voice`, which is already field three.
+ *
+ * The second is the other direction: the defaults must round-trip to an *empty*
+ * voice, or every offline line rendered before 3.4.0 gets a new file name and
+ * is rendered again from scratch on the next press.
+ */
+void test_local_tuning() {
+    const cloud::Tuning untouched;
+    require(cloud::tuning_text(untouched).empty(),
+            "an untuned voice spells as nothing, so it keeps the cache file it already had");
+    require(cloud::tuning_from_text("").speaker == -1 &&
+                cloud::tuning_from_text("default").variation == untouched.variation,
+            "an empty voice and the table's \"default\" are both the model's own settings");
+
+    cloud::Tuning tuned;
+    tuned.speaker = 2;
+    tuned.variation = 0.4;
+    tuned.timbre = 1.25;
+    tuned.speed = 1.5;
+    const auto spelled = cloud::tuning_text(tuned);
+    require(spelled == "speaker=2;variation=0.400;timbre=1.250;speed=1.500",
+            "the canonical spelling is all four fields, three decimals, in one order: " + spelled);
+    const auto back = cloud::tuning_from_text(spelled);
+    require(back.speaker == 2 && back.variation == 0.4 && back.timbre == 1.25 &&
+                back.speed == 1.5,
+            "the canonical spelling reads back as the numbers that made it");
+    // Two spellings of one voice are one cache entry, not two files of
+    // identical audio. This is what the tool canonicalising params.voice buys.
+    require(cloud::tuning_text(cloud::tuning_from_text("speaker=2;variation=0.4;timbre=1.25;"
+                                                       "speed=1.5")) == spelled,
+            "a hand-written tuning canonicalises to the same text");
+
+    /*
+     * Each field separately, and each one carried through `tuning_text()`
+     * rather than hand-spelled.
+     *
+     * Hand-spelling the four strings would have tested that `cache_file_name()`
+     * reads `voice`, which it plainly does and which nothing here is about. Put
+     * through the spelling, a field *dropped* from the canonical text collapses
+     * into the untuned string, two of these names become one, and the count
+     * fails — which is the mechanism: the tuning reaches the cache key by being
+     * spelled into the voice, so a field the spelling forgets is a field the
+     * cache forgets.
+     *
+     * The provider row is a local one, built the way local_cli.cpp builds it.
+     */
+    cloud::Provider local = *cloud::find("openai");
+    local.id = "local-melo";
+    local.on_this_machine = true;
+    local.default_voice = "default";
+    auto params = sample("local-melo");
+    params.voice = cloud::tuning_text(untouched);
+    std::vector<cloud::Tuning> each(4);
+    each[0].speaker = 0;          // not -1, which is "leave the model's own"
+    each[1].variation = 0.5;
+    each[2].timbre = 0.5;
+    each[3].speed = 1.2;
+    std::set<std::string> names{cloud::cache_file_name(local, params)};
+    for (const auto& one : each) {
+        auto changed = params;
+        changed.voice = cloud::tuning_text(one);
+        names.insert(cloud::cache_file_name(local, changed));
+    }
+    require(names.size() == 1u + each.size(),
+            "every field of the tuning changes the cache file name, or the old audio comes "
+            "back under the new setting (" + std::to_string(names.size()) + " names)");
+
+    // And what cannot be read is refused by name rather than guessed past. A
+    // setting silently dropped is a voice the user did not ask for, reported as
+    // success.
+    const char* const refusals[] = {
+        "speaker=1.5",              // not a whole number
+        "speaker=256",              // outside the range
+        "variation=3",              // outside 0..2
+        "speed=0",                  // outside 0.25..4
+        "speed=nan",                // strtod reads it; the range must not
+        "speed=1.0x",               // trailing junk
+        "wobble=1",                 // a name this tool does not know
+        "speaker",                  // not name=value
+    };
+    for (const char* const bad : refusals) {
+        bool refused = false;
+        std::string said;
+        try { cloud::tuning_from_text(bad); }
+        catch (const std::exception& error) { refused = true; said = error.what(); }
+        require(refused, std::string("\"") + bad + "\" is refused rather than guessed past");
+        require(contains(said, "speaker") || contains(said, "variation") ||
+                    contains(said, "timbre") || contains(said, "speed") ||
+                    contains(said, "wobble"),
+                std::string("the refusal of \"") + bad + "\" says which setting: " + said);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -649,6 +750,7 @@ int main() {
     test_network_failures_are_distinguished();
     test_broken_replies_are_refused_by_name();
     test_local_sources_are_representable();
+    test_local_tuning();
 
     if (failures) {
         std::cerr << failures << " cloud test(s) failed\n";

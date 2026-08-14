@@ -2556,6 +2556,129 @@
         "local-melo-ja": { megabytes: 171, caveat: "" }
     };
 
+    /*
+     * The offline model's own voice settings, and where they actually live.
+     *
+     * A neural model has knobs a provider's endpoint does not expose: which
+     * speaker out of the several in the weights, how much the decoder may vary,
+     * and how fast the line comes out. Until 3.4.0 they were constants in
+     * `island_chatter_local`, so a package holding several speakers offered one.
+     *
+     * **They travel in the Voice ID field, which is not a shortcut.** Every one
+     * of them changes the sound, so every one has to reach the cache key or the
+     * cache hands back the previous setting's audio and the line simply does
+     * not change when the dialog is closed. `voice` is already in that key, and
+     * for a source that runs here the provider table fills it with the literal
+     * `"default"` — it means nothing else. So the tuning *is* the voice, in the
+     * sense the key already understands, and no new field was added anywhere.
+     *
+     * That is also why the field is left editable rather than being replaced by
+     * the dialog: it is the same free-text voice field it has always been, the
+     * tool refuses anything it cannot read *by name*, and a tuning can be
+     * copied between machines.
+     *
+     * These numbers are a second copy of `cloud.hpp`'s, which
+     * `tests/validate-script.js` compares field by field. The copy is safe in
+     * the one way that matters: a name the tool does not know is **refused**
+     * rather than ignored, so a panel that drifted would say so on the first
+     * press instead of quietly rendering a voice nobody asked for.
+     */
+    var TUNING_MAX_SPEAKER = 255;
+    var TUNING_MIN_VARIATION = 0;
+    var TUNING_MAX_VARIATION = 2;
+    var TUNING_MIN_SPEED = 0.25;
+    var TUNING_MAX_SPEED = 4;
+    // -1 is not a speaker. It means "leave whatever the model says about
+    // itself", which is 1 in the published Chinese package — asking for 0
+    // instead is a different voice rather than an error, so the two cannot be
+    // collapsed.
+    var TUNING_DEFAULT_SPEAKER = -1;
+    var TUNING_DEFAULT_VARIATION = 0.667;
+    var TUNING_DEFAULT_TIMBRE = 0.8;
+    var TUNING_DEFAULT_SPEED = 1;
+
+    // Not parseFloat, which reads "1.5x" as 1.5: a typo accepted here is a
+    // render nobody can account for. The whole string has to be the number.
+    function tuningNumber(setting, value, low, high, whole) {
+        if (!/^-?[0-9]+(\.[0-9]+)?$/.test(value)) {
+            throw new Error(M("{0} has to be a number, not “{1}”. / {0} 要填數字，不能是「{1}」。",
+                setting, value));
+        }
+        var amount = Number(value);
+        if (whole && Math.floor(amount) !== amount) {
+            throw new Error(M("{0} has to be a whole number. / {0} 要填整數。", setting));
+        }
+        if (amount < low || amount > high) {
+            throw new Error(M("{0} has to be between {1} and {2}. / {0} 要在 {1} 到 {2} 之間。",
+                setting, low, high));
+        }
+        return amount;
+    }
+
+    function tuningFromText(text) {
+        var tuning = {
+            speaker: TUNING_DEFAULT_SPEAKER,
+            variation: TUNING_DEFAULT_VARIATION,
+            timbre: TUNING_DEFAULT_TIMBRE,
+            speed: TUNING_DEFAULT_SPEED
+        };
+        var said = trim(String(text === undefined || text === null ? "" : text));
+        // "default" is what the provider table carries for a source on this
+        // machine, so it is what arrives before anybody opens the dialog.
+        if (!said || said === "default") { return tuning; }
+        var pieces = said.split(";");
+        var index;
+        for (index = 0; index < pieces.length; index += 1) {
+            var piece = trim(pieces[index]);
+            if (!piece) { continue; }
+            var at = piece.indexOf("=");
+            if (at < 0) {
+                throw new Error(M("“{0}” is not written as name=value. / 「{0}」不是「名稱=值」的寫法。",
+                    piece));
+            }
+            var setting = trim(piece.substring(0, at));
+            var value = trim(piece.substring(at + 1));
+            if (setting === "speaker") {
+                tuning.speaker = tuningNumber(setting, value, -1, TUNING_MAX_SPEAKER, true);
+            } else if (setting === "variation") {
+                tuning.variation = tuningNumber(
+                    setting, value, TUNING_MIN_VARIATION, TUNING_MAX_VARIATION, false);
+            } else if (setting === "timbre") {
+                tuning.timbre = tuningNumber(
+                    setting, value, TUNING_MIN_VARIATION, TUNING_MAX_VARIATION, false);
+            } else {
+                if (setting !== "speed") {
+                    throw new Error(M("There is no voice setting called “{0}”. / 沒有叫「{0}」的聲音設定。",
+                        setting));
+                }
+                tuning.speed = tuningNumber(
+                    setting, value, TUNING_MIN_SPEED, TUNING_MAX_SPEED, false);
+            }
+        }
+        return tuning;
+    }
+
+    function spellTuning(tuning) {
+        return "speaker=" + tuning.speaker +
+            ";variation=" + tuning.variation.toFixed(3) +
+            ";timbre=" + tuning.timbre.toFixed(3) +
+            ";speed=" + tuning.speed.toFixed(3);
+    }
+
+    /*
+     * The defaults spell as **nothing**, and that is the compatibility.
+     *
+     * An offline line rendered before any of this existed was cached under an
+     * empty voice. Spelling the defaults out would rename every one of those
+     * files and re-render, on a machine, lines that had not changed. The
+     * comparison is against the same speller rather than a written-out string,
+     * so there is one copy of the format in this file.
+     */
+    function tuningTextOf(tuning) {
+        var spelled = spellTuning(tuning);
+        return spelled === spellTuning(tuningFromText("")) ? "" : spelled;
+    }
+
     // The first offline row in a source list, or "" when none is installed.
     function offlineSourceId(rows) {
         var index;
@@ -2792,6 +2915,98 @@
             dialog.close();
         };
         forgetButton.onClick = function () { answer = { key: "" }; dialog.close(); };
+        cancelButton.onClick = function () { answer = null; dialog.close(); };
+        dialog.show();
+        return answer;
+    }
+
+    /*
+     * The same button, asking a source that runs here for the thing it actually
+     * needs.
+     *
+     * A cloud source needs an account; a local one has none and needs a voice.
+     * Greying the key button out for an offline model — which is what 3.0.0 did
+     * — leaves the one control that configures a source doing nothing on the
+     * only sources this product can configure at all.
+     *
+     * Built with M() rather than through localiseTree() for the reason
+     * askForCloudKey() gives: it is created on demand, when the language is
+     * already known.
+     */
+    function askForVoiceTuning(sourceLabel, existing) {
+        var tuning;
+        try {
+            tuning = tuningFromText(existing);
+        } catch (unreadable) {
+            // Whatever is in the field cannot be read, so the dialog opens on
+            // the model's own settings. Refusing to open would leave somebody
+            // with a bad string and no way to fix it except retyping it.
+            tuning = tuningFromText("");
+        }
+        var dialog = new Window("dialog", SCRIPT_NAME);
+        dialog.orientation = "column";
+        dialog.alignChildren = ["fill", "top"];
+        dialog.margins = 14;
+        dialog.spacing = 8;
+        dialog.add("statictext", undefined,
+            M("Voice settings for {0} / {0} 的聲音設定", sourceLabel));
+
+        function tuningRow(caption, value) {
+            var row = dialog.add("group");
+            row.orientation = "row";
+            var title = row.add("statictext", undefined, caption);
+            title.preferredSize.width = 150;
+            var field = row.add("edittext", undefined, value);
+            field.characters = 8;
+            return field;
+        }
+
+        // Blank rather than -1 on screen: "the model's own" is a state, and a
+        // negative number in a box asking for a speaker reads as a mistake.
+        var speakerField = tuningRow(M("Speaker / 語者"),
+            tuning.speaker < 0 ? "" : String(tuning.speaker));
+        var variationField = tuningRow(M("Variation / 變化"), tuning.variation.toFixed(3));
+        var timbreField = tuningRow(M("Timbre variation / 音色變化"), tuning.timbre.toFixed(3));
+        var speedField = tuningRow(M("Speed / 語速"), tuning.speed.toFixed(3));
+
+        var explain = dialog.add("statictext", undefined, M(
+            "Speaker picks which voice in the model; leave it blank for the model's own. Both models here were trained with one voice, so a speaker number is usually refused — the tool renders it, hears silence, and says so rather than importing a line nobody can hear. Variation and timbre run 0 to 2 — higher is less predictable. Speed runs 0.25 to 4 and larger is faster; this is the offline model's own speed, because the Speed slider belongs to the built-in voice and does not reach a line an offline model spoke. / 「語者」是挑模型裡的哪一個聲音，留白就用模型原本的。這裡的兩個模型都只訓練了一個聲音，所以填語者編號通常會被拒絕——工具會先算出來，發現是無聲的就直接講，而不是匯入一段沒人聽得到的音檔。「變化」和「音色變化」是 0 到 2，越大越不固定。「語速」是 0.25 到 4，越大越快；這是離線模型自己的語速，因為面板上的 Speed 滑桿是內建聲音在用的，碰不到離線模型唸出來的句子。"),
+            { multiline: true });
+        explain.preferredSize = [440, 118];
+
+        var buttons = dialog.add("group");
+        buttons.orientation = "row";
+        buttons.alignment = ["right", "top"];
+        var saveButton = buttons.add("button", undefined, M("Save / 儲存"));
+        var resetButton = buttons.add("button", undefined, M("Reset / 回到預設"));
+        var cancelButton = buttons.add("button", undefined, M("Cancel / 取消"));
+        var answer = null;
+        saveButton.onClick = function () {
+            var wanted = trim(String(speakerField.text));
+            try {
+                answer = {
+                    voice: tuningTextOf({
+                        speaker: wanted
+                            ? tuningNumber("speaker", wanted, 0, TUNING_MAX_SPEAKER, true)
+                            : TUNING_DEFAULT_SPEAKER,
+                        variation: tuningNumber("variation", trim(String(variationField.text)),
+                            TUNING_MIN_VARIATION, TUNING_MAX_VARIATION, false),
+                        timbre: tuningNumber("timbre", trim(String(timbreField.text)),
+                            TUNING_MIN_VARIATION, TUNING_MAX_VARIATION, false),
+                        speed: tuningNumber("speed", trim(String(speedField.text)),
+                            TUNING_MIN_SPEED, TUNING_MAX_SPEED, false)
+                    })
+                };
+            } catch (error) {
+                // The dialog stays open on a bad number, so the other three
+                // fields are not lost to a typo in the fourth.
+                answer = null;
+                alert(String(error.message || error));
+                return;
+            }
+            dialog.close();
+        };
+        resetButton.onClick = function () { answer = { voice: "" }; dialog.close(); };
         cancelButton.onClick = function () { answer = null; dialog.close(); };
         dialog.show();
         return answer;
@@ -3844,6 +4059,29 @@
         "Save / 儲存": "保存",
         "Forget / 清除": "消去",
         "Cancel / 取消": "キャンセル",
+        // The offline model's own voice settings. The key button says this
+        // instead of "API key" when the selected source runs on this machine,
+        // because such a source has no account and does have a voice.
+        "Tuning… / 調音…": "声の調整…",
+        "Voice settings for {0} / {0} 的聲音設定": "{0} の声の設定",
+        "Speaker / 語者": "話者",
+        "Variation / 變化": "ゆらぎ",
+        "Timbre variation / 音色變化": "声色のゆらぎ",
+        "Speed / 語速": "はやさ",
+        "Speaker picks which voice in the model; leave it blank for the model's own. Both models here were trained with one voice, so a speaker number is usually refused — the tool renders it, hears silence, and says so rather than importing a line nobody can hear. Variation and timbre run 0 to 2 — higher is less predictable. Speed runs 0.25 to 4 and larger is faster; this is the offline model's own speed, because the Speed slider belongs to the built-in voice and does not reach a line an offline model spoke. / 「語者」是挑模型裡的哪一個聲音，留白就用模型原本的。這裡的兩個模型都只訓練了一個聲音，所以填語者編號通常會被拒絕——工具會先算出來，發現是無聲的就直接講，而不是匯入一段沒人聽得到的音檔。「變化」和「音色變化」是 0 到 2，越大越不固定。「語速」是 0.25 到 4，越大越快；這是離線模型自己的語速，因為面板上的 Speed 滑桿是內建聲音在用的，碰不到離線模型唸出來的句子。":
+            "「話者」はモデルの中のどの声を使うかです。空欄ならモデル本来の声になります。ここにある二つのモデルはどちらも声が一つしか学習されていないため、話者番号は多くの場合ことわられます——ツールがいったん合成し、無音だと分かった時点でそう伝えます。誰にも聞こえない行を読み込ませないためです。「ゆらぎ」と「声色のゆらぎ」は 0 から 2 で、大きいほど毎回の変化が増えます。「はやさ」は 0.25 から 4 で、大きいほど速くなります。これはオフラインモデル自身のはやさです。パネルの Speed スライダーは内蔵の音声のもので、オフラインモデルがしゃべった行には届きません。",
+        "Reset / 回到預設": "既定に戻す",
+        "Voice tuned / 已調過音": "声を調整しました",
+        "Model's own voice / 模型原本的聲音": "モデル本来の声",
+        "“{0}” is not written as name=value. / 「{0}」不是「名稱=值」的寫法。":
+            "「{0}」が name=value の形になっていません。",
+        "There is no voice setting called “{0}”. / 沒有叫「{0}」的聲音設定。":
+            "「{0}」という声の設定はありません。",
+        "{0} has to be a number, not “{1}”. / {0} 要填數字，不能是「{1}」。":
+            "{0} には数字を入れてください。「{1}」は数字ではありません。",
+        "{0} has to be a whole number. / {0} 要填整數。": "{0} には整数を入れてください。",
+        "{0} has to be between {1} and {2}. / {0} 要在 {1} 到 {2} 之間。":
+            "{0} は {1} から {2} のあいだにしてください。",
         "Key saved / 已存下金鑰": "APIキーを保存しました",
         "Key cleared / 已清除金鑰": "APIキーを消去しました",
         "Choose a provider first. / 請先選一家供應商。":
@@ -6879,8 +7117,26 @@
             // Only one provider has a per-region endpoint. A field nobody needs
             // is a field somebody fills in wrongly once.
             cloudRegionField.enabled = picked.needsRegion;
-            // A source that runs here has no account and no key to set.
-            keyButton.enabled = !picked.onThisMachine;
+            /*
+             * A source that runs here has no account, so the button asks for
+             * the other thing a source can need: its voice.
+             *
+             * 3.0.0 greyed it out instead, which left the one control that
+             * configures a source doing nothing on the only sources this
+             * product is able to configure. Relabelling rather than adding a
+             * button is also the only option the row has — invariant 8z, the
+             * panel is at 796 px of 800 and this row measured 471 in Japanese
+             * with four controls in it.
+             *
+             * `preferredSize` back to automatic width afterwards, or the
+             * longer label is drawn into the shorter one's box and comes back
+             * as an ellipsis.
+             */
+            keyButton.text = picked.onThisMachine
+                ? M("Tuning… / 調音…")
+                : M("API key / 金鑰");
+            keyButton.preferredSize = [-1, keyButton.preferredSize.height];
+            try { keyButton.parent.layout.layout(true); } catch (noKeyLayout) { /* not built */ }
             /*
              * The button says what pressing it will do.
              *
@@ -6985,6 +7241,26 @@
         keyButton.onClick = function () {
             try {
                 var picked = requireProviders();
+                /*
+                 * The dispatch the label promises, asked of the table rather
+                 * than assumed. A model on this machine has no account to hold
+                 * a key for, and the dialog it opens instead writes into the
+                 * Voice ID field — which is where the tuning has to be, because
+                 * that is the field already in the cache key.
+                 */
+                if (picked.onThisMachine) {
+                    var tuned = askForVoiceTuning(picked.label,
+                        trim(String(cloudVoiceField.text)));
+                    if (!tuned) { return; }
+                    // "default" rather than an empty box, so what is on screen
+                    // is what will be sent and what will come back next time.
+                    cloudVoiceField.text = tuned.voice ? tuned.voice : "default";
+                    rememberProviderFields();
+                    cloudReadout.text = tuned.voice
+                        ? M("Voice tuned / 已調過音")
+                        : M("Model's own voice / 模型原本的聲音");
+                    return;
+                }
                 var answer = askForCloudKey(picked.label, storedKey(picked.id));
                 if (!answer) { return; }
                 rememberKey(picked.id, answer.key);

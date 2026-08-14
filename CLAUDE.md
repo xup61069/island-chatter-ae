@@ -13,7 +13,7 @@ Read `README.md`, `native/README.md`, and this file before changing code.
 
 ## Product baseline
 
-- Current public release: `v3.3.0` (Windows x64).
+- Current public release: `v3.4.0` (Windows x64).
 - Supported host versions: After Effects 2025 and 2026.
 - Confirmed host: After Effects 2026 on Windows 11.
 - The v1.0.1 panel was applied twice to the same keyed Chinese text layer without an error.
@@ -67,7 +67,7 @@ effect.
 | `native/tests/midi_tests.cpp` | MIDI parsing, chord reduction, and every malformed file that must come back as a message rather than a crash |
 | `native/tests/song_tests.cpp` | Lyric-to-note assignment, slot encoding, and the rounding that must not accumulate |
 | `native/tests/ae-lipsync-verify.jsx` | Host suite for audio lip-sync: bakes its own WAV, imports it, analyses it, and checks the rig, the trim, and both refusals |
-| `native/tests/ae-local-verify.jsx` | Host suite for the offline voice: the merged source list, which tool serves each row, that a local source is asked for no key, and a real render through ONNX Runtime when the model is installed |
+| `native/tests/ae-local-verify.jsx` | Host suite for the offline voice: the merged source list, which tool serves each row, that a local source is asked for no key, a real render through ONNX Runtime when the model is installed, and the tuning — that it misses the cache, that speed 0.5 comes back *longer*, and that a speaker the model does not have is refused by number rather than imported as silence |
 | `native/tests/ae-cloud-verify.jsx` | Host suite for the cloud voice, run entirely on a cache hit so it opens no socket and bills nobody: seeds the path `--cache-path` names with a bake, then checks the import, the muted effect, the plan coming out of the recording, the stale rule putting it back on the engine, and that Apply re-fetches nothing |
 | `native/tests/ae-smoke-test.jsx` | Destructive temporary-project host smoke test; writes a report, closes the project, and quits AE |
 | `native/tests/ae-panel-reapply-setup.jsx` | Manual host setup for applying the actual panel twice to a selected Chinese text layer |
@@ -281,6 +281,50 @@ effect.
    Nothing guesses, and `--provider` is refused rather than defaulted when it names a model the
    tool does not serve — a Japanese line rendered by the Chinese model reads as the model being
    bad rather than as the wrong model.
+
+8ak. **The offline model's tuning is its voice, in the sense the cache key already
+   understands.**
+   A neural model has four knobs a provider's endpoint does not expose — which speaker out of
+   the several in the weights, `noise_scale`, `noise_scale_w`, and `length_scale`. They were
+   constants in `local_cli.cpp` until 3.4.0, so a package holding several speakers offered one.
+
+   **Every one of them changes the sound, so every one has to be in the cache key**, or the
+   cache hands back the previous setting's audio and the line simply does not change when the
+   dialog is closed. They travel in `Params::voice`, which is already field three of
+   `cache_material()` and which for a source that runs here means nothing else — the provider
+   table fills it with the literal `"default"`. So the tuning *is* the voice, and
+   `kCacheFields` did not move.
+
+   **An eighth field was the first attempt and is the thing not to go back to.** It rehashes
+   every entry including the three cloud providers', so the first Speak after an update
+   re-fetches a line somebody has already paid for. 8ab says a purchase must not sit behind a
+   keystroke; it must not sit behind an update either. For the same reason the defaults spell
+   as an **empty** string: an offline line cached before 3.4.0 keeps its file name.
+
+   **Speed is inverted at the tensor, not in the dialog.** `length_scale` multiplies duration,
+   so it runs backwards from what anybody means by speed. It had been pinned at 1 on the
+   argument that the panel already has a Speed — which was wrong: the panel's Speed belongs to
+   the *engine*, and an offline line is an imported WAV with the engine muted, so Speed never
+   reached it at all. `ae-local-verify.jsx` renders the line twice and requires 0.5 to be the
+   longer.
+
+   **There are two spellers, and only one of them can read a C++ header.** The panel's is
+   ExtendScript. `npm test` compares every limit and default against `cloud.hpp` field by
+   field, and compares the panel's spelling against the worked example in
+   `island_chatter_local --help` — which makes that example the wire format's one definition.
+   The duplication is survivable in the way that matters: an unknown *name* is refused by the
+   tool rather than ignored, so drift fails loudly on the first press.
+
+   **A speaker the model does not have renders silence, and the tool has to hear it.** Measured
+   on the shipped Chinese package: it declares `speaker_id: 1`, that one speaks, and 0 and 2
+   both come back the right length, the right rate, and peaking at 1 of 32767. Nothing in that
+   chain is an error — the embedding table is simply larger than the number of speakers that
+   were trained. A silent WAV imports cleanly, sits on the timeline, animates no mouth, and is
+   indistinguishable downstream from a line the analyser found nothing in, so the message the
+   user gets would be about their text. `speak()` therefore measures the waveform it is about
+   to write and refuses below `kAudibleFloor`, naming the speaker. This is 8aj's rule — an
+   option that appears and then fails reads as the feature being broken — applied to a number
+   the user typed rather than to a row in a menu.
 
 8ah. **Custom timbre is a vocal tract, not a recording, and what is not measured is derived.**
    Five vowels, F1 and F2 each, measured from recordings the user makes. They replace the

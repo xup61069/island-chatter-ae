@@ -7,6 +7,7 @@
 #include <array>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 
@@ -512,6 +513,112 @@ std::string sha256_hex(const std::string& bytes) {
     Sha256 hash;
     hash.update(bytes);
     return hash.finish();
+}
+
+namespace {
+
+/*
+ * Three decimals, and the same three every time.
+ *
+ * This string goes into the cache key, so a number that spells itself two ways
+ * is two cache entries holding identical audio. `%.3f` is finer than any
+ * control the panel offers and coarser than anything a listener could pick out,
+ * and it is a fixed format rather than a shortest round-trip one for exactly
+ * that reason.
+ *
+ * The tool never calls setlocale, so the decimal point is `.` here and in
+ * strtod below. That is not an assumption about the machine: it is the C
+ * locale, which is where a program starts and where this one stays.
+ */
+std::string fixed3(double value) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof buffer, "%.3f", value);
+    return buffer;
+}
+
+std::string spell_tuning(const Tuning& tuning) {
+    return "speaker=" + std::to_string(tuning.speaker) +
+           ";variation=" + fixed3(tuning.variation) +
+           ";timbre=" + fixed3(tuning.timbre) +
+           ";speed=" + fixed3(tuning.speed);
+}
+
+// Refused rather than clamped, and refused with the number in the message: a
+// value silently pulled back into range is a render the user cannot account
+// for. The comparison is written the positive way round so that a NaN — which
+// strtod happily produces from "nan" — fails it rather than passing every test
+// against it.
+double number_in(const char* name, const std::string& value, double low, double high) {
+    char* stopped = nullptr;
+    const double parsed = std::strtod(value.c_str(), &stopped);
+    if (value.empty() || stopped == nullptr || *stopped != '\0') {
+        throw std::runtime_error(std::string("the voice setting ") + name +
+                                 " is not a number: \"" + value + "\"");
+    }
+    if (!(parsed >= low && parsed <= high)) {
+        throw std::runtime_error(std::string("the voice setting ") + name + " is " + value +
+                                 ", which is outside " + fixed3(low) + " to " + fixed3(high));
+    }
+    return parsed;
+}
+
+}  // namespace
+
+std::string tuning_text(const Tuning& tuning) {
+    const auto spelled = spell_tuning(tuning);
+    // Empty for the defaults, so an offline line nobody has tuned keeps the
+    // cache file it had before this existed. Compared as text rather than field
+    // by field, because text is what the cache key sees.
+    static const std::string untouched = spell_tuning(Tuning{});
+    return spelled == untouched ? std::string() : spelled;
+}
+
+Tuning tuning_from_text(const std::string& text) {
+    Tuning tuning;
+    // "default" is what the provider table carries for a source on this
+    // machine, so it arrives here whenever nobody has opened the dialog.
+    if (text.empty() || text == "default") { return tuning; }
+    std::size_t at = 0;
+    while (at <= text.size()) {
+        const auto end = std::min(text.find(';', at), text.size());
+        const auto piece = text.substr(at, end - at);
+        at = end + 1;
+        if (piece.empty()) { continue; }
+        const auto equals = piece.find('=');
+        if (equals == std::string::npos) {
+            throw std::runtime_error("the voice setting \"" + piece + "\" is not name=value");
+        }
+        const auto name = piece.substr(0, equals);
+        const auto value = piece.substr(equals + 1);
+        if (name == "speaker") {
+            char* stopped = nullptr;
+            const long parsed = std::strtol(value.c_str(), &stopped, 10);
+            if (value.empty() || stopped == nullptr || *stopped != '\0') {
+                throw std::runtime_error("the speaker is not a whole number: \"" + value + "\"");
+            }
+            if (parsed < -1 || parsed > kMaxSpeaker) {
+                throw std::runtime_error("the speaker is " + value + ", which is outside -1 to " +
+                                         std::to_string(kMaxSpeaker));
+            }
+            tuning.speaker = static_cast<int>(parsed);
+        } else if (name == "variation") {
+            tuning.variation = number_in("variation", value, kMinVariation, kMaxVariation);
+        } else if (name == "timbre") {
+            tuning.timbre = number_in("timbre", value, kMinVariation, kMaxVariation);
+        } else if (name == "speed") {
+            tuning.speed = number_in("speed", value, kMinSpeed, kMaxSpeed);
+        } else {
+            /*
+             * Not ignored, for the reason parse_arguments() refuses --key
+             * rather than not implementing it: an unknown name here means the
+             * panel and the tool disagree about what a voice is, and a setting
+             * quietly dropped renders a voice the user did not ask for while
+             * everything reports success.
+             */
+            throw std::runtime_error("there is no voice setting called \"" + name + "\"");
+        }
+    }
+    return tuning;
 }
 
 std::string cache_material(const Provider& provider, const Params& params) {

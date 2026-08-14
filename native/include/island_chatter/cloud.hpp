@@ -118,6 +118,78 @@ struct Params {
     std::string key;
 };
 
+/*
+ * How a model on this machine is asked to speak, as opposed to which model.
+ *
+ * A neural voice has knobs a provider's endpoint does not expose: which speaker
+ * out of the several the weights hold, how much the decoder is allowed to vary,
+ * and how fast the result comes out. They were fixed constants until 3.4.0
+ * because the model's own published defaults are good ones — but "good default"
+ * is not the same as "the only voice this model has", and a package with four
+ * speakers in it was offering one.
+ *
+ * **It travels in `Params::voice`, and that is the whole reason it is here
+ * rather than in the tool.** Every one of these changes the sound, so every one
+ * of them has to be in the cache key or the cache hands back the previous
+ * setting's audio — silently, and for as long as the file exists, which is the
+ * failure `cache_material()` is counted field by field to prevent. `voice` is
+ * already in that key, and for a source that runs here it means nothing else:
+ * the provider table gives it the literal `"default"`. So the tuning *is* the
+ * voice, in the sense the cache key already understands, and no eighth field
+ * was added.
+ *
+ * Adding one was the first attempt and it is worth saying why it was wrong. An
+ * eighth field changes the hash of *every* entry, including the three cloud
+ * providers', so the first Speak after upgrading re-fetches a line somebody has
+ * already paid for. Invariant 8ab says a purchase must not sit behind a
+ * keystroke; it must not sit behind an update either.
+ *
+ * The defaults round-trip to an **empty** string rather than to a spelled-out
+ * one, for the same reason: an untuned offline line keeps the cache file 3.3.0
+ * gave it.
+ */
+struct Tuning {
+    // -1 means "whatever the model says about itself", which is not 0: the
+    // published Chinese package declares one speaker and numbers it 1, and
+    // asking for 0 is a different voice rather than an error.
+    int speaker = -1;
+    double variation = 0.667;   // the model's noise_scale
+    double timbre = 0.8;        // the model's noise_scale_w
+    /*
+     * Speed the way a person means it: larger is faster.
+     *
+     * The model's own control is `length_scale`, which is a duration
+     * multiplier and therefore runs the other way. The reciprocal is taken at
+     * the one point the tensor is filled in, because a dialog offering "speed"
+     * that gets slower as the number rises is a dialog nobody can use, and a
+     * canonical string that stores the inverted number is one nobody can read.
+     */
+    double speed = 1.0;
+};
+
+// The bounds are refused rather than clamped, because a number outside them is
+// a typo and a typo silently rounded is a render nobody can explain. The panel
+// clamps its own controls to the same numbers; `tests/validate-script.js`
+// compares the two lists so they cannot drift.
+constexpr int kMaxSpeaker = 255;
+constexpr double kMinVariation = 0.0;
+constexpr double kMaxVariation = 2.0;
+constexpr double kMinSpeed = 0.25;
+constexpr double kMaxSpeed = 4.0;
+
+/*
+ * The canonical text, which is what reaches the cache key, and back again.
+ *
+ * `tuning_text()` writes all four fields or none: a partial string would make
+ * the same voice depend on which defaults the version writing it happened to
+ * have. `tuning_from_text()` accepts an empty string and the literal `default`
+ * the provider table carries, and throws on anything else it cannot read — an
+ * unrecognised key is a panel and a tool that disagree, and guessing past it
+ * renders a voice nobody asked for.
+ */
+std::string tuning_text(const Tuning& tuning);
+Tuning tuning_from_text(const std::string& text);
+
 enum class Mode {
     // Print the table, so the panel builds its menu from the one copy of it
     // that exists. A provider list in the panel as well would be a second copy

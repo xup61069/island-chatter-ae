@@ -146,8 +146,33 @@
 
         var scratch = new Folder(Folder.temp.fsName.replace(/\\/g, "/") + "/ic-local-test");
         if (!scratch.exists) { scratch.create(); }
+
         projectFile = new File(scratch.fsName + "/ic-local-test.aep");
         app.project.save(projectFile);
+
+        /*
+         * Every run starts with an empty cache, and that is not tidiness.
+         *
+         * The cache lives beside the project and the project is always at the
+         * same path, so the second run of this suite found the first run's WAVs
+         * and every `cached === false` check passed by having already happened.
+         * Two did exactly that, and the one that mattered was the silence
+         * refusal: the entry was there from a build that did not refuse, so the
+         * new code never ran and the check reported that a speaker had been
+         * accepted. **A suite whose assertions depend on whether it has been
+         * run before answers a different question each time.**
+         *
+         * Asked of `cloudFolder()` rather than built from the project path,
+         * because the panel is what decides where the cache goes and a second
+         * copy of that decision here would clear the wrong folder the first
+         * time it moved.
+         */
+        var leftovers = cloudFolder().getFiles() || [];
+        var gone;
+        for (gone = 0; gone < leftovers.length; gone += 1) {
+            try { leftovers[gone].remove(); } catch (locked) { /* still imported */ }
+        }
+        say("cache cleared: " + leftovers.length + " file(s) from a previous run");
 
         comp = app.project.items.addComp("Island Chatter Local Test", 640, 360, 1, 30, 30);
         comp.openInViewer();
@@ -219,6 +244,71 @@
         // the saving here is seconds of CPU rather than money.
         var again = cloudVoiceLine(comp, textLayer, how, options);
         check(again.cached === true, "pressing it again is answered from the cache");
+
+        /*
+         * The tuning, and the one thing about it no portable test can see.
+         *
+         * `npm test` and `cloud_tests.cpp` both pin that every field is spelled
+         * into the voice, and therefore into the cache key. What neither can
+         * reach is whether the *model* is then given those numbers — a tool
+         * that named the file after the tuning and rendered the default voice
+         * would pass both suites, write a second file, and sound identical to
+         * the first.
+         *
+         * Speed is the probe, because it is the only field whose effect is
+         * measurable from the plan alone, and because its direction is the
+         * easiest thing here to get backwards: the model's `length_scale`
+         * multiplies duration, so the tool has to invert it or "faster" makes
+         * the line longer. Half speed therefore has to come back *longer* than
+         * the line already on the timeline.
+         */
+        function tuningOf(voice) {
+            return {
+                provider: picked.id, tool: picked.tool, onThisMachine: true,
+                voice: voice, model: picked.model, region: "", key: "", text: said,
+                sensitivity: 0.5, vowels: true
+            };
+        }
+        var wasSeconds = voiced.plan.duration;
+        var slow = cloudVoiceLine(comp, textLayer,
+            tuningOf("speaker=-1;variation=0.667;timbre=0.800;speed=0.500"), options);
+        check(slow.cached === false,
+            "a tuned line is a cache miss, so the tuning really is in the cache key");
+        check(slow.plan.events.length > 0,
+            "the tuned line came back (" + slow.plan.events.length + " syllables)");
+        check(bakedLayerFor(comp, textLayer) !== null, "and it is on the timeline");
+        check(slow.plan.duration > wasSeconds,
+            "speed 0.5 is slower, not faster: " + slow.plan.duration + "s against " +
+            wasSeconds + "s — length_scale runs backwards from speed and has to be inverted");
+
+        /*
+         * And a speaker this model does not have is refused rather than
+         * imported.
+         *
+         * Both shipped models were trained with one voice. Speaker 0 and
+         * speaker 2 render at the right length and the right rate, peaking at 1
+         * of 32767: a WAV that imports cleanly, sits on the timeline and
+         * animates no mouth, with nothing anywhere in the chain calling it an
+         * error. Downstream that is indistinguishable from a line the analyser
+         * found no syllables in, so the message the user would get is about
+         * their text. The tool measures what it is about to write instead.
+         *
+         * This is the check that found it. It was written expecting speaker 0
+         * to be a second voice.
+         */
+        var refused = "";
+        try {
+            cloudVoiceLine(comp, textLayer,
+                tuningOf("speaker=0;variation=0.667;timbre=0.800;speed=1.000"), options);
+        } catch (silent) { refused = String(silent.message || silent); }
+        check(refused !== "" && refused.indexOf("speaker 0") >= 0,
+            "a speaker the model does not have is refused by number, not imported as " +
+            "silence: " + (refused || "it was accepted"));
+
+        // Back to the model's own voice, and back to the file it already had.
+        var untuned = cloudVoiceLine(comp, textLayer, how, options);
+        check(untuned.cached === true,
+            "clearing the tuning returns to the cached line rather than rendering a third");
 
         // And nothing on this path ever wrote a key file.
         var strays = 0;
